@@ -1,0 +1,1018 @@
+{
+  "_comment": "Azurik: Rise of Perathia - World Logic Database for Randomizer Solver (rebuilt 2026-03-14)",
+  "_version": 3,
+  "victory_condition": {
+    "type": "all_of",
+    "items": [
+      "disc_air",
+      "disc_water",
+      "disc_fire",
+      "disc_earth",
+      "disc_life",
+      "event_place_disc_air",
+      "event_place_disc_water",
+      "event_place_disc_fire",
+      "event_place_disc_earth",
+      "event_place_disc_life"
+    ]
+  },
+  "starting_node": "town_core",
+  "starting_items": [],
+  "items": {
+    "powers": [
+      "power_water",
+      "power_water_a3",
+      "power_water",
+      "power_air",
+      "power_air",
+      "power_air",
+      "power_earth",
+      "power_earth",
+      "power_earth",
+      "power_fire",
+      "power_fire",
+      "power_fire"
+    ],
+    "fragments": [
+      "frag_air_1",
+      "frag_air_2",
+      "frag_air_3",
+      "frag_water_1",
+      "frag_water_2",
+      "frag_water_3",
+      "frag_fire_1",
+      "frag_fire_2",
+      "frag_fire_3",
+      "frag_earth_1",
+      "frag_earth_2",
+      "frag_earth_3",
+      "frag_life_1",
+      "frag_life_2",
+      "frag_life_3"
+    ],
+    "keys": [
+      "drill_key",
+      "torpedo_key"
+    ],
+    "discs": [
+      "disc_air",
+      "disc_water",
+      "disc_fire",
+      "disc_earth",
+      "disc_life"
+    ],
+    "events": [
+      "event_defeat_air_guardian",
+      "event_defeat_water_guardian",
+      "event_defeat_fire_guardian",
+      "event_defeat_earth_guardian",
+      "event_defeat_balthazar",
+      "event_defeat_spideyzar",
+      "event_place_disc_air",
+      "event_place_disc_water",
+      "event_place_disc_fire",
+      "event_place_disc_earth",
+      "event_place_disc_life",
+      "event_crystal_lightning",
+      "event_crystal_fire",
+      "event_crystal_whirlwind",
+      "event_crystal_pulse",
+      "event_activate_diggers",
+      "event_activate_lifts"
+    ]
+  },
+  "randomizer_groups": {
+    "_comment": "Items shuffle within their group. Users can move items between groups. Status: stable = tested and working, unstable = experimental/incomplete logic.",
+    "powers": {
+      "status": "stable",
+      "description": "Elemental power pickups — shuffle across all 12 power locations",
+      "items": [
+        "power_water", "power_water", "power_water_a3",
+        "power_air", "power_air", "power_air",
+        "power_earth", "power_earth", "power_earth",
+        "power_fire", "power_fire", "power_fire"
+      ]
+    },
+    "fragments": {
+      "status": "stable",
+      "description": "Disc fragments 1-3 per element — shuffle across 15 fragment locations",
+      "items": [
+        "frag_air_1", "frag_air_2", "frag_air_3",
+        "frag_water_1", "frag_water_2", "frag_water_3",
+        "frag_fire_1", "frag_fire_2", "frag_fire_3",
+        "frag_earth_1", "frag_earth_2", "frag_earth_3",
+        "frag_life_1", "frag_life_2", "frag_life_3"
+      ]
+    },
+    "sealed_fragments": {
+      "status": "unstable",
+      "description": "4th fragments behind guardian seals — shuffling may break seal/guardian logic",
+      "items": [
+        "frag_water_4", "frag_fire_4", "frag_earth_4", "frag_life_4"
+      ]
+    },
+    "temple_items": {
+      "status": "unstable",
+      "description": "Town temple rewards behind obsidian gates — shuffling untested",
+      "items": [
+        "power_life", "power_ammo", "power_staff1", "power_staff2",
+        "key_obsidian1", "key_obsidian2"
+      ]
+    },
+    "gems": {
+      "status": "unstable",
+      "description": "Regular gems — per-level shuffle already works via level_editor.py, cross-level untested in solver",
+      "items": []
+    }
+  },
+
+  "disc_sources": {
+    "event_defeat_air_guardian": "frag_air_4",
+    "event_get_drill_keys": "drill_key",
+    "event_defeat_w1_keylord": "torpedo_key"
+  },
+  "barrier_map": {
+    "_comment": "Maps barrier types to the powers needed to break them",
+    "barrier_fire_wall": ["power_water"],
+    "barrier_ice_block": {"type": "any_of", "items": [["power_fire"], ["power_fire", "power_water"]]},
+    "barrier_acid_block": ["power_earth"],
+    "barrier_steam": ["power_fire", "power_water"],
+    "barrier_lightning": ["power_air", "power_fire"],
+    "barrier_smash": ["power_air", "power_earth", "power_fire"]
+  },
+  "nodes": {
+    "town_core": {
+      "region": "town",
+      "level": "town",
+      "pickups": [
+        "power_ammo",
+        "power_life",
+        "power_staff1",
+        "power_staff2",
+        "key_obsidian1",
+        "key_obsidian2",
+        "frag_water_2"
+      ],
+      "events": [
+        {
+          "event": "event_place_disc_air",
+          "requires": ["disc_air"]
+        },
+        {
+          "event": "event_place_disc_water",
+          "requires": ["disc_water"]
+        },
+        {
+          "event": "event_place_disc_fire",
+          "requires": ["disc_fire"]
+        },
+        {
+          "event": "event_place_disc_earth",
+          "requires": ["disc_earth"]
+        }
+      ],
+      "connections": {
+        "w1_beach": {
+          "requires": []
+        },
+        "e2_core": {
+          "requires": []
+        },
+        "f1_core": {
+          "requires": ["power_fire", "power_air"]
+        },
+        "d1_core": {
+          "requires": [
+            "power_fire_L3", "power_water_L3", "power_air_L3", "power_earth_L3",
+            "frag_air_1", "frag_air_2", "frag_air_3", "frag_air_4",
+            "frag_water_1", "frag_water_2", "frag_water_3", "frag_water_4",
+            "frag_fire_1", "frag_fire_2", "frag_fire_3", "frag_fire_4",
+            "frag_earth_1", "frag_earth_2", "frag_earth_3", "frag_earth_4"
+          ]
+        },
+        "life_core": {
+          "requires": ["frag_life_1", "frag_life_2", "frag_life_3"]
+        }
+      }
+    },
+
+    "w1_beach": {
+      "region": "water",
+      "level": "w1",
+      "pickups": [],
+      "events": [],
+      "connections": {
+        "town_core": {
+          "requires": []
+        },
+        "w1_ocean": {
+          "requires": ["power_fire", "power_water"]
+        },
+        "w2_core": {
+          "requires": ["power_water"]
+        }
+      }
+    },
+
+    "w1_ocean": {
+      "region": "water",
+      "level": "w1",
+      "pickups": [],
+      "events": [
+        {
+          "event": "event_defeat_w1_keylord",
+          "requires": []
+        }
+      ],
+      "connections": {
+        "w1_beach": {
+          "requires": []
+        },
+        "w3_core": {
+          "requires": []
+        },
+        "w4_core": {
+          "requires": []
+        },
+        "airship_core": {
+          "requires": {
+            "type": "all_of",
+            "items": [
+              "event_defeat_water_guardian",
+              {
+                "type": "any_of",
+                "items": [
+                  "event_defeat_fire_guardian",
+                  "event_defeat_earth_guardian"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+
+    "w2_core": {
+      "region": "water",
+      "level": "w2",
+      "pickups": [
+        "frag_water_1",
+        "power_water"
+      ],
+      "events": [],
+      "connections": {
+        "w1_beach": {
+          "requires": []
+        }
+      }
+    },
+
+    "w3_core": {
+      "region": "water",
+      "level": "w3",
+      "pickups": [
+        "frag_fire_1",
+        "power_water"
+      ],
+      "events": [],
+      "connections": {
+        "w1_ocean": {
+          "requires": []
+        },
+        "w3_sealed": {
+          "requires": ["frag_water_1", "frag_water_2", "frag_water_3"]
+        }
+      }
+    },
+
+    "w3_sealed": {
+      "region": "water",
+      "level": "w3",
+      "pickups": [
+        "frag_water_4"
+      ],
+      "events": [
+        {
+          "event": "event_defeat_water_guardian",
+          "requires": [
+            "power_water", "power_air", "power_earth", "power_fire"
+          ]
+        }
+      ],
+      "connections": {
+        "town_core": {
+          "requires": [
+            "event_defeat_water_guardian",
+            "frag_water_1", "frag_water_2", "frag_water_3", "frag_water_4"
+          ]
+        },
+        "w3_core": {
+          "requires": []
+        }
+      }
+    },
+
+    "w4_core": {
+      "region": "water",
+      "level": "w4",
+      "pickups": [
+        "power_air"
+      ],
+      "events": [],
+      "connections": {
+        "w4_earth_frag": {
+          "requires": ["power_air"]
+        },
+        "w1_ocean": {
+          "requires": []
+        },
+        "f3_core": {
+          "requires": []
+        }
+      }
+    },
+
+    "w4_earth_frag": {
+      "region": "water",
+      "level": "w4",
+      "pickups": [
+        "frag_earth_1"
+      ],
+      "events": [],
+      "connections": {
+        "w4_core": {
+          "requires": []
+        }
+      }
+    },
+
+    "airship_core": {
+      "region": "air",
+      "level": "airship",
+      "pickups": [],
+      "events": [
+        {
+          "event": "event_defeat_balthazar",
+          "requires": []
+        }
+      ],
+      "connections": {
+        "a3_core": {
+          "requires": ["event_defeat_balthazar"]
+        },
+        "a5_dock": {
+          "requires": ["event_defeat_balthazar"]
+        },
+        "w1_ocean": {
+          "requires": []
+        }
+      }
+    },
+
+    "a3_core": {
+      "region": "air",
+      "level": "a3",
+      "pickups": [
+        "frag_life_2",
+        "power_water_a3"
+      ],
+      "events": [],
+      "connections": {
+        "airship_core": {
+          "requires": []
+        }
+      }
+    },
+
+    "a5_dock": {
+      "region": "air",
+      "level": "a5",
+      "pickups": [],
+      "events": [],
+      "connections": {
+        "a5_core": {
+          "requires": ["power_air_L2", "power_water_L2"]
+        },
+        "a5_air_power": {
+          "requires": ["power_fire_L3", "power_water_L3"]
+        },
+        "a5_frag_island": {
+          "requires": ["power_air_L3"]
+        },
+        "airship_core": {
+          "requires": []
+        }
+      }
+    },
+
+    "a5_core": {
+      "region": "air",
+      "level": "a5",
+      "pickups": [],
+      "events": [],
+      "connections": {
+        "a5_dock": {
+          "requires": []
+        }
+      }
+    },
+
+    "a5_air_power": {
+      "region": "air",
+      "level": "a5",
+      "pickups": [
+        "power_air"
+      ],
+      "events": [],
+      "connections": {
+        "a5_dock": {
+          "requires": []
+        }
+      }
+    },
+
+    "a5_frag_island": {
+      "region": "air",
+      "level": "a5",
+      "pickups": [
+        "frag_air_2"
+      ],
+      "events": [],
+      "connections": {
+        "a5_dock": {
+          "requires": []
+        }
+      }
+    },
+
+    "a1_core": {
+      "region": "air",
+      "level": "a1",
+      "pickups": [
+        "frag_air_1"
+      ],
+      "events": [],
+      "connections": {
+        "a6_core": {
+          "requires": ["frag_air_1", "frag_air_2", "frag_air_3"]
+        },
+        "e6_core": {
+          "requires": []
+        }
+      }
+    },
+
+    "a6_core": {
+      "region": "air",
+      "level": "a6",
+      "pickups": [],
+      "events": [
+        {
+          "event": "event_defeat_air_guardian",
+          "requires": [
+            "power_air_L3", "power_fire_L3", "power_water_L3", "power_earth_L3"
+          ]
+        }
+      ],
+      "connections": {
+        "a6_earth_power": {
+          "requires": ["power_fire_L3", "power_water_L3", "power_air_L3"]
+        },
+        "town_core": {
+          "requires": [
+            "event_defeat_air_guardian",
+            "frag_air_1", "frag_air_2", "frag_air_3", "frag_air_4"
+          ]
+        }
+      }
+    },
+
+    "a6_earth_power": {
+      "region": "air",
+      "level": "a6",
+      "pickups": [
+        "power_earth"
+      ],
+      "events": [],
+      "connections": {
+        "a6_core": {
+          "requires": []
+        }
+      }
+    },
+
+    "e2_core": {
+      "region": "earth",
+      "level": "e2",
+      "pickups": [
+        "power_fire"
+      ],
+      "events": [
+        {
+          "event": "event_activate_diggers",
+          "requires": ["drill_key"]
+        },
+        {
+          "event": "event_activate_lifts",
+          "requires": []
+        }
+      ],
+      "connections": {
+        "town_core": {
+          "requires": []
+        },
+        "e6_core": {
+          "requires": ["event_activate_diggers"]
+        },
+        "e7_core": {
+          "requires": []
+        },
+        "e5_digger": {
+          "requires": ["event_activate_diggers"]
+        },
+        "e5_lift": {
+          "requires": ["event_activate_lifts"]
+        },
+        "w2_core": {
+          "requires": []
+        },
+        "e2_air_fragment": {
+          "requires": ["power_air_L3", "power_fire_L3"]
+        }
+      }
+    },
+
+    "e2_air_fragment": {
+      "region": "earth",
+      "level": "e2",
+      "pickups": [
+        "frag_air_3"
+      ],
+      "events": [],
+      "connections": {
+        "e2_core": {
+          "requires": []
+        }
+      }
+    },
+
+    "e6_core": {
+      "region": "earth",
+      "level": "e6",
+      "pickups": [
+        "frag_earth_3"
+      ],
+      "events": [
+        {
+          "event": "event_crystal_lightning",
+          "requires": ["power_water", "power_earth", "power_air"]
+        }
+      ],
+      "connections": {
+        "e2_core": {
+          "requires": []
+        },
+        "a1_core": {
+          "requires": [
+            "event_crystal_lightning",
+            "event_crystal_fire",
+            "event_crystal_whirlwind",
+            "event_crystal_pulse"
+          ]
+        }
+      }
+    },
+
+    "e7_core": {
+      "region": "earth",
+      "level": "e7",
+      "pickups": [],
+      "events": [
+        {
+          "event": "event_get_drill_keys",
+          "requires": []
+        }
+      ],
+      "connections": {
+        "e2_core": {
+          "requires": []
+        },
+        "e7_drill_area": {
+          "requires": ["drill_key"]
+        }
+      }
+    },
+
+    "e7_drill_area": {
+      "region": "earth",
+      "level": "e7",
+      "pickups": [
+        "frag_life_1"
+      ],
+      "events": [
+        {
+          "event": "event_crystal_fire",
+          "requires": ["drill_key"]
+        }
+      ],
+      "connections": {
+        "e7_core": {
+          "requires": []
+        },
+        "e7_fire_power": {
+          "requires": ["power_water_L2"]
+        }
+      }
+    },
+
+    "e7_fire_power": {
+      "region": "earth",
+      "level": "e7",
+      "pickups": [
+        "power_fire"
+      ],
+      "events": [],
+      "connections": {
+        "e7_drill_area": {
+          "requires": []
+        }
+      }
+    },
+
+    "e5_digger": {
+      "region": "earth",
+      "level": "e5",
+      "pickups": [],
+      "events": [
+        {
+          "event": "event_crystal_whirlwind",
+          "requires": ["power_air", "power_earth"]
+        }
+      ],
+      "connections": {
+        "e5_power_cache": {
+          "requires": ["power_water_L2", "power_air_L2", "power_fire_L2"]
+        },
+        "e5_guardian_arena": {
+          "requires": [
+            "frag_earth_1", "frag_earth_2", "frag_earth_3",
+            "power_earth_L2", "power_water_L2"
+          ]
+        },
+        "e5_lift": {
+          "requires": ["power_water_L2", "power_air"]
+        },
+        "e2_core": {
+          "requires": []
+        }
+      }
+    },
+
+    "e5_lift": {
+      "region": "earth",
+      "level": "e5",
+      "pickups": [],
+      "events": [
+        {
+          "event": "event_crystal_pulse",
+          "requires": ["drill_key", "power_air", "power_earth", "power_fire"]
+        }
+      ],
+      "connections": {
+        "e5_conveyor": {
+          "requires": ["power_earth_L2"]
+        },
+        "f2_entrance": {
+          "requires": ["drill_key"]
+        },
+        "e5_digger": {
+          "requires": []
+        },
+        "e2_core": {
+          "requires": []
+        }
+      }
+    },
+
+    "e5_conveyor": {
+      "region": "earth",
+      "level": "e5",
+      "pickups": [
+        "frag_fire_3"
+      ],
+      "events": [],
+      "connections": {
+        "e5_lift": {
+          "requires": []
+        }
+      }
+    },
+
+    "e5_power_cache": {
+      "region": "earth",
+      "level": "e5",
+      "pickups": [
+        "power_earth"
+      ],
+      "events": [],
+      "connections": {
+        "e5_digger": {
+          "requires": []
+        }
+      }
+    },
+
+    "e5_guardian_arena": {
+      "region": "earth",
+      "level": "e5",
+      "pickups": [
+        "frag_earth_4"
+      ],
+      "events": [
+        {
+          "event": "event_defeat_earth_guardian",
+          "requires": ["power_fire_L2", "power_earth_L2"]
+        }
+      ],
+      "connections": {
+        "town_core": {
+          "requires": [
+            "event_defeat_earth_guardian",
+            "frag_earth_1", "frag_earth_2", "frag_earth_3", "frag_earth_4"
+          ]
+        },
+        "e5_digger": {
+          "requires": []
+        }
+      }
+    },
+
+    "f1_core": {
+      "region": "fire",
+      "level": "f1",
+      "pickups": [],
+      "events": [],
+      "connections": {
+        "f1_lava_tubes": {
+          "requires": ["power_air", "power_fire", "power_water"]
+        },
+        "f3_core": {
+          "requires": []
+        },
+        "f6_entrance": {
+          "requires": []
+        },
+        "town_core": {
+          "requires": []
+        }
+      }
+    },
+
+    "f1_lava_tubes": {
+      "region": "fire",
+      "level": "f1",
+      "pickups": [
+        "frag_water_3"
+      ],
+      "events": [],
+      "connections": {
+        "f1_core": {
+          "requires": []
+        }
+      }
+    },
+
+    "f2_entrance": {
+      "region": "fire",
+      "level": "f2",
+      "pickups": [],
+      "events": [],
+      "connections": {
+        "f2_core": {
+          "requires": ["power_air"]
+        },
+        "e5_lift": {
+          "requires": []
+        }
+      }
+    },
+
+    "f2_core": {
+      "region": "fire",
+      "level": "f2",
+      "pickups": [
+        "power_air"
+      ],
+      "events": [],
+      "connections": {
+        "f2_life_frag": {
+          "requires": ["power_earth_L3"]
+        },
+        "f4_lava_river": {
+          "requires": ["power_air_L2"]
+        },
+        "f4_cliffside": {
+          "requires": ["power_air_L2"]
+        },
+        "f2_entrance": {
+          "requires": []
+        }
+      }
+    },
+
+    "f2_life_frag": {
+      "region": "fire",
+      "level": "f2",
+      "pickups": [
+        "frag_life_3"
+      ],
+      "events": [],
+      "connections": {
+        "f2_core": {
+          "requires": []
+        }
+      }
+    },
+
+    "f3_core": {
+      "region": "fire",
+      "level": "f3",
+      "pickups": [
+        "frag_earth_2",
+        "power_earth"
+      ],
+      "events": [],
+      "connections": {
+        "f1_core": {
+          "requires": []
+        },
+        "w4_core": {
+          "requires": ["power_earth"]
+        }
+      }
+    },
+
+    "f4_cliffside": {
+      "region": "fire",
+      "level": "f4",
+      "pickups": [],
+      "events": [],
+      "connections": {
+        "f2_core": {
+          "requires": []
+        },
+        "f4_battle_platform": {
+          "requires": ["power_air_L3"]
+        }
+      }
+    },
+
+    "f4_lava_river": {
+      "region": "fire",
+      "level": "f4",
+      "pickups": [],
+      "events": [],
+      "connections": {
+        "f4_battle_platform": {
+          "requires": ["power_air_L2", "power_water_L2"]
+        }
+      }
+    },
+
+    "f4_battle_platform": {
+      "region": "fire",
+      "level": "f4",
+      "pickups": [
+        "frag_fire_2"
+      ],
+      "events": [],
+      "connections": {
+        "f4_cliffside": {
+          "requires": ["power_air_L2"]
+        }
+      }
+    },
+
+    "f6_entrance": {
+      "region": "fire",
+      "level": "f6",
+      "pickups": [],
+      "events": [],
+      "connections": {
+        "f6_core": {
+          "requires": {
+            "type": "any_of",
+            "items": [
+              {"type": "all_of", "items": ["power_fire_L2", "power_water_L2"]},
+              {"type": "all_of", "items": ["power_earth_L2", "power_water_L2"]}
+            ]
+          }
+        },
+        "f1_core": {
+          "requires": []
+        }
+      }
+    },
+
+    "f6_core": {
+      "region": "fire",
+      "level": "f6",
+      "pickups": [
+        "power_fire"
+      ],
+      "events": [],
+      "connections": {
+        "f6_inner": {
+          "requires": ["frag_fire_1", "frag_fire_2", "frag_fire_3"]
+        },
+        "f6_entrance": {
+          "requires": []
+        }
+      }
+    },
+
+    "f6_inner": {
+      "region": "fire",
+      "level": "f6",
+      "pickups": [
+        "frag_fire_4"
+      ],
+      "events": [
+        {
+          "event": "event_defeat_fire_guardian",
+          "requires": ["power_fire_L2", "power_earth_L2"]
+        }
+      ],
+      "connections": {
+        "town_core": {
+          "requires": [
+            "event_defeat_fire_guardian",
+            "frag_fire_1", "frag_fire_2", "frag_fire_3", "frag_fire_4"
+          ]
+        },
+        "f6_core": {
+          "requires": []
+        }
+      }
+    },
+
+    "d1_core": {
+      "region": "death",
+      "level": "d1",
+      "pickups": [],
+      "events": [
+        {
+          "event": "event_defeat_spideyzar",
+          "requires": [
+            "power_fire_L3", "power_water_L3", "power_air_L3", "power_earth_L3"
+          ]
+        },
+        {
+          "event": "event_place_disc_life",
+          "requires": ["disc_life"]
+        }
+      ],
+      "connections": {
+        "town_core": {
+          "requires": []
+        }
+      }
+    },
+
+    "life_core": {
+      "region": "life",
+      "level": "life",
+      "pickups": [
+        "frag_life_4"
+      ],
+      "events": [],
+      "connections": {
+        "town_core": {
+          "requires": []
+        }
+      }
+    }
+  },
+
+  "edges": {
+    "_comment": "Not used in v3 — all connections are direct node references in the connections dict"
+  },
+
+  "disc_from_fragments": {
+    "disc_air": [
+      "frag_air_1", "frag_air_2", "frag_air_3", "frag_air_4"
+    ],
+    "disc_water": [
+      "frag_water_1", "frag_water_2", "frag_water_3", "frag_water_4"
+    ],
+    "disc_fire": [
+      "frag_fire_1", "frag_fire_2", "frag_fire_3", "frag_fire_4"
+    ],
+    "disc_earth": [
+      "frag_earth_1", "frag_earth_2", "frag_earth_3", "frag_earth_4"
+    ],
+    "disc_life": [
+      "frag_life_1", "frag_life_2", "frag_life_3", "frag_life_4"
+    ]
+  }
+}

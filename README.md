@@ -34,11 +34,18 @@ Goals include:
 ```
 Elemental_Games_Modding/
 ├── docs/               # Research notes, struct definitions, system documentation
-├── tools/              # Utilities for binary analysis and content manipulation
+├── tools/
+│   └── randomizer/     # Full-game randomizer for Azurik (GUI + CLI)
 ├── reconstructed/      # Reconstructed C++ headers and source files
 ├── scripts/            # Automation scripts (Ghidra, Python, etc.)
 └── README.md
 ```
+
+### Azurik Randomizer
+
+The headline tool is a **full-game randomizer** for Azurik: Rise of Perathia with a graphical interface and logic solver. It shuffles powers, fragments, keys, gems, and barriers while guaranteeing the game remains completable.
+
+See [`tools/randomizer/README.md`](tools/randomizer/README.md) for setup and usage instructions.
 
 ---
 

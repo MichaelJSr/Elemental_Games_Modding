@@ -1,0 +1,358 @@
+{
+  "_meta": {
+    "game": "Azurik: Rise of Perathia (Xbox)",
+    "source_file": "game_files/gamedata/config.xbr",
+    "format": "xobx (Xbox binary resource)",
+    "generated_by": "xbr_parser.py",
+    "notes": [
+      "All numeric values are stored as 16-byte variant records: [pad(4)][extra(4)][value(4)][type(4)]",
+      "type=1 → single-precision float at bytes 8-11",
+      "type=2 → 32-bit integer at bytes 8-11",
+      "type=0 → unset/null (property not configured for this entity)",
+      "Record stride = 16 bytes. Entity block stride = n_properties × 16 bytes.",
+      "String tables are null-terminated ASCII stored before the binary records in each section."
+    ]
+  },
+
+  "sections": {
+
+    "critters_walking": {
+      "description": "Per-entity AI movement and combat behaviour. One block of 18×16 bytes per entity.",
+      "file_offset": "0x083000",
+      "virtual_size": "0x8D1C",
+      "string_table_offset": "0x083674",
+      "record_base_offset": "0x084090",
+      "entity_count": 107,
+      "properties_per_entity": 18,
+      "bytes_per_entity": 288,
+      "properties": [
+        { "index": 0,  "key": "stalk_time_min",           "display": "Stalk Time Min",           "type": "float", "unit": "seconds",     "range_hint": [0, 30],   "description": "Minimum time the entity will stalk before acting." },
+        { "index": 1,  "key": "stalk_time_max",           "display": "Stalk Time Max",           "type": "float", "unit": "seconds",     "range_hint": [0, 30],   "description": "Maximum time the entity will stalk before acting." },
+        { "index": 2,  "key": "stalk_distance_cw",        "display": "Stalk Distance CW",        "type": "float", "unit": "units",       "range_hint": [0, 100],  "description": "Clockwise stalk orbit radius." },
+        { "index": 3,  "key": "stalk_distance_ccw",       "display": "Stalk Distance CCW",       "type": "float", "unit": "units",       "range_hint": [0, 100],  "description": "Counter-clockwise stalk orbit radius." },
+        { "index": 4,  "key": "provoke_distance",         "display": "Provoke Distance",         "type": "float", "unit": "units",       "range_hint": [0, 500],  "description": "Distance at which entity becomes provoked and begins pursuing." },
+        { "index": 5,  "key": "ambush_time_min",          "display": "Ambush Time Min",          "type": "float", "unit": "seconds",     "range_hint": [0, 30],   "description": "Minimum wait time before launching an ambush." },
+        { "index": 6,  "key": "ambush_time_max",          "display": "Ambush Time Max",          "type": "float", "unit": "seconds",     "range_hint": [0, 30],   "description": "Maximum wait time before launching an ambush." },
+        { "index": 7,  "key": "ambush_if_hit_chance",     "display": "Ambush If Hit Chance",     "type": "float", "unit": "probability", "range_hint": [0, 1],    "description": "Probability (0-1) that a hit triggers an ambush response." },
+        { "index": 8,  "key": "need_n_allies",            "display": "Need N Allies",            "type": "int",   "unit": "count",       "range_hint": [0, 20],   "description": "Number of nearby allies required before entity engages." },
+        { "index": 9,  "key": "max_distance",             "display": "Max Distance",             "type": "int",   "unit": "game_units",  "range_hint": [0, 50000],"description": "Maximum chase/engagement distance from spawn point." },
+        { "index": 10, "key": "flee_after_attack_chance", "display": "Flee After Attack Chance", "type": "float", "unit": "probability", "range_hint": [0, 1],    "description": "Probability of fleeing after performing an attack." },
+        { "index": 11, "key": "flee_if_health_less_than", "display": "Flee If Health Less Than", "type": "float", "unit": "fraction",    "range_hint": [0, 1],    "description": "Flees when HP drops below this fraction of max HP." },
+        { "index": 12, "key": "safe_distance",            "display": "Safe Distance",            "type": "float", "unit": "units",       "range_hint": [0, 200],  "description": "Distance at which entity considers itself safe when fleeing." },
+        { "index": 13, "key": "attack_anim_rate",         "display": "Attack Anim Rate",         "type": "float", "unit": "multiplier",  "range_hint": [0.1, 5],  "description": "Animation playback rate multiplier for attack sequences." },
+        { "index": 14, "key": "max_turn_rate",            "display": "Max Turn Rate",            "type": "float", "unit": "rad/s",       "range_hint": [0, 20],   "description": "Maximum rotation speed in radians/sec when tracking a target." },
+        { "index": 15, "key": "turn_while_attacking",     "display": "Turn While Attacking",     "type": "float", "unit": "bool/0-1",    "range_hint": [0, 1],    "description": "Whether (>0) the entity can rotate during attack animations." },
+        { "index": 16, "key": "left_footstep_time",       "display": "Left Footstep Time",       "type": "float", "unit": "norm_time",   "range_hint": [0, 2],    "description": "Normalised time in walk cycle when left footstep event fires." },
+        { "index": 17, "key": "right_footstep_time",      "display": "Right Footstep Time",      "type": "float", "unit": "norm_time",   "range_hint": [0, 2],    "description": "Normalised time in walk cycle when right footstep event fires." }
+      ]
+    },
+
+    "critters_damage": {
+      "description": "Per-entity HP, damage type classification, and elemental resistance multipliers.",
+      "file_offset": "0x035000",
+      "virtual_size": "0x1A7E2",
+      "string_table_offset": "0x0350A4",
+      "record_base_offset": "0x035000",
+      "entity_count": 100,
+      "properties": [
+        { "index": 0,  "key": "name",          "display": "Name",             "type": "string", "unit": "",       "description": "Internal entity identifier string." },
+        { "index": 1,  "key": "damageType",    "display": "Damage Type",      "type": "string", "unit": "",       "description": "Damage type this entity inherits/deals." },
+        { "index": 2,  "key": "damageGroup",   "display": "Damage Group",     "type": "string", "unit": "",       "description": "Classification group for damage-interaction lookups." },
+        { "index": 3,  "key": "hitPoints",     "display": "Hit Points",       "type": "int",    "unit": "HP",     "range_hint": [1, 9999], "description": "Base hit point total for this entity." },
+        { "index": 4,  "key": "norm_1",        "display": "Normal Dmg Tier 1","type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for norm_1 attacks." },
+        { "index": 5,  "key": "norm_2",        "display": "Normal Dmg Tier 2","type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for norm_2 attacks." },
+        { "index": 6,  "key": "norm_3",        "display": "Normal Dmg Tier 3","type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for norm_3 attacks." },
+        { "index": 7,  "key": "norm_4",        "display": "Normal Dmg Tier 4","type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for norm_4 attacks." },
+        { "index": 8,  "key": "water_1",       "display": "Water Tier 1",     "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for water_1 attacks." },
+        { "index": 9,  "key": "water_2",       "display": "Water Tier 2",     "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for water_2 attacks." },
+        { "index": 10, "key": "water_3",       "display": "Water Tier 3",     "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for water_3 attacks." },
+        { "index": 11, "key": "steam_1",       "display": "Steam Tier 1",     "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for steam_1 attacks." },
+        { "index": 12, "key": "steam_2",       "display": "Steam Tier 2",     "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for steam_2 attacks." },
+        { "index": 13, "key": "steam_3",       "display": "Steam Tier 3",     "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for steam_3 attacks." },
+        { "index": 14, "key": "lightning_1",   "display": "Lightning Tier 1", "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for lightning_1 attacks." },
+        { "index": 15, "key": "lightning_2",   "display": "Lightning Tier 2", "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for lightning_2 attacks." },
+        { "index": 16, "key": "lightning_3",   "display": "Lightning Tier 3", "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for lightning_3 attacks." },
+        { "index": 17, "key": "acid_1",        "display": "Acid Tier 1",      "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for acid_1 attacks." },
+        { "index": 18, "key": "acid_2",        "display": "Acid Tier 2",      "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for acid_2 attacks." },
+        { "index": 19, "key": "acid_3",        "display": "Acid Tier 3",      "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for acid_3 attacks." },
+        { "index": 20, "key": "fire_1",        "display": "Fire Tier 1",      "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for fire_1 attacks." },
+        { "index": 21, "key": "fire_2",        "display": "Fire Tier 2",      "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for fire_2 attacks." },
+        { "index": 22, "key": "fire_3",        "display": "Fire Tier 3",      "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for fire_3 attacks." },
+        { "index": 23, "key": "wind_1",        "display": "Wind Tier 1",      "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for wind_1 attacks." },
+        { "index": 24, "key": "wind_2",        "display": "Wind Tier 2",      "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for wind_2 attacks." },
+        { "index": 25, "key": "wind_3",        "display": "Wind Tier 3",      "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for wind_3 attacks." },
+        { "index": 26, "key": "wind_4",        "display": "Wind Tier 4",      "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for wind_4 attacks." },
+        { "index": 27, "key": "smash_1",       "display": "Smash Tier 1",     "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for smash_1 attacks." },
+        { "index": 28, "key": "smash_2",       "display": "Smash Tier 2",     "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for smash_2 attacks." },
+        { "index": 29, "key": "smash_3",       "display": "Smash Tier 3",     "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for smash_3 attacks." },
+        { "index": 30, "key": "ice_1",         "display": "Ice Tier 1",       "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for ice_1 attacks." },
+        { "index": 31, "key": "ice_2",         "display": "Ice Tier 2",       "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for ice_2 attacks." },
+        { "index": 32, "key": "ice_3",         "display": "Ice Tier 3",       "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for ice_3 attacks." },
+        { "index": 33, "key": "elemental_1",   "display": "Elemental Tier 1", "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for elemental_1 attacks." },
+        { "index": 34, "key": "elemental_2",   "display": "Elemental Tier 2", "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for elemental_2 attacks." },
+        { "index": 35, "key": "elemental_3",   "display": "Elemental Tier 3", "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for elemental_3 attacks." },
+        { "index": 36, "key": "lava_1",        "display": "Lava Tier 1",      "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for lava_1 attacks." },
+        { "index": 37, "key": "lava_2",        "display": "Lava Tier 2",      "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for lava_2 attacks." },
+        { "index": 38, "key": "lava_3",        "display": "Lava Tier 3",      "type": "float",  "unit": "mult",   "range_hint": [0, 5],    "description": "Incoming damage multiplier for lava_3 attacks." }
+      ]
+    },
+
+    "critters_critter_data": {
+      "description": "Per-entity base stats: movement speeds, attack range, timers, item drops, collision.",
+      "file_offset": "0x01A000",
+      "virtual_size": "0x110F8",
+      "string_table_offset": "0x019891",
+      "record_base_offset": "0x01A000",
+      "notes": "String table overlaps with main XBE data section. Property names verified from XBE address 0x001981c8.",
+      "properties": [
+        { "key": "walkSpeed",        "display": "Walk Speed",        "type": "float", "unit": "units/s",    "range_hint": [0, 50],    "xbe_addr": "0x001981C8", "description": "Base walking speed." },
+        { "key": "walkAnimSpeed",    "display": "Walk Anim Speed",   "type": "float", "unit": "multiplier", "range_hint": [0.1, 5],   "xbe_addr": "0x001981B8", "description": "Animation playback rate multiplier while walking." },
+        { "key": "runSpeed",         "display": "Run Speed",         "type": "float", "unit": "units/s",    "range_hint": [0, 100],   "xbe_addr": "0x001981AC", "description": "Base running speed." },
+        { "key": "runAnimSpeed",     "display": "Run Anim Speed",    "type": "float", "unit": "multiplier", "range_hint": [0.1, 5],   "xbe_addr": "0x0019819C", "description": "Animation playback rate multiplier while running." },
+        { "key": "attackRange",      "display": "Attack Range",      "type": "float", "unit": "units",      "range_hint": [0, 20],    "xbe_addr": "0x001981D4", "description": "Maximum melee attack reach distance." },
+        { "key": "drownTime",        "display": "Drown Time",        "type": "float", "unit": "seconds",    "range_hint": [0, 120],   "xbe_addr": "0x00198190", "description": "Time until death when entity is fully submerged." },
+        { "key": "corpseWaitTime",   "display": "Corpse Wait Time",  "type": "float", "unit": "seconds",    "range_hint": [0, 300],   "xbe_addr": "0x00198180", "description": "Delay (seconds) before a corpse begins fading out." },
+        { "key": "corpseFadeTime",   "display": "Corpse Fade Time",  "type": "float", "unit": "seconds",    "range_hint": [0, 60],    "xbe_addr": "0x00198170", "description": "Duration of the corpse fade-out animation." },
+        { "key": "noFreeze",         "display": "No Freeze",         "type": "int",   "unit": "bool",       "range_hint": [0, 1],     "xbe_addr": "0x01992D",   "description": "Set to 1 to make this entity immune to freeze effects." },
+        { "key": "hitsThroughWalls", "display": "Hits Through Walls","type": "int",   "unit": "bool",       "range_hint": [0, 1],     "xbe_addr": "0x019936",   "description": "Set to 1 so entity attacks penetrate world geometry." },
+        { "key": "ouch2Threshold",   "display": "Ouch-2 Threshold",  "type": "float", "unit": "damage",     "range_hint": [1, 999],   "xbe_addr": "0x019947",   "description": "Damage value that triggers level-2 pain reaction." },
+        { "key": "ouch3Threshold",   "display": "Ouch-3 Threshold",  "type": "float", "unit": "damage",     "range_hint": [1, 999],   "xbe_addr": "0x019956",   "description": "Damage value that triggers level-3 pain reaction." },
+        { "key": "ouch1Knockback",   "display": "Ouch-1 Knockback",  "type": "float", "unit": "force",      "range_hint": [0, 100],   "xbe_addr": "0x019965",   "description": "Knockback impulse magnitude for level-1 pain hit." },
+        { "key": "ouch2Knockback",   "display": "Ouch-2 Knockback",  "type": "float", "unit": "force",      "range_hint": [0, 100],   "xbe_addr": "0x019974",   "description": "Knockback impulse magnitude for level-2 pain hit." },
+        { "key": "ouch3Knockback",   "display": "Ouch-3 Knockback",  "type": "float", "unit": "force",      "range_hint": [0, 100],   "xbe_addr": "0x019983",   "description": "Knockback impulse magnitude for level-3 pain hit." },
+        { "key": "boundRadius",      "display": "Bound Radius",      "type": "float", "unit": "units",      "range_hint": [0.1, 20],  "xbe_addr": "0x0019826C", "description": "Bounding sphere radius for broad-phase collision detection." },
+        { "key": "collisionRadius",  "display": "Collision Radius",  "type": "float", "unit": "units",      "range_hint": [0.1, 20],  "xbe_addr": "0x001982EC", "description": "Precise collision capsule radius." },
+        { "key": "drop1",            "display": "Drop Item 1",       "type": "string","unit": "item_id",    "xbe_addr": "0x019992",   "description": "Item ID string for drop slot 1 (e.g. 'small_health')." },
+        { "key": "dropCount1",       "display": "Drop Count 1",      "type": "int",   "unit": "count",      "range_hint": [0, 99],    "xbe_addr": "0x019998",   "description": "Quantity of drop1 items dropped per event." },
+        { "key": "dropChance1",      "display": "Drop Chance 1",     "type": "float", "unit": "probability","range_hint": [0, 1],     "xbe_addr": "0x0199A3",   "description": "Probability (0-1) that drop slot 1 triggers on death." },
+        { "key": "drop2",            "display": "Drop Item 2",       "type": "string","unit": "item_id",    "xbe_addr": "0x0199AF",   "description": "Item ID string for drop slot 2." },
+        { "key": "dropCount2",       "display": "Drop Count 2",      "type": "int",   "unit": "count",      "range_hint": [0, 99],    "xbe_addr": "0x0199B5",   "description": "Quantity of drop2 items dropped per event." },
+        { "key": "dropChance2",      "display": "Drop Chance 2",     "type": "float", "unit": "probability","range_hint": [0, 1],     "xbe_addr": "0x0199C0",   "description": "Probability (0-1) that drop slot 2 triggers on death." },
+        { "key": "drop3",            "display": "Drop Item 3",       "type": "string","unit": "item_id",    "xbe_addr": "0x0199CC",   "description": "Item ID string for drop slot 3." },
+        { "key": "dropCount3",       "display": "Drop Count 3",      "type": "int",   "unit": "count",      "range_hint": [0, 99],    "xbe_addr": "0x0199D2",   "description": "Quantity of drop3 items dropped per event." },
+        { "key": "dropChance3",      "display": "Drop Chance 3",     "type": "float", "unit": "probability","range_hint": [0, 1],     "xbe_addr": "0x0199DD",   "description": "Probability (0-1) that drop slot 3 triggers on death." },
+        { "key": "drop4",            "display": "Drop Item 4",       "type": "string","unit": "item_id",    "xbe_addr": "0x0199E9",   "description": "Item ID string for drop slot 4." },
+        { "key": "dropCount4",       "display": "Drop Count 4",      "type": "int",   "unit": "count",      "range_hint": [0, 99],    "xbe_addr": "0x0199EF",   "description": "Quantity of drop4 items dropped per event." },
+        { "key": "dropChance4",      "display": "Drop Chance 4",     "type": "float", "unit": "probability","range_hint": [0, 1],     "xbe_addr": "0x0199FA",   "description": "Probability (0-1) that drop slot 4 triggers on death." },
+        { "key": "drop5",            "display": "Drop Item 5",       "type": "string","unit": "item_id",    "xbe_addr": "0x019A06",   "description": "Item ID string for drop slot 5." },
+        { "key": "dropCount5",       "display": "Drop Count 5",      "type": "int",   "unit": "count",      "range_hint": [0, 99],    "xbe_addr": "0x019A0C",   "description": "Quantity of drop5 items dropped per event." },
+        { "key": "dropChance5",      "display": "Drop Chance 5",     "type": "float", "unit": "probability","range_hint": [0, 1],     "xbe_addr": "0x019A17",   "description": "Probability (0-1) that drop slot 5 triggers on death." },
+        { "key": "f.fear",           "display": "Fear Range Tag",    "type": "string","unit": "tag",        "xbe_addr": "0x019891",   "description": "Entity/feature tag this critter flees from on sight." },
+        { "key": "f.follow",         "display": "Follow Target Tag", "type": "string","unit": "tag",        "xbe_addr": "0x019898",   "description": "Entity/feature tag this critter follows." },
+        { "key": "f.attack",         "display": "Attack Target Tag", "type": "string","unit": "tag",        "xbe_addr": "0x0198A1",   "description": "Entity/feature tag this critter will attack." },
+        { "key": "f.food",           "display": "Food Target Tag",   "type": "string","unit": "tag",        "xbe_addr": "0x0198AA",   "description": "Entity/feature tag this critter treats as food." },
+        { "key": "range",            "display": "Default Range",     "type": "float", "unit": "units",      "range_hint": [0, 500],   "xbe_addr": "0x0198B1",   "description": "Default detection and interaction radius." },
+        { "key": "range_up",         "display": "Range Up",          "type": "float", "unit": "units",      "range_hint": [0, 500],   "xbe_addr": "0x0198B7",   "description": "Upward vertical range extension for detection." },
+        { "key": "range_down",       "display": "Range Down",        "type": "float", "unit": "units",      "range_hint": [0, 500],   "xbe_addr": "0x0198C0",   "description": "Downward vertical range extension for detection." },
+        { "key": "soundMaxDist",     "display": "Sound Max Distance","type": "float", "unit": "units",      "range_hint": [0, 5000],  "xbe_addr": "0x00197FB0", "description": "Distance at which this entity's sounds become inaudible." },
+        { "key": "soundMinDist",     "display": "Sound Min Distance","type": "float", "unit": "units",      "range_hint": [0, 500],   "xbe_addr": "0x00197FC0", "description": "Distance at which entity sounds play at full volume." },
+        { "key": "maxAlive",         "display": "Max Alive",         "type": "int",   "unit": "count",      "range_hint": [0, 50],    "xbe_addr": "0x00192408", "description": "Maximum simultaneous live instances in the world." },
+        { "key": "maxGenerated",     "display": "Max Generated",     "type": "int",   "unit": "count",      "range_hint": [0, 200],   "xbe_addr": "0x00192414", "description": "Maximum total number of this entity spawned per level session." },
+        { "key": "critterRange",     "display": "Spawn Trigger Range","type": "float","unit": "units",      "range_hint": [0, 1000],  "xbe_addr": "0x001923F8", "description": "Player proximity radius that triggers spawning." }
+      ]
+    },
+
+    "settings_foo": {
+      "description": "Global player progression settings. Elemental fuel capacities, HP thresholds, and fall damage tiers.",
+      "file_offset": "0x088300",
+      "virtual_size": "0x52C",
+      "string_table_offset": "0x088410",
+      "record_base_offset": "0x088300",
+      "element_keys": ["air", "water", "earth", "fire", "life"],
+      "notes": "Each property is repeated for each of the 5 element keys. Record groups are 48 bytes (3×16).",
+      "properties": [
+        { "index": 0,  "key": "initial_fuel",      "display": "Initial Fuel",         "type": "float", "unit": "fuel_units", "range_hint": [0, 200],  "description": "Starting fuel amount for this element type." },
+        { "index": 1,  "key": "initial_fuel_cap",  "display": "Initial Fuel Cap",     "type": "float", "unit": "fuel_units", "range_hint": [0, 500],  "description": "Starting maximum fuel capacity for this element." },
+        { "index": 2,  "key": "fuel_cap_inc",       "display": "Fuel Cap Increment",   "type": "float", "unit": "fuel_units", "range_hint": [0, 100],  "description": "Amount fuel capacity increases per upgrade pickup." },
+        { "index": 3,  "key": "num_fuel_inc",       "display": "Num Fuel Increments",  "type": "int",   "unit": "count",      "range_hint": [0, 20],   "description": "Total available fuel capacity upgrades." },
+        { "index": 4,  "key": "fuel_inc_gems",      "display": "Fuel Inc Gem Cost",    "type": "int",   "unit": "gems",       "range_hint": [0, 1000], "description": "Gems required to purchase each fuel capacity increment." },
+        { "index": 5,  "key": "initial_hp",         "display": "Initial HP",           "type": "int",   "unit": "HP",         "range_hint": [1, 9999], "description": "Player starting hit points at game begin." },
+        { "index": 6,  "key": "max_hp",             "display": "Max HP",               "type": "int",   "unit": "HP",         "range_hint": [1, 9999], "description": "Absolute maximum HP the player can reach." },
+        { "index": 7,  "key": "lev2_obs",           "display": "Level 2 Obstacle Goal","type": "int",   "unit": "count",      "range_hint": [0, 9999], "description": "Number of obstacles/tasks completed to reach power level 2." },
+        { "index": 8,  "key": "lev2_hp",            "display": "Level 2 HP Bonus",     "type": "int",   "unit": "HP",         "range_hint": [0, 999],  "description": "Additional HP granted upon reaching power level 2." },
+        { "index": 9,  "key": "lev3_obs",           "display": "Level 3 Obstacle Goal","type": "int",   "unit": "count",      "range_hint": [0, 9999], "description": "Obstacles/tasks needed to reach power level 3." },
+        { "index": 10, "key": "lev3_hp",            "display": "Level 3 HP Bonus",     "type": "int",   "unit": "HP",         "range_hint": [0, 999],  "description": "Additional HP granted upon reaching power level 3." },
+        { "index": 11, "key": "lev4_obs",           "display": "Level 4 Obstacle Goal","type": "int",   "unit": "count",      "range_hint": [0, 9999], "description": "Obstacles/tasks needed to reach power level 4." },
+        { "index": 12, "key": "lev4_hp",            "display": "Level 4 HP Bonus",     "type": "int",   "unit": "HP",         "range_hint": [0, 999],  "description": "Additional HP granted upon reaching power level 4." },
+        { "index": 13, "key": "fall_height_1",      "display": "Fall Height Tier 1",   "type": "float", "unit": "units",      "range_hint": [0, 1000], "description": "Minimum fall distance to trigger tier-1 fall damage." },
+        { "index": 14, "key": "fall_damage_1",      "display": "Fall Damage Tier 1",   "type": "float", "unit": "HP",         "range_hint": [0, 999],  "description": "HP lost on a tier-1 fall." },
+        { "index": 15, "key": "fall_height_2",      "display": "Fall Height Tier 2",   "type": "float", "unit": "units",      "range_hint": [0, 1000], "description": "Minimum fall distance to trigger tier-2 fall damage." },
+        { "index": 16, "key": "fall_damage_2",      "display": "Fall Damage Tier 2",   "type": "float", "unit": "HP",         "range_hint": [0, 999],  "description": "HP lost on a tier-2 fall." },
+        { "index": 17, "key": "fall_height_3",      "display": "Fall Height Tier 3",   "type": "float", "unit": "units",      "range_hint": [0, 1000], "description": "Minimum fall distance to trigger tier-3 fall damage." },
+        { "index": 18, "key": "fall_damage_3",      "display": "Fall Damage Tier 3",   "type": "float", "unit": "HP",         "range_hint": [0, 999],  "description": "HP lost on a tier-3 fall." },
+        { "index": 19, "key": "fall_height_4",      "display": "Fall Height Tier 4",   "type": "float", "unit": "units",      "range_hint": [0, 2000], "description": "Minimum fall distance considered a lethal/maximum fall." },
+        { "index": 20, "key": "fall_min_velocity",  "display": "Fall Min Velocity",    "type": "float", "unit": "units/s",    "range_hint": [0, 200],  "description": "Minimum downward velocity before fall damage can apply." }
+      ]
+    },
+
+    "attacks_anims": {
+      "description": "Player and enemy attack animation definitions with timing, damage, and fuel multipliers.",
+      "file_offset": "0x006000",
+      "virtual_size": "0x1C79",
+      "record_base_offset": "0x006000",
+      "properties": [
+        { "key": "Damage multiplier", "display": "Damage Multiplier", "type": "float", "unit": "multiplier", "range_hint": [0, 10],  "description": "Scales base damage for this attack (1.0 = normal)." },
+        { "key": "Fuel multiplier",   "display": "Fuel Multiplier",   "type": "float", "unit": "multiplier", "range_hint": [0, 5],   "description": "Scales elemental fuel consumed by this attack." },
+        { "key": "Rate",              "display": "Animation Rate",    "type": "float", "unit": "multiplier", "range_hint": [0.1, 5], "description": "Playback rate override for the attack animation." },
+        { "key": "Anim start",        "display": "Anim Start Frame",  "type": "float", "unit": "norm_time",  "range_hint": [0, 1],   "description": "Normalised start time within the source animation." },
+        { "key": "Anim end",          "display": "Anim End Frame",    "type": "float", "unit": "norm_time",  "range_hint": [0, 1],   "description": "Normalised end time within the source animation." },
+        { "key": "Move start",        "display": "Move Start Frame",  "type": "float", "unit": "norm_time",  "range_hint": [0, 1],   "description": "Normalised time at which root-motion begins." },
+        { "key": "Move end1",         "display": "Move End 1 Frame",  "type": "float", "unit": "norm_time",  "range_hint": [0, 1],   "description": "Primary root-motion end frame." },
+        { "key": "Move end2",         "display": "Move End 2 Frame",  "type": "float", "unit": "norm_time",  "range_hint": [0, 1],   "description": "Secondary root-motion end frame." },
+        { "key": "Aim angle",         "display": "Aim Angle",         "type": "float", "unit": "degrees",    "range_hint": [-180, 180],"description": "Horizontal aim direction for this attack in degrees." }
+      ]
+    },
+
+    "armor_properties": {
+      "description": "Armor type definitions: tiers, elemental affinities, protection multipliers.",
+      "file_offset": "0x004000",
+      "virtual_size": "0x1447",
+      "record_base_offset": "0x004000",
+      "armor_types": [
+        "no_armor_1", "earth_armor_1", "earth_armor_2", "earth_armor_3",
+        "ice_armor_1", "ice_armor_2", "ice_armor_3",
+        "light_armor_1", "light_armor_2", "light_armor_3",
+        "force_field_1", "force_field_2", "force_field_3",
+        "air_shield_1", "air_shield_2", "air_shield_3",
+        "electro_shield_1", "electro_shield_2", "electro_shield_3"
+      ],
+      "properties": [
+        { "key": "Level",                "display": "Armor Level",              "type": "int",   "unit": "tier",   "range_hint": [0, 10], "description": "Power tier of this armor set." },
+        { "key": "Strong vs",            "display": "Strong vs Damage Type",   "type": "string","unit": "",       "description": "Damage type this armor resists strongly." },
+        { "key": "Weak vs",              "display": "Weak vs Damage Type",     "type": "string","unit": "",       "description": "Damage type this armor is vulnerable to." },
+        { "key": "Strong protection",    "display": "Strong Protection Mult",  "type": "float", "unit": "mult",   "range_hint": [0, 1],  "description": "Damage fraction taken from strongly-resisted hits (0=immune)." },
+        { "key": "Normal protection",    "display": "Normal Protection Mult",  "type": "float", "unit": "mult",   "range_hint": [0, 1],  "description": "Damage fraction taken from neutral hits." },
+        { "key": "Strong protection hp", "display": "Strong Prot HP Modifier", "type": "float", "unit": "mult",   "range_hint": [0, 5],  "description": "HP multiplier applied when strong protection activates." },
+        { "key": "Normal protection hp", "display": "Normal Prot HP Modifier", "type": "float", "unit": "mult",   "range_hint": [0, 5],  "description": "HP multiplier applied for neutral-hit protection." },
+        { "key": "Cost",                 "display": "Purchase Cost",            "type": "int",   "unit": "gold",   "range_hint": [0, 9999],"description": "In-game gem/gold cost to purchase this armor." },
+        { "key": "Flaps",                "display": "Has Flaps",                "type": "int",   "unit": "bool",   "range_hint": [0, 1],  "description": "1 = armor has animated wing/cape flaps." }
+      ]
+    },
+
+    "damage": {
+      "description": "Global damage type definitions: base damage values, freeze durations, fuel costs.",
+      "file_offset": "0x086000",
+      "virtual_size": "0x2A44",
+      "record_base_offset": "0x086000",
+      "damage_types": [
+        "norm_1","norm_2","norm_3","norm_4","kill",
+        "water_1","water_2","water_3",
+        "fire_1","fire_2","fire_3",
+        "wind_1","wind_2","wind_3","wind_4",
+        "acid_1","acid_2","acid_3",
+        "steam_1","steam_2","steam_3",
+        "lightning_1","lightning_2","lightning_3",
+        "smash_1","smash_2","smash_3",
+        "ice_1","ice_2","ice_3",
+        "elemental_1","elemental_2","elemental_3",
+        "lava_1","lava_2","lava_3",
+        "shield_lightning_1","shield_lightning_2","shield_lightning_3",
+        "fire_shard","rock_shard","blaze","fire_elemental","shadow",
+        "bot_1","bot_2","sleeth","lord","golem","lord_golem",
+        "catalisk","catalisk_baby","tesla","fire_wall","barnacle","drown"
+      ],
+      "properties": [
+        { "key": "Level",  "display": "Damage Level",   "type": "int",   "unit": "tier",    "range_hint": [1, 3],    "description": "Tier/power level of this damage type." },
+        { "key": "Damage", "display": "Base Damage",    "type": "float", "unit": "HP",      "range_hint": [0, 9999], "description": "Base HP damage dealt per hit." },
+        { "key": "Delay",  "display": "Damage Delay",   "type": "float", "unit": "seconds", "range_hint": [0, 5],    "description": "Time delay before damage is applied after hit detection." },
+        { "key": "Cost",   "display": "Fuel Cost",      "type": "float", "unit": "fuel",    "range_hint": [0, 100],  "description": "Elemental fuel cost to execute this attack." },
+        { "key": "Freeze", "display": "Freeze Duration","type": "float", "unit": "seconds", "range_hint": [0, 30],   "description": "Duration of freeze effect applied to the target." }
+      ]
+    },
+
+    "magic": {
+      "description": "Magic ability definitions: elemental staffs, shields, and special attacks.",
+      "file_offset": "0x087000",
+      "virtual_size": "0xDA1",
+      "record_base_offset": "0x087000",
+      "ability_types": [
+        "armor","elec","icar","erth","frce","lght","staff_litn","wind",
+        "smsh","EAFW_elem","ice","fire","acid","stem","watr","none/norm","skin"
+      ],
+      "properties": [
+        { "key": "Damage",    "display": "Magic Damage",   "type": "float", "unit": "HP",      "range_hint": [0, 9999], "description": "Base damage dealt by this magic ability." },
+        { "key": "Sequence",  "display": "Anim Sequence",  "type": "int",   "unit": "index",   "range_hint": [0, 99],   "description": "Index into animation sequence table." },
+        { "key": "Auto",      "display": "Auto-Activate",  "type": "int",   "unit": "bool",    "range_hint": [0, 1],    "description": "1 = ability triggers automatically without player input." }
+      ]
+    },
+
+    "critters_flocking": {
+      "description": "Boid/flocking behaviour for ambient wildlife groups.",
+      "file_offset": "0x05D000",
+      "virtual_size": "0x2F29",
+      "record_base_offset": "0x05D000",
+      "properties": [
+        { "key": "followPlayer",        "display": "Follow Player",       "type": "int",   "unit": "bool",       "range_hint": [0, 1],   "description": "1 = flock drifts toward the player position." },
+        { "key": "freezePlayer",        "display": "Freeze Player",       "type": "int",   "unit": "bool",       "range_hint": [0, 1],   "description": "1 = flock proximity slows the player." },
+        { "key": "minDistance",         "display": "Min Separation",      "type": "float", "unit": "units",      "range_hint": [0, 50],  "description": "Minimum inter-member separation (separation rule radius)." },
+        { "key": "maxDistance",         "display": "Max Cohesion Radius", "type": "float", "unit": "units",      "range_hint": [0, 500], "description": "Maximum cohesion radius; members outside will steer back." },
+        { "key": "localVelocityFactor", "display": "Velocity Match Factor","type": "float","unit": "multiplier", "range_hint": [0, 1],   "description": "How strongly neighbours' velocities are matched (alignment rule)." },
+        { "key": "scaleRangeMin",       "display": "Scale Min",           "type": "float", "unit": "scalar",     "range_hint": [0.1, 5], "description": "Minimum random scale applied to each flock member." },
+        { "key": "scaleRangeMax",       "display": "Scale Max",           "type": "float", "unit": "scalar",     "range_hint": [0.1, 5], "description": "Maximum random scale applied to each flock member." }
+      ]
+    }
+  },
+
+  "known_items": {
+    "description": "Collectible item IDs found in critters_item_data. These are valid values for drop1-5 fields.",
+    "items": [
+      { "id": "small_health",      "display": "Small Health Orb",     "category": "health" },
+      { "id": "large_health",      "display": "Large Health Orb",     "category": "health" },
+      { "id": "small_air_fuel",    "display": "Small Air Fuel",       "category": "fuel_air" },
+      { "id": "large_air_fuel",    "display": "Large Air Fuel",       "category": "fuel_air" },
+      { "id": "small_water_fuel",  "display": "Small Water Fuel",     "category": "fuel_water" },
+      { "id": "large_water_fuel",  "display": "Large Water Fuel",     "category": "fuel_water" },
+      { "id": "small_earth_fuel",  "display": "Small Earth Fuel",     "category": "fuel_earth" },
+      { "id": "large_earth_fuel",  "display": "Large Earth Fuel",     "category": "fuel_earth" },
+      { "id": "small_fire_fuel",   "display": "Small Fire Fuel",      "category": "fuel_fire" },
+      { "id": "large_fire_fuel",   "display": "Large Fire Fuel",      "category": "fuel_fire" },
+      { "id": "power_ammo",        "display": "Power Ammo",           "category": "powerup" },
+      { "id": "power_life",        "display": "Power Life",           "category": "powerup" },
+      { "id": "power_staff1",      "display": "Staff Power 1",        "category": "powerup" },
+      { "id": "power_staff2",      "display": "Staff Power 2",        "category": "powerup" },
+      { "id": "power_air",         "display": "Air Power",            "category": "powerup" },
+      { "id": "power_water",       "display": "Water Power",          "category": "powerup" },
+      { "id": "power_water_a3",    "display": "Water Power (A3)",     "category": "powerup" },
+      { "id": "power_earth",       "display": "Earth Power",          "category": "powerup" },
+      { "id": "power_fire",        "display": "Fire Power",           "category": "powerup" },
+      { "id": "key_battery",       "display": "Key: Battery",         "category": "key" },
+      { "id": "key_diamondbattery","display": "Key: Diamond Battery", "category": "key" },
+      { "id": "key_fuse",          "display": "Key: Fuse",            "category": "key" },
+      { "id": "key_circuitboard",  "display": "Key: Circuit Board",   "category": "key" },
+      { "id": "key_lens",          "display": "Key: Lens",            "category": "key" }
+    ]
+  },
+
+  "xbe_property_addresses": {
+    "description": "Addresses in default.xbe where property-name strings are stored. Useful for cross-referencing.",
+    "addresses": {
+      "walkSpeed":           "0x001981C8",
+      "walkAnimSpeed":       "0x001981B8",
+      "runSpeed":            "0x001981AC",
+      "runAnimSpeed":        "0x0019819C",
+      "attackRange":         "0x001981D4",
+      "drownTime":           "0x00198190",
+      "corpseWaitTime":      "0x00198180",
+      "corpseFadeTime":      "0x00198170",
+      "noFreeze":            "0x0019292D",
+      "hitsThroughWalls":    "0x00198200 (config section)",
+      "ouch2Threshold":      "0x00198200 (config section)",
+      "ouch3Threshold":      "0x00198200 (config section)",
+      "dropChance1":         "0x001980CC",
+      "dropCount1":          "0x00198090",
+      "config_critters_walking": "0x00198D14",
+      "config_critters_damage":  "0x00198048",
+      "config_critters_item_data":"0x00197F7C",
+      "initial_hp":          "0x00197B14",
+      "fall_damage_3":       "0x00194B08",
+      "fall_damage_2":       "0x00194B28",
+      "fall_damage_1":       "0x00194B48",
+      "fall_min_velocity":   "0x00194B68",
+      "health_max":          "0x00196700",
+      "earth_fuel_max":      "0x00196688",
+      "air_fuel_max":        "0x00196678",
+      "fire_fuel_max":       "0x00196668",
+      "water_fuel_max":      "0x00196658"
+    }
+  }
+}
