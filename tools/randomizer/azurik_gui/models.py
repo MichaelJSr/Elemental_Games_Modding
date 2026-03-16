@@ -23,6 +23,7 @@ class RandomizerConfig:
     do_keys: bool = True
     do_gems: bool = True
     do_barriers: bool = True
+    do_connections: bool = False
     do_qol: bool = True
     output_path: Path | None = None
     item_pool: dict[str, int] | None = None
@@ -45,6 +46,8 @@ class RandomizerConfig:
             args.append("--no-gems")
         if not self.do_barriers:
             args.append("--no-barriers")
+        if not self.do_connections:
+            args.append("--no-connections")
         if not self.do_qol:
             args.append("--no-qol")
         if self.item_pool:

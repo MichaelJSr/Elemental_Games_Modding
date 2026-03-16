@@ -134,28 +134,36 @@ def load_registry() -> dict:
 
 
 def read_value(data: bytes, offset: int, type_flag: int):
-    if type_flag == 1:
-        return struct.unpack_from("<f", data, offset)[0]
-    elif type_flag == 2:
-        return struct.unpack_from("<I", data, offset)[0]
-    return struct.unpack_from("<f", data, offset)[0]
+    """Read a config value from config.xbr at the given offset.
+
+    Config values are stored as 8-byte IEEE 754 doubles (little-endian).
+    The offset should point to the start of the double (record_base + 4).
+    """
+    if type_flag == 2:
+        # Integer values are doubles that represent whole numbers
+        return int(struct.unpack_from("<d", data, offset)[0])
+    return struct.unpack_from("<d", data, offset)[0]
 
 
 def write_value(data: bytearray, offset: int, value, type_flag: int):
-    if type_flag == 1:
-        struct.pack_into("<f", data, offset, float(value))
-    elif type_flag == 2:
-        struct.pack_into("<I", data, offset, int(value))
+    """Write a config value to config.xbr at the given offset.
+
+    Writes an 8-byte IEEE 754 double (little-endian).
+    """
+    if type_flag == 2:
+        struct.pack_into("<d", data, offset, float(int(value)))
     else:
-        struct.pack_into("<f", data, offset, float(value))
+        struct.pack_into("<d", data, offset, float(value))
 
 
 def format_value(val, type_flag: int) -> str:
-    if type_flag == 1:
-        return f"{val:.4f}" if isinstance(val, float) else str(val)
-    elif type_flag == 2:
+    if type_flag == 2:
         return str(int(val)) if isinstance(val, (int, float)) else str(val)
-    return f"{val:.4f}" if isinstance(val, float) else str(val)
+    if isinstance(val, float):
+        if val == int(val):
+            return f"{val:.1f}"
+        return f"{val:.4f}"
+    return str(val)
 
 
 def resolve_prop(registry: dict, section: str, entity: str, prop: str) -> dict | None:
@@ -909,6 +917,155 @@ OBSIDIAN_ANIM_OFFSET = 0x0489C3
 OBSIDIAN_ANIM_ORIGINAL = bytes([0x8B, 0x86, 0xD8, 0x01, 0x00, 0x00])
 OBSIDIAN_ANIM_PATCH = bytes([0xEB, 0x1C, 0x90, 0x90, 0x90, 0x90])
 
+# Per-pickup fist pump animation: player state machine at 0x2B0F2
+# State 0x1E checks absorbed entity type (+0x148); if non-zero, plays animation 0x52
+# Patch the conditional JE to unconditional JMP to always skip the animation
+FIST_PUMP_OFFSET = 0x02B0F2
+FIST_PUMP_ORIGINAL = bytes([0x74, 0x0C])  # JE +12 (skip if zero)
+FIST_PUMP_PATCH = bytes([0xEB, 0x0C])     # JMP +12 (always skip)
+
+# Player character swap: replace "garret4" with another character model
+# At file offset 0x1976C8, "garret4\0d:\" = 12 bytes, can fit any name up to 11 chars
+PLAYER_CHAR_OFFSET = 0x1976C8
+PLAYER_CHAR_ORIGINAL = bytes([0x67,0x61,0x72,0x72,0x65,0x74,0x34,0x00,
+                               0x64,0x3a,0x5c,0x00])  # "garret4\0d:\\0"
+PLAYER_CHAR_MAX_LEN = 11  # max chars (12 bytes with null)
+
+# Obsidian lock threshold tables in town.xbr
+# Two identical tables of 10 entries (48 bytes each), threshold float at +0
+OBSIDIAN_LOCK_TABLE_A = 0x37DBDC4
+OBSIDIAN_LOCK_TABLE_B = 0x37DC0E4
+OBSIDIAN_LOCK_ENTRY_SIZE = 48
+OBSIDIAN_LOCK_COUNT = 10
+OBSIDIAN_LOCK_DEFAULTS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+
+# Town barrier item scale: items placed behind obsidian locks that aren't
+# native to town get scaled down so they don't protrude through the force field.
+# Scale is applied to the 3x3 rotation/scale matrix diagonal at name-56, name-36, name-20.
+# Items that are behind obsidian lock barriers in town
+TOWN_BARRIER_ITEMS = {
+    "power_life", "power_ammo", "power_staff1", "power_staff2",
+    "key_obsidian1", "key_obsidian2",
+}
+TOWN_BARRIER_SCALE = 0.5
+# Offsets of scale floats relative to the entity name offset
+SCALE_OFFSETS = [-56, -36, -20]
+
+
+# ---------------------------------------------------------------------------
+# Level connection randomization
+# ---------------------------------------------------------------------------
+
+# Level paths as they appear in XBR transition data
+LEVEL_PATHS = {
+    "town": "levels/town",          # 11 chars
+    "life": "levels/life",          # 11 chars
+    "a1": "levels/air/a1",          # 13 chars
+    "a3": "levels/air/a3",          # 13 chars
+    "a5": "levels/air/a5",          # 13 chars
+    "a6": "levels/air/a6",          # 13 chars
+    "f1": "levels/fire/f1",         # 14 chars
+    "f2": "levels/fire/f2",         # 14 chars
+    "f3": "levels/fire/f3",         # 14 chars
+    "f4": "levels/fire/f4",         # 14 chars
+    "f6": "levels/fire/f6",         # 14 chars
+    "w1": "levels/water/w1",        # 15 chars
+    "w2": "levels/water/w2",        # 15 chars
+    "w3": "levels/water/w3",        # 15 chars
+    "w4": "levels/water/w4",        # 15 chars
+    "e2": "levels/earth/e2",        # 15 chars
+    "e5": "levels/earth/e5",        # 15 chars
+    "e6": "levels/earth/e6",        # 15 chars
+    "e7": "levels/earth/e7",        # 15 chars
+    "d1": "levels/death/d1",        # 15 chars
+    "d2": "levels/death/d2",        # 15 chars
+    "airship": "levels/air/airship", # 18 chars
+}
+
+# Valid destination levels for randomization (exclude cut levels)
+VALID_DEST_LEVELS = set(LEVEL_PATHS.keys()) - {"airship"}  # airship is one-way, special
+
+# Transitions to exclude from randomization
+EXCLUDE_TRANSITIONS = {
+    ("f1", "f7"),     # cut level
+    ("e2", "e2"),     # self-reference (bink movie)
+}
+
+
+def _find_level_transitions(data: bytes, level_name: str) -> list[dict]:
+    """Scan a level's XBR data for all levelSwitch transition entries.
+
+    Returns list of dicts with:
+      offset: file offset of destination path string
+      dest_path: full path string (e.g. "levels/water/w1")
+      dest_level: short name (e.g. "w1")
+      path_len: length of path string (not including null)
+      spot: start spot name in destination level
+      spot_offset: file offset of spot string (0 if no spot)
+      movie: movie/bink path before the transition (empty if none)
+    """
+    valid_levels = set(LEVEL_PATHS.keys()) | {"f7"}  # include f7 for detection
+    transitions = []
+    pos = 0
+    search = b"levels/"
+
+    while True:
+        pos = data.find(search, pos)
+        if pos == -1:
+            break
+
+        end = data.find(b"\x00", pos)
+        dest_path = data[pos:end].decode("ascii", errors="replace")
+        dest_level = dest_path.split("/")[-1]
+
+        # Skip non-level destinations (fx_, etc.)
+        if dest_level not in valid_levels:
+            pos += 1
+            continue
+
+        # Read start spot: next non-null string after path
+        spot_start = end + 1
+        while spot_start < len(data) and data[spot_start] == 0:
+            spot_start += 1
+        spot_end = data.find(b"\x00", spot_start)
+        spot = ""
+        if spot_end > spot_start and spot_end - spot_start < 40:
+            candidate = data[spot_start:spot_end]
+            if all(32 <= b < 127 for b in candidate):
+                spot = candidate.decode("ascii")
+
+        # Check for movie/bink path immediately before
+        movie = ""
+        pre = pos - 1
+        while pre > 0 and data[pre] == 0:
+            pre -= 1
+        if pre > 0:
+            ps = pre
+            while ps > 0 and data[ps - 1] != 0:
+                ps -= 1
+            pre_str = data[ps:pre + 1].decode("ascii", errors="replace")
+            if pre_str.startswith("bink:") or pre_str.startswith("movies/"):
+                movie = pre_str
+
+        # Skip self-references at file end (index entries, not transitions)
+        if dest_level == level_name and not spot and pos > len(data) - 2000:
+            pos += 1
+            continue
+
+        transitions.append({
+            "offset": pos,
+            "dest_path": dest_path,
+            "dest_level": dest_level,
+            "path_len": len(dest_path),
+            "spot": spot,
+            "spot_offset": spot_start if spot else 0,
+            "movie": movie,
+            "level": level_name,
+        })
+        pos += 1
+
+    return transitions
+
 
 def _power_element(name: str) -> str | None:
     """Extract the element type from a power-up entity name.
@@ -1235,7 +1392,18 @@ def cmd_randomize(args):
 
 
 DIRECT_SEARCH_NAMES = [
+    # Powers (some lack 1.0f marker or have non-zero w in coords)
+    b"power_water", b"power_water_a3",
+    b"power_air", b"power_earth", b"power_fire",
     b"power_staff1", b"power_staff2", b"power_life", b"power_ammo",
+    # Fragments
+    b"frag_air_1", b"frag_air_2", b"frag_air_3",
+    b"frag_water_1", b"frag_water_2", b"frag_water_3",
+    b"frag_fire_1", b"frag_fire_2", b"frag_fire_3",
+    b"frag_earth_1", b"frag_earth_2", b"frag_earth_3",
+    b"frag_life_1", b"frag_life_2", b"frag_life_3",
+    b"frag_water_4", b"frag_fire_4", b"frag_earth_4", b"frag_life_4",
+    # Keys
     b"key_air1", b"key_air2", b"key_air3",
     b"key_fire1", b"key_fire2", b"key_fire3",
     b"key_water1", b"key_water2",
@@ -1383,7 +1551,9 @@ def cmd_randomize_full(args):
     do_barriers = not args.no_barriers
     hard_barriers = getattr(args, 'hard_barriers', False)
     do_qol = not args.no_qol
+    do_connections = not getattr(args, 'no_connections', False)
     force_unsolvable = getattr(args, 'force', False)
+    obsidian_cost = getattr(args, 'obsidian_cost', None)
 
     # Parse custom item pool if provided
     custom_pool = None
@@ -1403,6 +1573,7 @@ def cmd_randomize_full(args):
 
     categories = [t for t, f in [("major items", do_major), ("keys", do_keys),
                                   ("gems", do_gems), ("barriers", do_barriers),
+                                  ("connections", do_connections),
                                   ("QoL patches", do_qol)] if f]
     print(f"Azurik Full Randomizer")
     print(f"  Seed: {seed}")
@@ -1414,7 +1585,7 @@ def cmd_randomize_full(args):
         extract_dir = Path(tmpdir) / "game"
 
         # Step 1: Extract
-        print(f"\n[1/6] Extracting {iso_path.name}...")
+        print(f"\n[1/7] Extracting {iso_path.name}...")
         run_xdvdfs(xdvdfs, ["unpack", str(iso_path), str(extract_dir)])
 
         if not (extract_dir / "default.xbe").exists():
@@ -1440,7 +1611,7 @@ def cmd_randomize_full(args):
         # Step 2: Major items (fragments + powers + town powers)
         # Uses solver forward-fill to guarantee completability.
         if do_major:
-            print(f"\n[2/6] Randomizing major items (forward-fill)...")
+            print(f"\n[2/7] Randomizing major items (forward-fill)...")
             major_rng = random.Random(master_rng.randint(0, 2**31))
 
             # Collect all major item slots from binary scan
@@ -1570,16 +1741,27 @@ def cmd_randomize_full(args):
                     _write_name(data, item["name_offset"], new_name, item["field_size"])
                     if changed:
                         _rename_all_refs(data, old_name, new_name, item["name_offset"])
+                        # Scale down non-native items placed behind town barriers
+                        if (item["level"] == "town"
+                                and new_name not in TOWN_BARRIER_ITEMS
+                                and old_name in TOWN_BARRIER_ITEMS):
+                            name_off = item["name_offset"]
+                            # Verify the scale offsets contain 1.0f before patching
+                            if all(data[name_off + so : name_off + so + 4] == b"\x00\x00\x80\x3f"
+                                   for so in SCALE_OFFSETS):
+                                for so in SCALE_OFFSETS:
+                                    struct.pack_into("<f", data, name_off + so, TOWN_BARRIER_SCALE)
+                                print(f"      (scaled to {TOWN_BARRIER_SCALE}x for barrier fit)")
 
                 print(f"  Major items: {changes}/{len(rename_ops)} changed across {len(levels_touched)} levels")
             else:
                 print(f"  Only {len(major_items)} major items found, skipping")
         else:
-            print(f"\n[2/6] Major items — skipped")
+            print(f"\n[2/7] Major items — skipped")
 
         # Step 3: Keys (within-realm shuffle)
         if do_keys:
-            print(f"\n[3/6] Randomizing keys (within realm)...")
+            print(f"\n[3/7] Randomizing keys (within realm)...")
             key_rng = random.Random(master_rng.randint(0, 2**31))
             total_key_changes = 0
 
@@ -1618,11 +1800,11 @@ def cmd_randomize_full(args):
 
             print(f"  Total key changes: {total_key_changes}")
         else:
-            print(f"\n[3/6] Keys — skipped")
+            print(f"\n[3/7] Keys — skipped")
 
-        # Step 4: Gems (per-level shuffle, excluding obsidians)
+        # Step 4: Gems (per-level shuffle, including obsidians)
         if do_gems:
-            print(f"\n[4/6] Randomizing gems...")
+            print(f"\n[4/7] Randomizing gems...")
             gem_rng = random.Random(master_rng.randint(0, 2**31))
             total_gems = 0
             total_gem_changes = 0
@@ -1636,7 +1818,8 @@ def cmd_randomize_full(args):
                     print(f"  Custom gem weights: {gem_weights}")
 
             for level_name in sorted(all_entities.keys()):
-                gems = all_entities[level_name]["gems"]
+                # Combine regular gems + obsidians into one pool
+                gems = all_entities[level_name]["gems"] + all_entities[level_name]["obsidians"]
                 if len(gems) < 2:
                     continue
 
@@ -1668,11 +1851,11 @@ def cmd_randomize_full(args):
 
             print(f"  Total: {total_gems} gems, {total_gem_changes} changed")
         else:
-            print(f"\n[4/6] Gems — skipped")
+            print(f"\n[4/7] Gems — skipped")
 
         # Step 5: Barriers (randomize element vulnerability)
         if do_barriers:
-            print(f"\n[5/6] Randomizing barriers...")
+            print(f"\n[5/7] Randomizing barriers...")
             barrier_rng = random.Random(master_rng.randint(0, 2**31))
             barrier_changes = 0
             fourcc_pool = BARRIER_FOURCCS_HARD if hard_barriers else BARRIER_FOURCCS
@@ -1696,11 +1879,76 @@ def cmd_randomize_full(args):
 
             print(f"  Barriers: {barrier_changes} changed")
         else:
-            print(f"\n[5/6] Barriers — skipped")
+            print(f"\n[5/7] Barriers — skipped")
 
-        # Step 6: QoL XBE patches
+        # Step 6: Level connections (randomize exits between levels)
+        if do_connections:
+            print(f"\n[6/7] Randomizing level connections...")
+            conn_rng = random.Random(master_rng.randint(0, 2**31))
+
+            # Scan all loaded levels for transitions
+            all_transitions = []
+            for level_name, data in modified_levels.items():
+                transitions = _find_level_transitions(bytes(data), level_name)
+                for t in transitions:
+                    pair = (t["level"], t["dest_level"])
+                    if pair in EXCLUDE_TRANSITIONS:
+                        continue
+                    # Only include transitions to valid randomizable levels
+                    if t["dest_level"] in VALID_DEST_LEVELS:
+                        all_transitions.append(t)
+
+            # Group transitions by path length (can only swap within same length or shorter)
+            by_length: dict[int, list[dict]] = {}
+            for t in all_transitions:
+                by_length.setdefault(t["path_len"], []).append(t)
+
+            print(f"  Found {len(all_transitions)} transitions in {len(by_length)} length groups:")
+            for length in sorted(by_length.keys()):
+                group = by_length[length]
+                dests = [t["dest_level"] for t in group]
+                print(f"    {length} chars: {len(group)} exits -> {sorted(set(dests))}")
+
+            # Shuffle destinations within each length group
+            conn_changes = 0
+            for length, group in by_length.items():
+                # Collect the destination paths and shuffle them
+                dest_paths = [t["dest_path"] for t in group]
+                shuffled = list(dest_paths)
+                conn_rng.shuffle(shuffled)
+
+                for t, new_dest_path in zip(group, shuffled):
+                    data = modified_levels[t["level"]]
+                    old_dest = t["dest_path"]
+                    changed = old_dest != new_dest_path
+
+                    if changed:
+                        conn_changes += 1
+
+                    # Write the new destination path (null-pad if shorter)
+                    new_bytes = new_dest_path.encode("ascii")
+                    old_len = len(old_dest)
+                    padded = new_bytes + b"\x00" * (old_len - len(new_bytes) + 1)
+                    data[t["offset"]:t["offset"] + len(padded)] = padded
+
+                    # Clear the start spot name (set to empty string)
+                    # This makes the player spawn at the level's default origin
+                    # which is safer than leaving a mismatched spot name
+                    if changed and t["spot_offset"]:
+                        spot_len = len(t["spot"])
+                        data[t["spot_offset"]:t["spot_offset"] + spot_len] = b"\x00" * spot_len
+
+                    new_level = new_dest_path.split("/")[-1]
+                    marker = "~" if changed else "="
+                    print(f"    {marker} {t['level']:>5} -> {t['dest_level']:>8} now -> {new_level:<8}")
+
+            print(f"  Connections: {conn_changes}/{len(all_transitions)} changed")
+        else:
+            print(f"\n[6/7] Level connections — skipped")
+
+        # Step 7: QoL XBE patches
         if do_qol:
-            print(f"\n[6/6] Applying QoL patches to default.xbe...")
+            print(f"\n[7/7] Applying QoL patches to default.xbe...")
             xbe_path = extract_dir / "default.xbe"
             xbe_data = bytearray(xbe_path.read_bytes())
 
@@ -1715,14 +1963,118 @@ def cmd_randomize_full(args):
                 current = bytes(xbe_data[OBSIDIAN_ANIM_OFFSET:OBSIDIAN_ANIM_OFFSET + 6])
                 if current == OBSIDIAN_ANIM_ORIGINAL:
                     xbe_data[OBSIDIAN_ANIM_OFFSET:OBSIDIAN_ANIM_OFFSET + 6] = OBSIDIAN_ANIM_PATCH
-                    print(f"  Disabled obsidian pickup animation + voice line")
+                    print(f"  Disabled obsidian first-pickup notification")
                 else:
                     print(f"  WARNING: XBE bytes at 0x{OBSIDIAN_ANIM_OFFSET:X} don't match expected "
                           f"(got {current.hex()}, expected {OBSIDIAN_ANIM_ORIGINAL.hex()})")
 
+            # Disable per-pickup fist pump animation
+            if FIST_PUMP_OFFSET + 2 <= len(xbe_data):
+                current = bytes(xbe_data[FIST_PUMP_OFFSET:FIST_PUMP_OFFSET + 2])
+                if current == FIST_PUMP_ORIGINAL:
+                    xbe_data[FIST_PUMP_OFFSET:FIST_PUMP_OFFSET + 2] = FIST_PUMP_PATCH
+                    print(f"  Disabled per-pickup fist pump animation")
+                else:
+                    print(f"  WARNING: XBE bytes at 0x{FIST_PUMP_OFFSET:X} don't match expected "
+                          f"(got {current.hex()}, expected {FIST_PUMP_ORIGINAL.hex()})")
+
+            # Player character swap (experimental)
+            player_char = getattr(args, 'player_character', None)
+            if player_char:
+                if len(player_char) > PLAYER_CHAR_MAX_LEN:
+                    print(f"  WARNING: Player character name '{player_char}' too long "
+                          f"(max {PLAYER_CHAR_MAX_LEN} chars), skipping")
+                elif PLAYER_CHAR_OFFSET + 12 <= len(xbe_data):
+                    current = bytes(xbe_data[PLAYER_CHAR_OFFSET:PLAYER_CHAR_OFFSET + 12])
+                    if current == PLAYER_CHAR_ORIGINAL:
+                        new_bytes = player_char.encode("ascii") + b"\x00"
+                        new_bytes = new_bytes + b"\x00" * (12 - len(new_bytes))
+                        xbe_data[PLAYER_CHAR_OFFSET:PLAYER_CHAR_OFFSET + 12] = new_bytes
+                        print(f"  Player character: garret4 -> {player_char} (EXPERIMENTAL)")
+                    else:
+                        print(f"  WARNING: Player char bytes don't match expected, skipping")
+
             xbe_path.write_bytes(xbe_data)
         else:
-            print(f"\n[6/6] QoL patches — skipped")
+            print(f"\n[7/7] QoL patches — skipped")
+
+        # Config.xbr patches (from --config-mod)
+        config_mod_arg = getattr(args, 'config_mod', None)
+        if config_mod_arg:
+            config_xbr = extract_dir / CONFIG_XBR_REL
+            if config_xbr.exists():
+                print(f"\n  Applying config patches...")
+                registry = load_registry()
+                # Load the mod JSON (file path or inline JSON)
+                try:
+                    mod_path = Path(config_mod_arg)
+                    if mod_path.exists():
+                        mod = load_mod(str(mod_path))
+                    else:
+                        mod = json.loads(config_mod_arg)
+                except Exception as e:
+                    print(f"  WARNING: Could not parse --config-mod: {e}")
+                    mod = None
+
+                if mod:
+                    config_data = bytearray(config_xbr.read_bytes())
+                    applied = 0
+
+                    # Variant-record patches (via config_registry)
+                    patches = flatten_mod(mod, registry)
+                    for p in patches:
+                        prop = resolve_prop(registry, p["section"], p["entity"], p["property"])
+                        if not prop:
+                            continue
+                        offset = int(prop["value_file_offset"], 16)
+                        tf = prop.get("type_flag", 0)
+                        if offset + 8 > len(config_data):
+                            continue
+                        write_value(config_data, offset, p["value"], tf)
+                        applied += 1
+
+                    # Keyed-table patches (direct cell offset doubles)
+                    keyed = mod.get("_keyed_patches", {})
+                    if keyed:
+                        # Import keyed table parser
+                        parser_path = SCRIPT_DIR / "claude_output" / "keyed_table_parser.py"
+                        if parser_path.exists():
+                            import importlib.util
+                            spec = importlib.util.spec_from_file_location(
+                                "keyed_table_parser", str(parser_path))
+                            ktp = importlib.util.module_from_spec(spec)
+                            spec.loader.exec_module(ktp)
+                            tables = ktp.load_all_tables(str(config_xbr))
+                            for section_key, entities in keyed.items():
+                                if section_key not in tables:
+                                    print(f"    WARNING: keyed section '{section_key}' not found")
+                                    continue
+                                table = tables[section_key]
+                                for entity_name, props in entities.items():
+                                    for prop_name, value in props.items():
+                                        cell = table.get_value(entity_name, prop_name)
+                                        if cell and cell[0] == "double":
+                                            cell_off = cell[2]
+                                            # Write double at cell_offset + 8
+                                            struct.pack_into("<d", config_data,
+                                                             cell_off + 8, float(value))
+                                            applied += 1
+
+                    config_xbr.write_bytes(config_data)
+                    print(f"  Config patches: {applied} applied")
+
+        # Obsidian lock thresholds (patched in town.xbr)
+        if obsidian_cost is not None and "town" in modified_levels:
+            print(f"\n  Patching obsidian lock thresholds (cost={obsidian_cost} per lock)...")
+            town_data = modified_levels["town"]
+            thresholds = [obsidian_cost * (i + 1) for i in range(OBSIDIAN_LOCK_COUNT)]
+            for table_base in [OBSIDIAN_LOCK_TABLE_A, OBSIDIAN_LOCK_TABLE_B]:
+                for i, thresh in enumerate(thresholds):
+                    off = table_base + i * OBSIDIAN_LOCK_ENTRY_SIZE
+                    if off + 4 <= len(town_data):
+                        old_val = struct.unpack_from("<f", town_data, off)[0]
+                        struct.pack_into("<f", town_data, off, float(thresh))
+            print(f"  Thresholds: {thresholds}")
 
         # Write all modified level files back
         for level_name, data in modified_levels.items():
@@ -1859,14 +2211,24 @@ def main():
                          help="Skip barrier randomization")
     p_full.add_argument("--hard-barriers", action="store_true",
                          help="Include multi-element combo fourccs (stem/acid/ice/litn) in barrier pool")
+    p_full.add_argument("--no-connections", action="store_true",
+                         help="Skip level connection randomization")
     p_full.add_argument("--no-qol", action="store_true",
                          help="Skip QoL patches (gem popups, obsidian animation)")
+    p_full.add_argument("--obsidian-cost", type=int, metavar="N",
+                         help="Obsidian cost per temple lock (default: 10 = locks at 10,20,...100)")
     p_full.add_argument("--item-pool",
                          help='Custom item pool as JSON (inline or file path). '
                               'Format: {"power_water": 5, "frag_air_1": 2, ...}. '
                               'Overrides the default item counts for the solver.')
     p_full.add_argument("--force", action="store_true",
                          help="Build the ISO even if no solvable placement is found")
+    p_full.add_argument("--player-character",
+                         help="Replace player model (e.g. evil_noreht, overlord, flicken). "
+                              "EXPERIMENTAL: animations may break. Max 11 chars.")
+    p_full.add_argument("--config-mod",
+                         help="Config mod JSON to apply (file path or inline JSON). "
+                              "Patches config.xbr values (entity stats, damage, etc.)")
 
     args = parser.parse_args()
     if not args.command:

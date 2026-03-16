@@ -48,7 +48,7 @@ class AzurikApp:
 
         self.notebook.add(self.tab_randomizer, text="Randomizer")
         self.notebook.add(self.tab_qol, text="QoL")
-        self.notebook.add(self.tab_entity, text="Entity Browser")
+        self.notebook.add(self.tab_entity, text="Entity Editor")
         self.notebook.add(self.tab_config, text="Config Editor")
 
         # Auto-detect base ISO in iso/ folder

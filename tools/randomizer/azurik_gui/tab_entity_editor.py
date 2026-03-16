@@ -1,107 +1,49 @@
-"""Entity Editor tab — browse and (future) edit entities across levels."""
+"""Entity Editor tab — browse, edit, and randomize critter/player/damage config values."""
 
 from __future__ import annotations
 
+import json
+import random
+import struct
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox, filedialog
+from pathlib import Path
 
 from . import backend
 
+# Sections available for editing, organized by user-facing category.
+# format: "keyed" (uses keyed_table_parser) or "variant" (uses config_registry.json)
+EDITABLE_SECTIONS = [
+    # Keyed sections (8,466+ patchable values)
+    ("attacks_transitions", "Entity Stats (speed, range, HP)", "keyed"),
+    ("critters_critter_data", "Entity Damage Multipliers", "keyed"),
+    ("critters_walking_dmg", "Damage Types (player attacks)", "keyed"),
+    ("magic", "Player Global Settings", "keyed_flat"),
+    ("armor_properties_real", "Armor Properties", "keyed"),
+    # Variant-record sections (corrected to doubles)
+    ("critters_walking", "Critters — Movement & AI", "variant"),
+    ("critters_flocking", "Critters — Flocking", "variant"),
+    ("damage", "Enemy Damage Overrides", "variant"),
+]
 
-CATEGORY_DISPLAY = {
-    "fragments": "Disk Fragments",
-    "keys": "Keys",
-    "gems": "Gems",
-    "powers": "Powers",
-    "fuel": "Fuel",
+# Entities to flag as "not gameplay relevant" in critters_walking
+NON_GAMEPLAY_ENTITIES = {
+    "garret4", "movies", "debug", "test", "good_noreht", "evil_noreht",
+    "bird", "fish_big", "fish_little1", "fish_little2", "firefly",
 }
-
-
-def _flatten_pickups(data: dict, category: str) -> list[dict]:
-    """Flatten the nested all_pickups.json structure into a list of row dicts."""
-    section = data.get(category, {})
-    rows = []
-
-    if category == "fragments":
-        # element -> entity_name -> {level, region, position, ...}
-        for element, entities in section.items():
-            if element.startswith("_"):
-                continue
-            if not isinstance(entities, dict):
-                continue
-            for entity_name, info in entities.items():
-                if not isinstance(info, dict):
-                    continue
-                pos = info.get("position") or [None, None, None]
-                rows.append({
-                    "entity": entity_name,
-                    "level": info.get("level", ""),
-                    "region": info.get("region", element),
-                    "x": pos[0] if isinstance(pos, list) and len(pos) > 0 else "",
-                    "y": pos[1] if isinstance(pos, list) and len(pos) > 1 else "",
-                    "z": pos[2] if isinstance(pos, list) and len(pos) > 2 else "",
-                    "notes": info.get("notes", ""),
-                })
-
-    elif category == "gems":
-        # level -> {region, gem_count, entities: {instance_id -> {type, position, ...}}}
-        for level, level_data in section.items():
-            if level.startswith("_"):
-                continue
-            if not isinstance(level_data, dict):
-                continue
-            region = level_data.get("region", "")
-            entities = level_data.get("entities", {})
-            for instance_id, info in entities.items():
-                if not isinstance(info, dict):
-                    continue
-                pos = info.get("position") or [None, None, None]
-                rows.append({
-                    "entity": instance_id,
-                    "level": level,
-                    "region": region,
-                    "x": pos[0] if isinstance(pos, list) and len(pos) > 0 else "",
-                    "y": pos[1] if isinstance(pos, list) and len(pos) > 1 else "",
-                    "z": pos[2] if isinstance(pos, list) and len(pos) > 2 else "",
-                    "notes": info.get("type", "") + (" " + info.get("variant", "")).rstrip(),
-                })
-
-    elif category in ("keys", "powers", "fuel"):
-        # level -> entity_name -> {position, category/element, notes, ...}
-        for level, level_data in section.items():
-            if level.startswith("_"):
-                continue
-            if not isinstance(level_data, dict):
-                continue
-            for entity_name, info in level_data.items():
-                if not isinstance(info, dict):
-                    continue
-                pos = info.get("position") or [None, None, None]
-                note_parts = []
-                if info.get("category"):
-                    note_parts.append(info["category"])
-                if info.get("element"):
-                    note_parts.append(info["element"])
-                if info.get("notes"):
-                    note_parts.append(info["notes"])
-                rows.append({
-                    "entity": entity_name,
-                    "level": level,
-                    "region": info.get("region", ""),
-                    "x": pos[0] if isinstance(pos, list) and len(pos) > 0 else "",
-                    "y": pos[1] if isinstance(pos, list) and len(pos) > 1 else "",
-                    "z": pos[2] if isinstance(pos, list) and len(pos) > 2 else "",
-                    "notes": " / ".join(note_parts),
-                })
-
-    return rows
 
 
 class EntityEditorTab(ttk.Frame):
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
-        self._pickups = None
+        self._registry = None
+        self._schema = None
+        self._keyed_tables = None
+        self._config_xbr_path = None
+        self._edits: dict[str, dict[str, dict[str, float]]] = {}
+        self._value_widgets: dict[str, tk.Variable] = {}
+        self._default_values: dict[str, dict[str, dict[str, float]]] = {}
         self._build()
 
     def _build(self):
@@ -109,98 +51,643 @@ class EntityEditorTab(ttk.Frame):
         ctrl = ttk.Frame(self)
         ctrl.pack(fill=tk.X, padx=10, pady=(10, 5))
 
-        ttk.Label(ctrl, text="Category:").pack(side=tk.LEFT, padx=(0, 5))
-        self._cat_var = tk.StringVar(value="fragments")
-        cat_combo = ttk.Combobox(ctrl, textvariable=self._cat_var,
-                                 values=list(CATEGORY_DISPLAY.keys()),
-                                 state="readonly", width=15)
-        cat_combo.pack(side=tk.LEFT, padx=(0, 10))
-        cat_combo.bind("<<ComboboxSelected>>", lambda e: self._refresh())
+        ttk.Label(ctrl, text="Section:").pack(side=tk.LEFT, padx=(0, 5))
+        self._section_var = tk.StringVar()
+        self._section_combo = ttk.Combobox(
+            ctrl, textvariable=self._section_var,
+            values=[s[1] for s in EDITABLE_SECTIONS],
+            state="readonly", width=30)
+        self._section_combo.pack(side=tk.LEFT, padx=(0, 10))
+        self._section_combo.bind("<<ComboboxSelected>>", lambda e: self._on_section_change())
 
-        ttk.Label(ctrl, text="Filter:").pack(side=tk.LEFT, padx=(0, 5))
-        self._filter_var = tk.StringVar()
-        self._filter_var.trace_add("write", lambda *_: self._refresh())
-        ttk.Entry(ctrl, textvariable=self._filter_var, width=20).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Label(ctrl, text="Entity:").pack(side=tk.LEFT, padx=(0, 5))
+        self._entity_var = tk.StringVar()
+        self._entity_combo = ttk.Combobox(
+            ctrl, textvariable=self._entity_var,
+            values=[], state="readonly", width=20)
+        self._entity_combo.pack(side=tk.LEFT, padx=(0, 10))
+        self._entity_combo.bind("<<ComboboxSelected>>", lambda e: self._rebuild_property_grid())
 
-        ttk.Button(ctrl, text="Reload", command=self._load_data).pack(side=tk.LEFT)
+        # -- Button row --
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
 
-        # -- Treeview --
-        cols = ("level", "region", "entity", "x", "y", "z", "notes")
-        self._tree = ttk.Treeview(self, columns=cols, show="headings", height=18)
-        self._tree.heading("level", text="Level")
-        self._tree.heading("region", text="Region")
-        self._tree.heading("entity", text="Entity Name")
-        self._tree.heading("x", text="X")
-        self._tree.heading("y", text="Y")
-        self._tree.heading("z", text="Z")
-        self._tree.heading("notes", text="Notes")
+        ttk.Button(btn_frame, text="Load from ISO",
+                   command=self._load_from_iso).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(btn_frame, text="Export Mod JSON",
+                   command=self._export_mod).pack(side=tk.LEFT, padx=(0, 5))
+        self._edit_count_label = ttk.Label(btn_frame, text="")
+        self._edit_count_label.pack(side=tk.LEFT, padx=(10, 0))
 
-        self._tree.column("level", width=60, anchor=tk.CENTER)
-        self._tree.column("region", width=60, anchor=tk.CENTER)
-        self._tree.column("entity", width=160)
-        self._tree.column("x", width=80, anchor=tk.E)
-        self._tree.column("y", width=80, anchor=tk.E)
-        self._tree.column("z", width=80, anchor=tk.E)
-        self._tree.column("notes", width=150)
+        ttk.Button(btn_frame, text="Reset All Edits",
+                   command=self._reset_edits).pack(side=tk.RIGHT)
 
-        scrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL, command=self._tree.yview)
-        self._tree.config(yscrollcommand=scrollbar.set)
+        # -- Randomize controls --
+        rand_frame = ttk.LabelFrame(self, text="Randomize Stats")
+        rand_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
 
-        self._tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=5)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 10), pady=5)
+        rand_inner = ttk.Frame(rand_frame)
+        rand_inner.pack(fill=tk.X, padx=5, pady=4)
 
-        # -- Status bar --
-        self._status = ttk.Label(self, text="Click Reload to load pickup data")
+        ttk.Label(rand_inner, text="Range:").pack(side=tk.LEFT, padx=(0, 3))
+        self._rand_min_var = tk.IntVar(value=50)
+        ttk.Spinbox(rand_inner, from_=1, to=500, textvariable=self._rand_min_var,
+                     width=4).pack(side=tk.LEFT)
+        ttk.Label(rand_inner, text="% to").pack(side=tk.LEFT, padx=3)
+        self._rand_max_var = tk.IntVar(value=150)
+        ttk.Spinbox(rand_inner, from_=1, to=500, textvariable=self._rand_max_var,
+                     width=4).pack(side=tk.LEFT)
+        ttk.Label(rand_inner, text="% of default").pack(side=tk.LEFT, padx=(0, 10))
+
+        ttk.Button(rand_inner, text="Randomize This Entity",
+                   command=self._randomize_entity).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(rand_inner, text="Randomize All in Section",
+                   command=self._randomize_section).pack(side=tk.LEFT, padx=(0, 5))
+
+        # -- Property editor (scrollable) --
+        editor_frame = ttk.Frame(self)
+        editor_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+
+        canvas = tk.Canvas(editor_frame, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(editor_frame, orient=tk.VERTICAL,
+                                   command=canvas.yview)
+        self._prop_frame = ttk.Frame(canvas)
+
+        self._prop_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=self._prop_frame, anchor=tk.NW)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        def _on_mousewheel(event):
+            # Only scroll if content overflows the visible area
+            bbox = canvas.bbox("all")
+            if bbox and bbox[3] > canvas.winfo_height():
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel, add="+")
+        self._canvas = canvas
+
+        # -- Status --
+        self._status = ttk.Label(self, text="Select a section and entity, then Load from ISO")
         self._status.pack(fill=tk.X, padx=10, pady=(0, 10))
 
-        # Auto-load
-        self._load_data()
+        # Load data
+        self._load_registry()
+        if EDITABLE_SECTIONS:
+            self._section_combo.set(EDITABLE_SECTIONS[0][1])
+            self._on_section_change()
 
-    def _load_data(self):
-        self._pickups = backend.load_all_pickups()
-        if self._pickups:
-            self._status.config(text="Pickup data loaded")
-            self._refresh()
-        else:
-            self._status.config(text="No pickup data found (claude_output/all_pickups.json)")
+    def _load_registry(self):
+        reg_path = backend.SCRIPT_DIR / "claude_output" / "config_registry.json"
+        schema_path = backend.SCRIPT_DIR / "claude_output" / "property_schema.json"
+        try:
+            with open(reg_path) as f:
+                self._registry = json.load(f)
+        except Exception:
+            self._registry = None
+        try:
+            with open(schema_path) as f:
+                self._schema = json.load(f)
+        except Exception:
+            self._schema = None
 
-    def _refresh(self):
-        self._tree.delete(*self._tree.get_children())
-        if not self._pickups:
+    def _get_section_info(self) -> tuple[str, str, str]:
+        """Return (section_key, display_name, format_type) for current selection."""
+        display = self._section_var.get()
+        for key, disp, fmt in EDITABLE_SECTIONS:
+            if disp == display:
+                return key, disp, fmt
+        return "", "", ""
+
+    def _on_section_change(self):
+        section_key, _, fmt = self._get_section_info()
+        if not section_key:
             return
 
-        category = self._cat_var.get()
-        filter_text = self._filter_var.get().lower()
+        if fmt == "keyed_flat":
+            # Flat sections show all settings in one list, no entity dropdown
+            self._entity_combo.config(values=["(all settings)"])
+            self._entity_combo.set("(all settings)")
+            self._rebuild_property_grid()
+            return
 
-        rows = _flatten_pickups(self._pickups, category)
+        entities = []
+        if fmt == "keyed" and self._keyed_tables and section_key in self._keyed_tables:
+            table = self._keyed_tables[section_key]
+            entities = sorted(table.col_names)
+        elif fmt == "variant" and self._registry:
+            entities = sorted(
+                self._registry.get("sections", {}).get(section_key, {}).get("entities", {}).keys()
+            )
+
+        self._entity_combo.config(values=entities)
+        if entities:
+            self._entity_combo.set(entities[0])
+            self._rebuild_property_grid()
+        else:
+            self._status.config(text=f"No entities loaded — click 'Load from ISO' first")
+
+    def _build_flat_grid(self, section_key: str):
+        """Build a flat property list for sections like magic where each 'entity' is really a setting."""
+        if not self._keyed_tables or section_key not in self._keyed_tables:
+            self._status.config(text="No data — click 'Load from ISO' first")
+            return
+
+        table = self._keyed_tables[section_key]
+
+        # Headers
+        for col, (text, width) in enumerate([
+            ("Setting", 24), ("Default", 12), ("New Value", 10),
+        ]):
+            ttk.Label(self._prop_frame, text=text, font=("Segoe UI", 9, "bold"),
+                      width=width).grid(row=0, column=col, sticky=tk.W, padx=5, pady=2)
+
+        ttk.Separator(self._prop_frame, orient=tk.HORIZONTAL).grid(
+            row=1, column=0, columnspan=3, sticky=tk.EW, pady=2)
+
+        row = 2
         count = 0
-        for row in rows:
-            entity = row.get("entity", "")
-            level = row.get("level", "") or ""
-            region = row.get("region", "") or ""
-            x = row.get("x", "")
-            y = row.get("y", "")
-            z = row.get("z", "")
-            notes = row.get("notes", "")
+        # Each "entity" (column) in magic is a setting name with a "Value" property
+        for entity_name, col_idx in table.iter_entities():
+            # Get the Value cell for this entity
+            cell = table.get_value(entity_name, "Value")
+            if not cell:
+                # Try row index 1 directly
+                typ, val, addr = table.read_cell(col_idx, 1)
+            else:
+                typ, val, addr = cell
 
-            # Apply filter
-            if filter_text:
-                searchable = f"{entity} {level} {region} {notes}".lower()
-                if filter_text not in searchable:
-                    continue
+            if typ != "double":
+                continue
 
-            def fmt(v):
-                if v is None or v == "":
-                    return ""
-                if isinstance(v, (int, float)):
-                    return f"{v:.1f}"
-                return str(v)
-
-            self._tree.insert("", tk.END, values=(
-                str(level), str(region), str(entity),
-                fmt(x), fmt(y), fmt(z), str(notes),
-            ))
+            default_str = f"{val:.4g}" if val != int(val) or abs(val) > 1e6 else f"{val:.1f}"
             count += 1
 
-        display_name = CATEGORY_DISPLAY.get(category, category)
-        self._status.config(text=f"{display_name}: {count} items")
+            # Cache default
+            self._default_values.setdefault(section_key, {}).setdefault(
+                entity_name, {})["Value"] = val
+
+            # Pending edit
+            edit_val = self._edits.get(section_key, {}).get(entity_name, {}).get("Value")
+
+            ttk.Label(self._prop_frame, text=entity_name, width=24).grid(
+                row=row, column=0, sticky=tk.W, padx=5, pady=1)
+
+            ttk.Label(self._prop_frame, text=default_str, width=12,
+                      anchor=tk.E).grid(row=row, column=1, padx=5, pady=1)
+
+            var = tk.StringVar(value=str(edit_val) if edit_val is not None else "")
+            widget_key = f"{section_key}/{entity_name}/Value"
+            self._value_widgets[widget_key] = var
+
+            entry = ttk.Entry(self._prop_frame, textvariable=var, width=12)
+            entry.grid(row=row, column=2, padx=5, pady=1)
+            if edit_val is not None:
+                entry.config(foreground="blue")
+            var.trace_add("write", lambda *_, wk=widget_key, v=var: self._on_value_edit(wk, v))
+
+            row += 1
+
+        self._status.config(text=f"{section_key}: {count} settings")
+
+    def _load_from_iso(self):
+        iso_path = self.app.get_iso_path()
+        if not iso_path or not iso_path.exists():
+            messagebox.showerror("Error", "Select a valid game ISO first.")
+            return
+
+        self._status.config(text="Extracting config.xbr from ISO...")
+        self.update_idletasks()
+
+        config_path = backend.extract_config_xbr(iso_path)
+        if not config_path:
+            messagebox.showerror("Error", "Failed to extract config.xbr from ISO.")
+            return
+
+        self._config_xbr_path = config_path
+        self._status.config(text="Loading keyed tables...")
+        self.update_idletasks()
+
+        self._keyed_tables = backend.load_keyed_tables(config_path)
+        if self._keyed_tables:
+            count = sum(t.num_cols for t in self._keyed_tables.values())
+            self._status.config(text=f"Loaded {len(self._keyed_tables)} sections, {count} entities")
+        else:
+            self._status.config(text="Failed to load keyed tables")
+
+        # Also load defaults for variant sections
+        self._load_variant_defaults(iso_path)
+
+        # Refresh entity list
+        self._on_section_change()
+
+    def _load_variant_defaults(self, iso_path):
+        """Load default values for all variant-record sections."""
+        for key, _, fmt in EDITABLE_SECTIONS:
+            if fmt != "variant":
+                continue
+            if not self._registry:
+                continue
+            entities = self._registry.get("sections", {}).get(key, {}).get("entities", {})
+            for entity in entities:
+                output = backend.run_config_dump(iso_path, key, entity)
+                values = {}
+                for line in output.splitlines():
+                    line = line.strip()
+                    if "=" in line and "@" in line:
+                        parts = line.split("=", 1)
+                        prop_name = parts[0].strip()
+                        rest = parts[1].strip()
+                        val_str = rest.split("[")[0].strip()
+                        try:
+                            values[prop_name] = float(val_str)
+                        except ValueError:
+                            pass
+                if values:
+                    self._default_values.setdefault(key, {})[entity] = values
+
+    def _rebuild_property_grid(self):
+        section_key, _, fmt = self._get_section_info()
+        entity = self._entity_var.get()
+        if not section_key:
+            return
+
+        for w in self._prop_frame.winfo_children():
+            w.destroy()
+        self._value_widgets.clear()
+
+        if fmt == "keyed_flat":
+            self._build_flat_grid(section_key)
+        elif fmt == "keyed":
+            if not entity:
+                return
+            self._build_keyed_grid(section_key, entity)
+        else:
+            if not entity:
+                return
+            self._build_variant_grid(section_key, entity)
+
+    def _build_keyed_grid(self, section_key: str, entity: str):
+        """Build property grid from keyed table data, showing ALL rows including empty (default)."""
+        if not self._keyed_tables or section_key not in self._keyed_tables:
+            self._status.config(text="No data — click 'Load from ISO' first")
+            return
+
+        table = self._keyed_tables[section_key]
+        col_idx = table.entity_index.get(entity)
+        if col_idx is None:
+            self._status.config(text=f"Entity '{entity}' not found")
+            return
+
+        # Get explicitly set values
+        props = table.get_entity(entity)
+
+        # Headers
+        for col, (text, width) in enumerate([
+            ("Property", 24), ("Default", 12), ("New Value", 10), ("Type", 6),
+        ]):
+            ttk.Label(self._prop_frame, text=text, font=("Segoe UI", 9, "bold"),
+                      width=width).grid(row=0, column=col, sticky=tk.W, padx=5, pady=2)
+
+        ttk.Separator(self._prop_frame, orient=tk.HORIZONTAL).grid(
+            row=1, column=0, columnspan=4, sticky=tk.EW, pady=2)
+
+        row = 2
+        editable_count = 0
+
+        # Iterate ALL rows (properties), not just non-empty ones
+        for r_idx, prop_name in enumerate(table.row_names):
+            if prop_name == "name":
+                continue
+
+            # Read the cell (may be empty, double, or string)
+            typ, val, addr = table.read_cell(col_idx, r_idx)
+
+            # Pending edit
+            edit_val = self._edits.get(section_key, {}).get(entity, {}).get(prop_name)
+
+            # Default value display
+            if typ == "double" and val is not None:
+                if val == int(val) and abs(val) < 1e6:
+                    default_str = f"{val:.1f}"
+                else:
+                    default_str = f"{val:.4g}"
+                self._default_values.setdefault(section_key, {}).setdefault(entity, {})[prop_name] = val
+            elif typ == "string":
+                default_str = str(val)[:20]
+            elif typ == "empty":
+                default_str = "(default)"
+            else:
+                default_str = "\u2014"
+
+            # Property name — dim for empty/default entries
+            name_color = "" if typ == "double" else "gray"
+            lbl = ttk.Label(self._prop_frame, text=prop_name, width=24,
+                            foreground=name_color)
+            lbl.grid(row=row, column=0, sticky=tk.W, padx=5, pady=1)
+
+            ttk.Label(self._prop_frame, text=default_str, width=12,
+                      anchor=tk.E, foreground="gray" if typ == "empty" else "").grid(
+                row=row, column=1, padx=5, pady=1)
+
+            # All non-string rows are editable (doubles and empties)
+            if typ != "string":
+                var = tk.StringVar(value=str(edit_val) if edit_val is not None else "")
+                widget_key = f"{section_key}/{entity}/{prop_name}"
+                self._value_widgets[widget_key] = var
+
+                entry = ttk.Entry(self._prop_frame, textvariable=var, width=12)
+                entry.grid(row=row, column=2, padx=5, pady=1)
+                if edit_val is not None:
+                    entry.config(foreground="blue")
+                var.trace_add("write", lambda *_, wk=widget_key, v=var: self._on_value_edit(wk, v))
+                editable_count += 1
+            else:
+                ttk.Label(self._prop_frame, text="(string)", width=10,
+                          foreground="gray").grid(row=row, column=2, padx=5, pady=1)
+
+            type_str = typ if typ != "empty" else "default"
+            ttk.Label(self._prop_frame, text=type_str, width=6,
+                      foreground="gray").grid(row=row, column=3, padx=5, pady=1)
+
+            row += 1
+
+        note = ""
+        if entity in NON_GAMEPLAY_ENTITIES and section_key == "critters_walking":
+            note = " (non-gameplay entity)"
+        set_count = sum(1 for _, (t, _, _) in props.items() if t == "double")
+        self._status.config(
+            text=f"{section_key}/{entity}: {set_count} set, {editable_count} editable{note}")
+
+    def _build_variant_grid(self, section_key: str, entity: str):
+        """Build property grid from variant-record registry data."""
+        if not self._registry:
+            self._status.config(text="Registry not loaded")
+            return
+
+        reg_section = self._registry.get("sections", {}).get(section_key, {})
+        reg_entity = reg_section.get("entities", {}).get(entity, {})
+        reg_props = reg_entity.get("properties", {})
+        defaults = self._default_values.get(section_key, {}).get(entity, {})
+
+        schema_props = []
+        if self._schema:
+            sec = self._schema.get("sections", {}).get(section_key, {})
+            schema_props = sec.get("properties", [])
+        schema_by_key = {p["key"]: p for p in schema_props if isinstance(p, dict)}
+
+        # Headers
+        for col, (text, width) in enumerate([
+            ("Property", 24), ("Default", 12), ("New Value", 10), ("Description", 30),
+        ]):
+            ttk.Label(self._prop_frame, text=text, font=("Segoe UI", 9, "bold"),
+                      width=width).grid(row=0, column=col, sticky=tk.W, padx=5, pady=2)
+
+        ttk.Separator(self._prop_frame, orient=tk.HORIZONTAL).grid(
+            row=1, column=0, columnspan=4, sticky=tk.EW, pady=2)
+
+        prop_order = []
+        for prop_key in reg_props:
+            sp = schema_by_key.get(prop_key, {})
+            prop_order.append((sp.get("index", 999), prop_key))
+        prop_order.sort()
+
+        row = 2
+        for _, prop_key in prop_order:
+            prop_data = reg_props[prop_key]
+            sp = schema_by_key.get(prop_key, {})
+            display_name = sp.get("display", prop_key)
+            description = sp.get("description", "")
+            type_flag = prop_data.get("type_flag", 0)
+
+            default_val = defaults.get(prop_key)
+            if default_val is not None:
+                default_str = f"{default_val:.4g}" if type_flag != 2 else str(int(default_val))
+            else:
+                default_str = "\u2014"
+
+            edit_val = self._edits.get(section_key, {}).get(entity, {}).get(prop_key)
+
+            ttk.Label(self._prop_frame, text=display_name, width=24).grid(
+                row=row, column=0, sticky=tk.W, padx=5, pady=1)
+
+            ttk.Label(self._prop_frame, text=default_str, width=12,
+                      anchor=tk.E).grid(row=row, column=1, padx=5, pady=1)
+
+            var = tk.StringVar(value=str(edit_val) if edit_val is not None else "")
+            widget_key = f"{section_key}/{entity}/{prop_key}"
+            self._value_widgets[widget_key] = var
+
+            entry = ttk.Entry(self._prop_frame, textvariable=var, width=12)
+            entry.grid(row=row, column=2, padx=5, pady=1)
+            if edit_val is not None:
+                entry.config(foreground="blue")
+            var.trace_add("write", lambda *_, wk=widget_key, v=var: self._on_value_edit(wk, v))
+
+            ttk.Label(self._prop_frame, text=description[:50], wraplength=250,
+                      foreground="gray", font=("Segoe UI", 8)).grid(
+                row=row, column=3, sticky=tk.W, padx=5, pady=1)
+
+            row += 1
+
+        note = ""
+        if entity in NON_GAMEPLAY_ENTITIES:
+            note = " (non-gameplay entity)"
+        self._status.config(
+            text=f"{section_key}/{entity}: {len(reg_props)} properties{note}")
+
+    def _on_value_edit(self, widget_key: str, var: tk.Variable):
+        parts = widget_key.split("/", 2)
+        if len(parts) != 3:
+            return
+        section, entity, prop = parts
+        val_str = var.get().strip()
+        if not val_str:
+            if section in self._edits and entity in self._edits[section]:
+                self._edits[section][entity].pop(prop, None)
+                if not self._edits[section][entity]:
+                    del self._edits[section][entity]
+                if not self._edits[section]:
+                    del self._edits[section]
+        else:
+            try:
+                val = float(val_str)
+                self._edits.setdefault(section, {}).setdefault(entity, {})[prop] = val
+            except ValueError:
+                pass
+        self._update_edit_count()
+
+    def _update_edit_count(self):
+        total = sum(len(p) for e in self._edits.values() for p in e.values())
+        self._edit_count_label.config(text=f"{total} edit(s) pending" if total else "")
+
+    def _ensure_defaults(self, section_key: str, entity: str) -> dict[str, float]:
+        defaults = self._default_values.get(section_key, {}).get(entity, {})
+        if not defaults:
+            # Try loading from keyed tables
+            if self._keyed_tables and section_key in self._keyed_tables:
+                table = self._keyed_tables[section_key]
+                props = table.get_entity(entity)
+                for pname, (typ, val, _) in props.items():
+                    if typ == "double" and val is not None and pname != "name":
+                        self._default_values.setdefault(section_key, {}).setdefault(entity, {})[pname] = val
+                defaults = self._default_values.get(section_key, {}).get(entity, {})
+            if not defaults:
+                # Try loading from ISO for variant sections
+                iso_path = self.app.get_iso_path()
+                if iso_path and iso_path.exists():
+                    self._load_from_iso()
+                    defaults = self._default_values.get(section_key, {}).get(entity, {})
+        return defaults
+
+    def _randomize_entity(self):
+        section_key, _, _ = self._get_section_info()
+        entity = self._entity_var.get()
+        if not section_key or not entity:
+            return
+        defaults = self._ensure_defaults(section_key, entity)
+        if not defaults:
+            messagebox.showerror("Error", "Load defaults from ISO first.")
+            return
+        self._apply_random_to_entity(section_key, entity, defaults)
+        self._rebuild_property_grid()
+        self._update_edit_count()
+
+    def _randomize_section(self):
+        section_key, _, fmt = self._get_section_info()
+        if not section_key:
+            return
+
+        if fmt in ("keyed", "keyed_flat") and self._keyed_tables and section_key in self._keyed_tables:
+            entities = list(self._keyed_tables[section_key].col_names)
+        elif fmt == "variant" and self._registry:
+            entities = list(
+                self._registry.get("sections", {}).get(section_key, {}).get("entities", {}).keys())
+        else:
+            messagebox.showerror("Error", "Load defaults from ISO first.")
+            return
+
+        self._status.config(text=f"Randomizing {len(entities)} entities...")
+        self.update_idletasks()
+
+        count = 0
+        for entity in entities:
+            if entity in NON_GAMEPLAY_ENTITIES and section_key == "critters_walking":
+                continue
+            defaults = self._ensure_defaults(section_key, entity)
+            if defaults:
+                count += self._apply_random_to_entity(section_key, entity, defaults)
+
+        self._rebuild_property_grid()
+        self._update_edit_count()
+        self._status.config(text=f"Randomized {count} properties across {len(entities)} entities")
+
+    def _apply_random_to_entity(self, section_key, entity, defaults) -> int:
+        try:
+            min_pct = self._rand_min_var.get() / 100.0
+            max_pct = self._rand_max_var.get() / 100.0
+        except (tk.TclError, ValueError):
+            min_pct, max_pct = 0.5, 1.5
+        if min_pct > max_pct:
+            min_pct, max_pct = max_pct, min_pct
+
+        count = 0
+        for prop_key, default_val in defaults.items():
+            if default_val == 0.0:
+                continue
+            new_val = default_val * random.uniform(min_pct, max_pct)
+            self._edits.setdefault(section_key, {}).setdefault(entity, {})[prop_key] = round(new_val, 4)
+            count += 1
+        return count
+
+    def get_pending_mod(self) -> dict | None:
+        """Return pending edits as a grouped mod dict for the randomizer pipeline."""
+        if not self._edits:
+            return None
+        # Separate variant edits (go through config_registry) from keyed edits
+        mod = {"name": "Entity Editor Edits", "format": "grouped", "sections": {}}
+        keyed_patches = {}
+
+        for section_key, entities in self._edits.items():
+            _, _, fmt = next(
+                ((k, d, f) for k, d, f in EDITABLE_SECTIONS if k == section_key),
+                ("", "", "variant"))
+            if fmt == "variant":
+                mod_section = {}
+                for entity, props in entities.items():
+                    mod_section[entity] = dict(props)
+                mod["sections"][section_key] = mod_section
+            else:
+                # Keyed edits need cell offsets — store separately
+                keyed_patches[section_key] = {}
+                for entity, props in entities.items():
+                    keyed_patches[section_key][entity] = dict(props)
+
+        if keyed_patches:
+            mod["_keyed_patches"] = keyed_patches
+
+        return mod if (mod["sections"] or mod.get("_keyed_patches")) else None
+
+    def get_edit_count(self) -> int:
+        return sum(len(p) for e in self._edits.values() for p in e.values())
+
+    def _reset_edits(self):
+        self._edits.clear()
+        self._rebuild_property_grid()
+        self._update_edit_count()
+
+    def _export_mod(self):
+        if not self._edits:
+            messagebox.showinfo("No Edits", "No property edits to export.")
+            return
+
+        # Build a combined export with both variant and keyed edits
+        export = {"name": "Entity Editor Export", "format": "grouped", "sections": {}}
+
+        # For keyed sections, include cell offsets for direct patching
+        keyed_offsets = {}
+
+        for section_key, entities in self._edits.items():
+            _, _, fmt = next(
+                ((k, d, f) for k, d, f in EDITABLE_SECTIONS if k == section_key),
+                ("", "", "variant"))
+
+            mod_section = {}
+            for entity, props in entities.items():
+                mod_entity = {}
+                for prop_key, value in props.items():
+                    mod_entity[prop_key] = value
+                    # For keyed sections, also record the cell offset
+                    if fmt == "keyed" and self._keyed_tables and section_key in self._keyed_tables:
+                        table = self._keyed_tables[section_key]
+                        cell = table.get_value(entity, prop_key)
+                        if cell:
+                            keyed_offsets.setdefault(section_key, {}).setdefault(
+                                entity, {})[prop_key] = {
+                                "value": value,
+                                "cell_offset": f"0x{cell[2]:06X}",
+                                "format": "keyed_double"
+                            }
+                mod_section[entity] = mod_entity
+            export["sections"][section_key] = mod_section
+
+        if keyed_offsets:
+            export["_keyed_cell_offsets"] = keyed_offsets
+
+        path = filedialog.asksaveasfilename(
+            title="Save Mod JSON",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile="entity_edits.json",
+        )
+        if not path:
+            return
+
+        with open(path, "w") as f:
+            json.dump(export, f, indent=2)
+
+        total = sum(len(p) for e in self._edits.values() for p in e.values())
+        self._status.config(text=f"Exported {total} edits to {Path(path).name}")

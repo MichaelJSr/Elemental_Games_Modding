@@ -44,7 +44,7 @@ DEFAULT_GEM_WEIGHTS = {
     "emerald": 1,
     "sapphire": 1,
     "ruby": 1,
-    "obsidian": 0,  # obsidians excluded from gem shuffle by default
+    "obsidian": 1,
 }
 
 # Friendly display names for item categories
@@ -131,6 +131,7 @@ class RandomizerTab(ttk.Frame):
             ("do_keys", "Keys (shuffled within elemental realm)", True),
             ("do_gems", "Gems (diamond/emerald/sapphire/ruby per-level)", True),
             ("do_barriers", "Barriers (element vulnerability)", True),
+            ("do_connections", "Level Connections (randomize exits between levels)", False),
             ("do_qol", "QoL Patches (disable popups, obsidian animation)", True),
         ]
         for key, label, default in categories:
@@ -140,14 +141,22 @@ class RandomizerTab(ttk.Frame):
             row.pack(anchor=tk.W, padx=10, pady=2)
             ttk.Checkbutton(row, text=label, variable=var).pack(side=tk.LEFT)
             # Add warning labels for keys and barriers
-            if key == "do_keys":
+            if key in ("do_keys", "do_barriers", "do_connections"):
                 warn = ttk.Label(row, text="\u26A0 may cause unsolvable seeds",
                                  foreground="#CC8800", font=("Segoe UI", 8))
                 warn.pack(side=tk.LEFT, padx=(6, 0))
-            elif key == "do_barriers":
-                warn = ttk.Label(row, text="\u26A0 may cause unsolvable seeds",
-                                 foreground="#CC8800", font=("Segoe UI", 8))
-                warn.pack(side=tk.LEFT, padx=(6, 0))
+
+        # -- Obsidian cost --
+        obsidian_frame = ttk.Frame(cat_frame)
+        obsidian_frame.pack(anchor=tk.W, padx=10, pady=(4, 2))
+        ttk.Label(obsidian_frame, text="Obsidian cost per temple lock:").pack(
+            side=tk.LEFT)
+        self._obsidian_cost = tk.IntVar(value=10)
+        ttk.Spinbox(obsidian_frame, from_=1, to=100,
+                     textvariable=self._obsidian_cost, width=4).pack(
+            side=tk.LEFT, padx=(5, 5))
+        ttk.Label(obsidian_frame, text="(default: 10 = locks at 10,20,...100)",
+                  foreground="gray", font=("Segoe UI", 8)).pack(side=tk.LEFT)
 
         # -- Item Pool Editor (collapsible) --
         self._pool_frame = ttk.LabelFrame(self, text="Item Pool (click to expand)")
@@ -292,6 +301,14 @@ class RandomizerTab(ttk.Frame):
             text=f"Major items: {total} / {MAX_POOL_SLOTS} slots",
             foreground=color)
 
+    def _get_obsidian_cost(self) -> int | None:
+        """Return custom obsidian cost, or None if using default (10)."""
+        try:
+            val = self._obsidian_cost.get()
+        except (tk.TclError, ValueError):
+            return None
+        return val if val != 10 else None
+
     def _get_item_pool(self) -> dict[str, int] | None:
         """Return the custom item pool dict, or None if using defaults.
 
@@ -351,9 +368,18 @@ class RandomizerTab(ttk.Frame):
                 messagebox.showerror("Error", "Custom item pool is empty.")
                 return
 
+        # Gather entity editor edits (if any)
+        config_edits = None
+        entity_tab = self.app.tab_entity
+        edit_count = entity_tab.get_edit_count()
+        if edit_count > 0:
+            config_edits = entity_tab.get_pending_mod()
+
         # Disable button during build
         self._build_btn.config(state=tk.DISABLED)
         self.log.clear()
+        if config_edits:
+            self.log.append(f"Including {edit_count} entity editor edits\n")
         self.progress.start("Building randomized ISO...")
 
         seed = self.seed.get_seed()
@@ -389,8 +415,11 @@ class RandomizerTab(ttk.Frame):
                             do_keys=self._vars["do_keys"].get(),
                             do_gems=self._vars["do_gems"].get(),
                             do_barriers=self._vars["do_barriers"].get(),
+                            do_connections=self._vars["do_connections"].get(),
                             do_qol=self._vars["do_qol"].get(),
                             item_pool=item_pool,
+                            obsidian_cost=self._get_obsidian_cost(),
+                            config_edits=config_edits,
                             force_unsolvable=True,
                             on_output=on_output,
                             on_done=on_done,
@@ -419,8 +448,11 @@ class RandomizerTab(ttk.Frame):
             do_keys=self._vars["do_keys"].get(),
             do_gems=self._vars["do_gems"].get(),
             do_barriers=self._vars["do_barriers"].get(),
+            do_connections=self._vars["do_connections"].get(),
             do_qol=self._vars["do_qol"].get(),
             item_pool=item_pool,
+            obsidian_cost=self._get_obsidian_cost(),
+            config_edits=config_edits,
             force_unsolvable=False,
             on_output=on_output,
             on_done=on_done,
