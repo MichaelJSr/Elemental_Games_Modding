@@ -912,17 +912,16 @@ BARRIER_FOURCCS_HARD = [b"watr", b"fire", b"smsh", b"wind", b"stem", b"acid", b"
 # XBE QoL patch offsets
 # Gem popup string file offsets (null first byte to disable)
 GEM_POPUP_OFFSETS = [0x197858, 0x19783C, 0x197820, 0x197800, 0x1977D8]
-# Obsidian fist pump animation: patch 6 bytes at file offset 0x0489C3
-OBSIDIAN_ANIM_OFFSET = 0x0489C3
-OBSIDIAN_ANIM_ORIGINAL = bytes([0x8B, 0x86, 0xD8, 0x01, 0x00, 0x00])
-OBSIDIAN_ANIM_PATCH = bytes([0xEB, 0x1C, 0x90, 0x90, 0x90, 0x90])
-
-# Per-pickup fist pump animation: player state machine at 0x2B0F2
-# State 0x1E checks absorbed entity type (+0x148); if non-zero, plays animation 0x52
-# Patch the conditional JE to unconditional JMP to always skip the animation
-FIST_PUMP_OFFSET = 0x02B0F2
-FIST_PUMP_ORIGINAL = bytes([0x74, 0x0C])  # JE +12 (skip if zero)
-FIST_PUMP_PATCH = bytes([0xEB, 0x0C])     # JMP +12 (always skip)
+# Pickup celebration animation patch (confirmed via runtime debugging).
+#
+# The pickup handler at VA 0x41390 (resolved from vtable[0xB8]) checks
+# bit 0x10000000 in [this+0x168] to decide whether to play the celebration.
+# Gems have this bit SET (no animation); obsidians have it CLEAR (animation).
+# Replace the conditional JNZ with an unconditional JMP so all pickups
+# take the "gem path" -- skip animation, go straight to despawn/cooldown.
+PICKUP_ANIM_OFFSET = 0x0313A2
+PICKUP_ANIM_ORIGINAL = bytes([0x0F, 0x85, 0xCB, 0x00, 0x00, 0x00])  # JNZ +0xCB
+PICKUP_ANIM_PATCH = bytes([0xE9, 0xCC, 0x00, 0x00, 0x00, 0x90])     # JMP +0xCC; NOP
 
 # Player character swap: replace "garret4" with another character model
 # At file offset 0x1976C8, "garret4\0d:\" = 12 bytes, can fit any name up to 11 chars
@@ -1958,25 +1957,15 @@ def cmd_randomize_full(args):
                     xbe_data[off] = 0x00
             print(f"  Disabled 5 gem first-pickup popups")
 
-            # Disable obsidian fist pump animation
-            if OBSIDIAN_ANIM_OFFSET + 6 <= len(xbe_data):
-                current = bytes(xbe_data[OBSIDIAN_ANIM_OFFSET:OBSIDIAN_ANIM_OFFSET + 6])
-                if current == OBSIDIAN_ANIM_ORIGINAL:
-                    xbe_data[OBSIDIAN_ANIM_OFFSET:OBSIDIAN_ANIM_OFFSET + 6] = OBSIDIAN_ANIM_PATCH
-                    print(f"  Disabled obsidian first-pickup notification")
+            # Disable pickup celebration animation (JNZ -> JMP in pickup handler)
+            if PICKUP_ANIM_OFFSET + 6 <= len(xbe_data):
+                current = bytes(xbe_data[PICKUP_ANIM_OFFSET:PICKUP_ANIM_OFFSET + 6])
+                if current == PICKUP_ANIM_ORIGINAL:
+                    xbe_data[PICKUP_ANIM_OFFSET:PICKUP_ANIM_OFFSET + 6] = PICKUP_ANIM_PATCH
+                    print(f"  Disabled pickup celebration animation")
                 else:
-                    print(f"  WARNING: XBE bytes at 0x{OBSIDIAN_ANIM_OFFSET:X} don't match expected "
-                          f"(got {current.hex()}, expected {OBSIDIAN_ANIM_ORIGINAL.hex()})")
-
-            # Disable per-pickup fist pump animation
-            if FIST_PUMP_OFFSET + 2 <= len(xbe_data):
-                current = bytes(xbe_data[FIST_PUMP_OFFSET:FIST_PUMP_OFFSET + 2])
-                if current == FIST_PUMP_ORIGINAL:
-                    xbe_data[FIST_PUMP_OFFSET:FIST_PUMP_OFFSET + 2] = FIST_PUMP_PATCH
-                    print(f"  Disabled per-pickup fist pump animation")
-                else:
-                    print(f"  WARNING: XBE bytes at 0x{FIST_PUMP_OFFSET:X} don't match expected "
-                          f"(got {current.hex()}, expected {FIST_PUMP_ORIGINAL.hex()})")
+                    print(f"  WARNING: XBE bytes at 0x{PICKUP_ANIM_OFFSET:X} don't match expected "
+                          f"(got {current.hex()}, expected {PICKUP_ANIM_ORIGINAL.hex()})")
 
             # Player character swap (experimental)
             player_char = getattr(args, 'player_character', None)
