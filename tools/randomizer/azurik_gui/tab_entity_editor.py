@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import random
-import struct
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from pathlib import Path
@@ -527,7 +526,6 @@ class EntityEditorTab(ttk.Frame):
     def _ensure_defaults(self, section_key: str, entity: str) -> dict[str, float]:
         defaults = self._default_values.get(section_key, {}).get(entity, {})
         if not defaults:
-            # Try loading from keyed tables
             if self._keyed_tables and section_key in self._keyed_tables:
                 table = self._keyed_tables[section_key]
                 props = table.get_entity(entity)
@@ -535,12 +533,6 @@ class EntityEditorTab(ttk.Frame):
                     if typ == "double" and val is not None and pname != "name":
                         self._default_values.setdefault(section_key, {}).setdefault(entity, {})[pname] = val
                 defaults = self._default_values.get(section_key, {}).get(entity, {})
-            if not defaults:
-                # Try loading from ISO for variant sections
-                iso_path = self.app.get_iso_path()
-                if iso_path and iso_path.exists():
-                    self._load_from_iso()
-                    defaults = self._default_values.get(section_key, {}).get(entity, {})
         return defaults
 
     def _randomize_entity(self):

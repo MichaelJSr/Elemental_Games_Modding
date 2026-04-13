@@ -385,78 +385,73 @@ class RandomizerTab(ttk.Frame):
         seed = self.seed.get_seed()
         self._pending_force = False
 
-        def on_output(line):
-            self.after(0, self.log.append, line)
-            # Detect unsolvable message to offer force-build
-            if "ERROR: Could not find solvable placement" in line:
-                self._pending_force = True
+        def _start_build(force=False):
+            self._thread, self._msg_queue = backend.run_randomizer(
+                iso_path=iso_path,
+                output_path=output_path,
+                seed=seed,
+                do_major=self._vars["do_major"].get(),
+                do_keys=self._vars["do_keys"].get(),
+                do_gems=self._vars["do_gems"].get(),
+                do_barriers=self._vars["do_barriers"].get(),
+                do_connections=self._vars["do_connections"].get(),
+                do_qol=self._vars["do_qol"].get(),
+                item_pool=item_pool,
+                obsidian_cost=self._get_obsidian_cost(),
+                config_edits=config_edits,
+                force_unsolvable=force,
+            )
+            self._poll_queue()
 
-        def on_done(result):
-            def _finish():
-                if self._pending_force and not result.success:
-                    # Offer the user a choice to force-build
-                    answer = messagebox.askyesno(
-                        "Unsolvable Seed",
-                        "No solvable placement was found for this seed.\n\n"
-                        "This can happen with custom item pools or certain "
-                        "category combinations.\n\n"
-                        "Build the ISO anyway? (The game may not be completable)",
-                        icon="warning",
-                    )
-                    if answer:
-                        self._pending_force = False
-                        self.log.append("\nRetrying with --force...\n")
-                        self.progress.start("Rebuilding (forced)...")
-                        self._thread = backend.run_randomizer(
-                            iso_path=iso_path,
-                            output_path=output_path,
-                            seed=seed,
-                            do_major=self._vars["do_major"].get(),
-                            do_keys=self._vars["do_keys"].get(),
-                            do_gems=self._vars["do_gems"].get(),
-                            do_barriers=self._vars["do_barriers"].get(),
-                            do_connections=self._vars["do_connections"].get(),
-                            do_qol=self._vars["do_qol"].get(),
-                            item_pool=item_pool,
-                            obsidian_cost=self._get_obsidian_cost(),
-                            config_edits=config_edits,
-                            force_unsolvable=True,
-                            on_output=on_output,
-                            on_done=on_done,
-                        )
-                        return  # Don't re-enable button yet
-                    else:
-                        self.progress.stop("Build cancelled — seed unsolvable")
-                        self._build_btn.config(state=tk.NORMAL)
-                        return
-
-                self.progress.stop(
-                    f"Done! Seed: {seed}" if result.success
-                    else "Build failed — check log"
+        def _handle_done(result):
+            if self._pending_force and not result.success:
+                answer = messagebox.askyesno(
+                    "Unsolvable Seed",
+                    "No solvable placement was found for this seed.\n\n"
+                    "This can happen with custom item pools or certain "
+                    "category combinations.\n\n"
+                    "Build the ISO anyway? (The game may not be completable)",
+                    icon="warning",
                 )
-                self._build_btn.config(state=tk.NORMAL)
-                if result.success:
-                    self.app.state.last_seed = seed
-                    self.app.state.last_output = result.output_path
-            self.after(0, _finish)
+                if answer:
+                    self._pending_force = False
+                    self.log.append("\nRetrying with --force...\n")
+                    self.progress.start("Rebuilding (forced)...")
+                    _start_build(force=True)
+                    return
+                else:
+                    self.progress.stop("Build cancelled — seed unsolvable")
+                    self._build_btn.config(state=tk.NORMAL)
+                    return
 
-        self._thread = backend.run_randomizer(
-            iso_path=iso_path,
-            output_path=output_path,
-            seed=seed,
-            do_major=self._vars["do_major"].get(),
-            do_keys=self._vars["do_keys"].get(),
-            do_gems=self._vars["do_gems"].get(),
-            do_barriers=self._vars["do_barriers"].get(),
-            do_connections=self._vars["do_connections"].get(),
-            do_qol=self._vars["do_qol"].get(),
-            item_pool=item_pool,
-            obsidian_cost=self._get_obsidian_cost(),
-            config_edits=config_edits,
-            force_unsolvable=False,
-            on_output=on_output,
-            on_done=on_done,
-        )
+            self.progress.stop(
+                f"Done! Seed: {seed}" if result.success
+                else "Build failed — check log"
+            )
+            self._build_btn.config(state=tk.NORMAL)
+            if result.success:
+                self.app.state.last_seed = seed
+                self.app.state.last_output = result.output_path
+
+        self._handle_done = _handle_done
+        _start_build()
+
+    def _poll_queue(self):
+        """Poll the build thread's message queue from the main thread."""
+        import queue as _queue
+        try:
+            while True:
+                msg_type, payload = self._msg_queue.get_nowait()
+                if msg_type == "output":
+                    self.log.append(payload)
+                    if "ERROR: Could not find solvable placement" in payload:
+                        self._pending_force = True
+                elif msg_type == "done":
+                    self._handle_done(payload)
+                    return
+        except _queue.Empty:
+            pass
+        self.after(50, self._poll_queue)
 
     def auto_fill_output(self, iso_path: Path | None):
         """Called when ISO path changes."""

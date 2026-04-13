@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import queue
 import subprocess
 import sys
 import threading
@@ -73,13 +74,19 @@ def run_randomizer(
     force_unsolvable: bool = False,
     on_output: Callable[[str], None] | None = None,
     on_done: Callable[[BuildResult], None] | None = None,
-) -> threading.Thread:
+) -> tuple[threading.Thread, "queue.Queue[tuple[str, object]]"]:
     """Run the full randomizer in a background thread.
 
-    on_output is called with each line of stdout (from the GUI thread via after()).
-    on_done is called with the result when complete.
-    Returns the thread (already started).
+    Returns (thread, msg_queue). The caller should poll msg_queue from the
+    main/GUI thread (e.g. via tkinter after()) for ("output", line) and
+    ("done", BuildResult) messages. This avoids calling Tkinter APIs from
+    the worker thread, which is undefined behavior.
+
+    For backward compatibility on_output and on_done are still called from
+    the worker thread if provided, but callers should prefer the queue.
     """
+    msg_queue: queue.Queue[tuple[str, object]] = queue.Queue()
+
     def _run():
         azurik_mod = SCRIPT_DIR / "azurik_mod.py"
         args = [
@@ -122,6 +129,7 @@ def run_randomizer(
             full_output = []
             for line in proc.stdout:
                 full_output.append(line)
+                msg_queue.put(("output", line))
                 if on_output:
                     on_output(line)
             proc.wait()
@@ -135,12 +143,13 @@ def run_randomizer(
         except Exception as e:
             result = BuildResult(success=False, output=f"Error: {e}")
 
+        msg_queue.put(("done", result))
         if on_done:
             on_done(result)
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
-    return thread
+    return thread, msg_queue
 
 
 def run_config_dump(iso_path: Path, section: str, entity: str | None = None) -> str:
@@ -197,13 +206,19 @@ def load_keyed_tables(config_path: Path) -> dict | None:
         return None
 
 
+_temp_dirs: list[str] = []
+
 def extract_config_xbr(iso_path: Path) -> Path | None:
-    """Extract config.xbr from ISO to a temp file and return its path."""
+    """Extract config.xbr from ISO to a temp file and return its path.
+
+    Temp directories are tracked in _temp_dirs for cleanup via cleanup_temp_dirs().
+    """
     import tempfile
     xdvdfs = find_xdvdfs()
     if not xdvdfs:
         return None
     tmpdir = tempfile.mkdtemp(prefix="azurik_cfg_")
+    _temp_dirs.append(tmpdir)
     out_file = Path(tmpdir) / "config.xbr"
     try:
         import subprocess
@@ -224,3 +239,14 @@ def load_all_pickups() -> dict | None:
         return None
     with open(path) as f:
         return json.load(f)
+
+
+def cleanup_temp_dirs():
+    """Remove temp directories created by extract_config_xbr."""
+    import shutil
+    for d in _temp_dirs:
+        try:
+            shutil.rmtree(d, ignore_errors=True)
+        except Exception:
+            pass
+    _temp_dirs.clear()
