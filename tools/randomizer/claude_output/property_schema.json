@@ -5,12 +5,13 @@
     "format": "xobx (Xbox binary resource)",
     "generated_by": "xbr_parser.py",
     "notes": [
-      "All numeric values are stored as 16-byte variant records: [pad(4)][extra(4)][value(4)][type(4)]",
-      "type=1 → single-precision float at bytes 8-11",
-      "type=2 → 32-bit integer at bytes 8-11",
+      "All numeric values are stored as 16-byte variant records: [pad(4)][VALUE_double(8)][type_flag(4)]",
+      "type=1 → 64-bit IEEE 754 double at record bytes 4-11 (NOT float32 — see config_registry.json CRITICAL_CORRECTION)",
+      "type=2 → 64-bit double interpreted as integer (cast to int after reading)",
       "type=0 → unset/null (property not configured for this entity)",
       "Record stride = 16 bytes. Entity block stride = n_properties × 16 bytes.",
-      "String tables are null-terminated ASCII stored before the binary records in each section."
+      "String tables are null-terminated ASCII stored before the binary records in each section.",
+      "settings_foo uses 48-byte groups: [meta_record(16)][VALUE_record(16)][term_record(16)]. Write double at group_offset + 16 + 4."
     ]
   },
 

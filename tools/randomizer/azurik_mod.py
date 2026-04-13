@@ -129,7 +129,11 @@ def load_registry() -> dict:
         print(f"ERROR: Registry not found at {REGISTRY_PATH}")
         sys.exit(1)
     with open(REGISTRY_PATH, "r") as f:
-        _registry_cache = json.load(f)
+        try:
+            _registry_cache = json.load(f)
+        except json.JSONDecodeError as e:
+            print(f"ERROR: Invalid JSON in {REGISTRY_PATH.name}: {e}")
+            sys.exit(1)
     return _registry_cache
 
 
@@ -293,7 +297,7 @@ def flatten_mod(mod: dict, registry: dict) -> list[dict]:
                     else:
                         # Children are values — this is an entity
                         for prop_name, prop_val in val.items():
-                            if isinstance(prop_val, (int, float)):
+                            if isinstance(prop_val, (int, float)) and not isinstance(prop_val, bool):
                                 patches.append({
                                     "section": sec_name,
                                     "entity": key,
@@ -320,12 +324,11 @@ def find_level_entities(data: bytes) -> dict[str, dict]:
     Tries multiple coordinate offsets: -96 (standard), -116 (typed nodes), -144, -140.
     """
     COORD_OFFSETS = [-96, -116, -144, -140]
+    MARKER = b"\x00\x00\x80\x3F"
     entities = {}
-    i = 0
-    while i < len(data) - 8:
-        if (data[i] == 0x00 and data[i+1] == 0x00
-                and data[i+2] == 0x80 and data[i+3] == 0x3F
-                and i + 4 < len(data) and 33 <= data[i+4] < 127):
+    i = data.find(MARKER, 0)
+    while 0 <= i < len(data) - 8:
+        if i + 4 < len(data) and 33 <= data[i+4] < 127:
             s_start = i + 4
             s_end = s_start
             while s_end < len(data) and data[s_end] != 0 and s_end - s_start < 200:
@@ -339,7 +342,8 @@ def find_level_entities(data: bytes) -> dict[str, dict]:
                     if cp >= 0 and cp + 16 <= len(data):
                         x, y, z, w = struct.unpack_from("<4f", data, cp)
                         if (w == 0.0
-                                and all(abs(v) < 50000 for v in [x, y, z] if v == v)):
+                                and x == x and y == y and z == z
+                                and all(abs(v) < 50000 for v in [x, y, z])):
                             entities[name] = {
                                 "name_offset": s_start,
                                 "name_len": s_end - s_start,
@@ -347,9 +351,9 @@ def find_level_entities(data: bytes) -> dict[str, dict]:
                                 "x": x, "y": y, "z": z,
                             }
                             break
-                i = s_end + 1
+                i = data.find(MARKER, s_end + 1)
                 continue
-        i += 1
+        i = data.find(MARKER, i + 1)
     return entities
 
 
@@ -547,7 +551,7 @@ def cmd_dump(args):
                                        key=lambda x: x[1].get("prop_index", 0)):
             offset = int(prop["value_file_offset"], 16)
             tf = prop.get("type_flag", 0)
-            val = read_value(data, offset, tf) if offset + 4 <= len(data) else "?"
+            val = read_value(data, offset, tf) if offset + 8 <= len(data) else "?"
             ts = {0: "unset", 1: "float", 2: "int"}.get(tf, f"?{tf}")
             print(f"    {prop_name:<30} = {format_value(val, tf):<15} [{ts}]  @0x{offset:06X}")
 
@@ -574,7 +578,7 @@ def cmd_diff(args):
             continue
         offset = int(prop["value_file_offset"], 16)
         tf = prop.get("type_flag", 0)
-        cur = read_value(data, offset, tf) if offset + 4 <= len(data) else "?"
+        cur = read_value(data, offset, tf) if offset + 8 <= len(data) else "?"
         cur_s = format_value(cur, tf)
         new_s = format_value(p["value"], tf)
         marker = "~" if cur_s != new_s else "="
@@ -824,13 +828,14 @@ def cmd_randomize_gems(args):
             changes = 0
             for g, new_base in zip(gems, base_types):
                 new_name = new_base + g["gem_suffix"]
-                if len(new_name) > NAME_FIELD_SIZE:
+                field_size = max(g["name_len"], len(new_name) + 1)
+                if len(new_name) > g["name_len"]:
                     continue
                 if g["name"] != new_name:
                     changes += 1
                 offset = g["name_offset"]
-                new_bytes = new_name.encode("ascii").ljust(NAME_FIELD_SIZE, b"\x00")
-                data[offset:offset + NAME_FIELD_SIZE] = new_bytes
+                new_bytes = new_name.encode("ascii").ljust(field_size, b"\x00")
+                data[offset:offset + field_size] = new_bytes
 
             level_file.write_bytes(data)
 
@@ -1227,13 +1232,14 @@ def cmd_randomize(args):
                 changes = 0
                 for g, new_base in zip(gems, base_types):
                     new_name = new_base + g["gem_suffix"]
-                    if len(new_name) > NAME_FIELD_SIZE:
+                    if len(new_name) > g["name_len"]:
                         continue
                     if g["name"] != new_name:
                         changes += 1
                     offset = g["name_offset"]
-                    new_bytes = new_name.encode("ascii").ljust(NAME_FIELD_SIZE, b"\x00")
-                    data[offset:offset + NAME_FIELD_SIZE] = new_bytes
+                    field_size = g["name_len"]
+                    new_bytes = new_name.encode("ascii").ljust(field_size, b"\x00")
+                    data[offset:offset + field_size] = new_bytes
 
                 modified_levels[level_name] = data
                 total_gems += len(gems)
@@ -1348,7 +1354,9 @@ def cmd_randomize(args):
                 for pu, new_elem in zip(powerups, elements):
                     data = modified_levels[pu["level"]]
                     old_name = pu["name"]
-                    new_name = f"power_{new_elem}"
+                    old_elem = pu["element"]
+                    suffix = old_name[len(f"power_{old_elem}"):]
+                    new_name = f"power_{new_elem}{suffix}"
 
                     if len(new_name) > NAME_FIELD_SIZE:
                         print(f"    WARNING: '{new_name}' exceeds {NAME_FIELD_SIZE} bytes, skipping")
@@ -1442,7 +1450,8 @@ def _find_all_entities_in_level(data: bytes, level_name: str):
                         if cp < 0 or cp + 16 > len(data):
                             continue
                         x, y, z, w = struct.unpack_from("<4f", data, cp)
-                        if w == 0.0 and all(abs(v) < 50000 for v in [x, y, z] if v == v):
+                        if (w == 0.0 and x == x and y == y and z == z
+                                and all(abs(v) < 50000 for v in [x, y, z])):
                             entities[name] = {
                                 "name_offset": pos,
                                 "name_len": len(needle),
@@ -1952,11 +1961,13 @@ def cmd_randomize_full(args):
             xbe_path = extract_dir / "default.xbe"
             xbe_data = bytearray(xbe_path.read_bytes())
 
-            # Disable gem first-pickup popups
+            # Disable gem first-pickup popups (null first byte of popup string path)
+            popup_count = 0
             for off in GEM_POPUP_OFFSETS:
-                if off < len(xbe_data):
+                if off < len(xbe_data) and xbe_data[off] != 0x00:
                     xbe_data[off] = 0x00
-            print(f"  Disabled 5 gem first-pickup popups")
+                    popup_count += 1
+            print(f"  Disabled {popup_count} gem first-pickup popups")
 
             # Disable obsidian fist pump animation
             if OBSIDIAN_ANIM_OFFSET + 6 <= len(xbe_data):
@@ -2068,13 +2079,17 @@ def cmd_randomize_full(args):
             print(f"\n  Patching obsidian lock thresholds (cost={obsidian_cost} per lock)...")
             town_data = modified_levels["town"]
             thresholds = [obsidian_cost * (i + 1) for i in range(OBSIDIAN_LOCK_COUNT)]
+            patched_tables = 0
             for table_base in [OBSIDIAN_LOCK_TABLE_A, OBSIDIAN_LOCK_TABLE_B]:
+                last_off = table_base + (OBSIDIAN_LOCK_COUNT - 1) * OBSIDIAN_LOCK_ENTRY_SIZE
+                if last_off + 4 > len(town_data):
+                    print(f"  WARNING: Lock table at 0x{table_base:X} out of range for town.xbr")
+                    continue
                 for i, thresh in enumerate(thresholds):
                     off = table_base + i * OBSIDIAN_LOCK_ENTRY_SIZE
-                    if off + 4 <= len(town_data):
-                        old_val = struct.unpack_from("<f", town_data, off)[0]
-                        struct.pack_into("<f", town_data, off, float(thresh))
-            print(f"  Thresholds: {thresholds}")
+                    struct.pack_into("<f", town_data, off, float(thresh))
+                patched_tables += 1
+            print(f"  Thresholds: {thresholds} ({patched_tables} tables patched)")
 
         # Write all modified level files back
         for level_name, data in modified_levels.items():

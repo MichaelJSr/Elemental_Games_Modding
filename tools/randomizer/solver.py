@@ -116,13 +116,12 @@ class Solver:
                 print(f"  Inventory: {sorted(state.inventory)}")
                 print(f"  Reachable: {sorted(state.reachable_nodes)}")
 
-            # Collect all pickups and trigger events at reachable nodes
+            # Collect pickups at newly-reachable nodes
             for node_id in list(state.reachable_nodes):
                 if node_id not in state.visited_nodes:
                     state.visited_nodes.add(node_id)
                     changed = True
 
-                    # Collect pickups
                     for pickup_idx, item in enumerate(pickup_map.get(node_id, [])):
                         pickup_key = f"{node_id}:{pickup_idx}:{item}"
                         if pickup_key not in state.collected_pickups:
@@ -132,7 +131,6 @@ class Solver:
                             if verbose:
                                 print(f"  + Collect: {item} @ {node_id}")
 
-                            # Track power levels: collecting duplicates grants L2/L3
                             base = POWER_BASE.get(item)
                             if base:
                                 level = state.power_levels.get(base, 0) + 1
@@ -145,7 +143,10 @@ class Solver:
                                     if verbose:
                                         print(f"    -> Power level: {marker}")
 
-                # Trigger events whose requirements are met
+            # Re-evaluate events at ALL reachable nodes every iteration.
+            # Events may require items obtained after the node was first visited
+            # (e.g. placing discs at town_core after collecting them elsewhere).
+            for node_id in list(state.reachable_nodes):
                 node_data = self.nodes[node_id]
                 for event_def in node_data.get("events", []):
                     event_id = event_def["event"]
@@ -160,7 +161,6 @@ class Solver:
                         if verbose:
                             print(f"  * Event: {event_id} @ {node_id}")
 
-                        # Grant item(s) from event (fragments, keys, etc.)
                         if event_id in self.disc_sources:
                             drops = self.disc_sources[event_id]
                             if isinstance(drops, str):
@@ -336,12 +336,10 @@ class Solver:
                     state.visited_nodes.add(node_id)
                     changed = True
 
-                    # Collect fixed pickups (not in randomizable pool)
                     node_data = self.nodes[node_id]
                     for pickup in node_data.get("pickups", []):
                         if pickup not in skip_pickups and pickup not in state.inventory:
                             state.inventory.add(pickup)
-                            # Track power levels for fixed pickups too
                             base = POWER_BASE.get(pickup)
                             if base:
                                 level = state.power_levels.get(base, 0) + 1
@@ -350,25 +348,27 @@ class Solver:
                                     state.inventory.add(f"{base}_L{level}")
                             changed = True
 
-                    # Trigger events (to get event drops and unlock event-gated paths)
-                    for event_def in node_data.get("events", []):
-                        event_id = event_def["event"]
-                        if event_id in state.triggered_events:
-                            continue
-                        reqs = event_def.get("requires", [])
-                        if state.has_all(reqs):
-                            state.triggered_events.add(event_id)
-                            state.inventory.add(event_id)
-                            changed = True
-                            if event_id in self.disc_sources:
-                                drops = self.disc_sources[event_id]
-                                if isinstance(drops, str):
-                                    drops = [drops]
-                                for drop in drops:
-                                    state.inventory.add(drop)
-                                    changed = True
+            # Re-evaluate events at all reachable nodes (not just first visit)
+            for node_id in list(state.reachable_nodes):
+                node_data = self.nodes[node_id]
+                for event_def in node_data.get("events", []):
+                    event_id = event_def["event"]
+                    if event_id in state.triggered_events:
+                        continue
+                    reqs = event_def.get("requires", [])
+                    if state.has_all(reqs):
+                        state.triggered_events.add(event_id)
+                        state.inventory.add(event_id)
+                        changed = True
+                        if event_id in self.disc_sources:
+                            drops = self.disc_sources[event_id]
+                            if isinstance(drops, str):
+                                drops = [drops]
+                            for drop in drops:
+                                state.inventory.add(drop)
+                                changed = True
 
-                # Check disc assembly from fragments
+            for node_id in list(state.reachable_nodes):
                 for disc_name, frags in self.disc_from_fragments.items():
                     if disc_name not in state.inventory and all(
                         f in state.inventory for f in frags
@@ -376,7 +376,6 @@ class Solver:
                         state.inventory.add(disc_name)
                         changed = True
 
-                # Expand connections
                 node_data = self.nodes[node_id]
                 for conn_id, conn_data in node_data.get("connections", {}).items():
                     reqs = conn_data.get("requires", [])
@@ -706,8 +705,8 @@ class Solver:
                     group_locs = [loc for loc in reachable_locs
                                   if loc[3] == chosen_group]
                 else:
-                    # Truly stuck
-                    continue
+                    # Truly stuck -- no reachable location for any remaining item
+                    break
 
             chosen_loc = rng.choice(group_locs)
             loc_node, loc_idx, loc_orig, loc_group = chosen_loc
@@ -882,7 +881,6 @@ class Solver:
                         if node_id not in placement:
                             placement[node_id] = {}
                         placement[node_id][orig_name] = new_name
-                        break
 
         return placement
 

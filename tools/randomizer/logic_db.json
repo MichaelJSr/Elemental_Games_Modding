@@ -16,7 +16,7 @@
       "event_place_disc_life"
     ]
   },
-  "starting_node": "town_core",
+  "starting_node": "w1_beach",
   "starting_items": [],
   "items": {
     "powers": [
@@ -203,13 +203,13 @@
       "events": [],
       "connections": {
         "town_core": {
-          "requires": []
+          "requires": ["power_water"]
         },
         "w1_ocean": {
           "requires": ["power_fire", "power_water"]
         },
         "w2_core": {
-          "requires": ["power_water"]
+          "requires": []
         }
       }
     },
@@ -974,6 +974,21 @@
       ],
       "connections": {
         "town_core": {
+          "requires": []
+        },
+        "d2_core": {
+          "requires": []
+        }
+      }
+    },
+
+    "d2_core": {
+      "region": "death",
+      "level": "d2",
+      "pickups": [],
+      "events": [],
+      "connections": {
+        "d1_core": {
           "requires": []
         }
       }
