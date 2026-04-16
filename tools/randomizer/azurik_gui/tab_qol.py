@@ -22,6 +22,13 @@ QOL_PATCHES = [
         "included_in_randomizer": True,
     },
     {
+        "key": "disable_fist_pump",
+        "label": "Disable per-pickup fist pump animation",
+        "description": "Skips the fist pump animation that plays every time you pick up an item.",
+        "default": True,
+        "included_in_randomizer": True,
+    },
+    {
         "key": "fps_unlock",
         "label": "60 FPS unlock (experimental)",
         "description": "Unlocks 60 fps: removes the 30 fps VBlank cap, doubles the "
@@ -31,8 +38,9 @@ QOL_PATCHES = [
                        "corrects render-phase flash timers, tunes the collision "
                        "solver bounce limit and impulse scaling for correct stair "
                        "climbing, scales the ground probe offset to fix edge-walk "
-                       "velocity, and uses FISTP truncation to prevent the "
-                       "60→30 fps death spiral.",
+                       "velocity, uses FISTP truncation to prevent the "
+                       "60→30 fps death spiral, and caps simulation steps at 2 "
+                       "per frame to prevent crash on death at low FPS.",
         "default": False,
         "included_in_randomizer": False,
     },
@@ -50,9 +58,8 @@ class QoLTab(ttk.Frame):
         ttk.Label(self, text="Quality of Life Patches",
                   font=("", 11, "bold")).pack(anchor=tk.W, padx=10, pady=(10, 5))
 
-        ttk.Label(self, text="These patches are automatically applied when the "
-                  "randomizer's QoL option is enabled.\n"
-                  "Future standalone patches will be configurable here.",
+        ttk.Label(self, text="Toggle individual patches below. These are applied "
+                  "when the randomizer's QoL option is enabled.",
                   wraplength=500, justify=tk.LEFT).pack(anchor=tk.W, padx=10, pady=(0, 10))
 
         for patch in QOL_PATCHES:

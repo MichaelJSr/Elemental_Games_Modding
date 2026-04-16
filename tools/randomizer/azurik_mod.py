@@ -909,28 +909,6 @@ BARRIER_OFFSETS = {
 BARRIER_FOURCCS = [b"watr", b"fire", b"smsh", b"wind"]
 BARRIER_FOURCCS_HARD = [b"watr", b"fire", b"smsh", b"wind", b"stem", b"acid", b"ice\x00", b"litn"]
 
-# XBE QoL patch offsets
-# Gem popup string file offsets (null first byte to disable)
-GEM_POPUP_OFFSETS = [0x197858, 0x19783C, 0x197820, 0x197800, 0x1977D8]
-# Obsidian fist pump animation: patch 6 bytes at file offset 0x0489C3
-OBSIDIAN_ANIM_OFFSET = 0x0489C3
-OBSIDIAN_ANIM_ORIGINAL = bytes([0x8B, 0x86, 0xD8, 0x01, 0x00, 0x00])
-OBSIDIAN_ANIM_PATCH = bytes([0xEB, 0x1C, 0x90, 0x90, 0x90, 0x90])
-
-# Per-pickup fist pump animation: player state machine at 0x2B0F2
-# State 0x1E checks absorbed entity type (+0x148); if non-zero, plays animation 0x52
-# Patch the conditional JE to unconditional JMP to always skip the animation
-FIST_PUMP_OFFSET = 0x02B0F2
-FIST_PUMP_ORIGINAL = bytes([0x74, 0x0C])  # JE +12 (skip if zero)
-FIST_PUMP_PATCH = bytes([0xEB, 0x0C])     # JMP +12 (always skip)
-
-# Player character swap: replace "garret4" with another character model
-# At file offset 0x1976C8, "garret4\0d:\" = 12 bytes, can fit any name up to 11 chars
-PLAYER_CHAR_OFFSET = 0x1976C8
-PLAYER_CHAR_ORIGINAL = bytes([0x67,0x61,0x72,0x72,0x65,0x74,0x34,0x00,
-                               0x64,0x3a,0x5c,0x00])  # "garret4\0d:\\0"
-PLAYER_CHAR_MAX_LEN = 11  # max chars (12 bytes with null)
-
 # Obsidian lock threshold tables in town.xbr
 # Two identical tables of 10 entries (48 bytes each), threshold float at +0
 OBSIDIAN_LOCK_TABLE_A = 0x37DBDC4
@@ -951,396 +929,9 @@ TOWN_BARRIER_SCALE = 0.5
 # Offsets of scale floats relative to the entity name offset
 SCALE_OFFSETS = [-56, -36, -20]
 
-# ---------------------------------------------------------------------------
-# XBE section table — used by va_to_file() to convert Ghidra virtual addresses
-# to raw file offsets.  (va_start, raw_start) pairs from the XBE section headers.
-# ---------------------------------------------------------------------------
-_XBE_SECTIONS = [
-    (0x011000, 0x001000),   # .text
-    (0x1001E0, 0x0F01E0),   # BINK
-    (0x11D5C0, 0x118000),   # D3D
-    (0x135460, 0x12FE60),   # DSOUND
-    (0x154BA0, 0x14F5A0),   # XGRPH
-    (0x168680, 0x163080),   # D3DX
-    (0x187BA0, 0x1825A0),   # XPP
-    (0x18F3A0, 0x188000),   # .rdata
-    (0x1A29A0, 0x19C000),   # .data
-]
-
-
-def va_to_file(va: int) -> int:
-    """Convert a virtual address to an XBE file offset using the section table."""
-    for va_start, raw_start in reversed(_XBE_SECTIONS):
-        if va >= va_start:
-            return raw_start + (va - va_start)
-    raise ValueError(f"VA 0x{va:X} is below all known sections")
-
-
-# 60 FPS unlock — three independent caps must be lifted:
-#
-# XBE section mappings are in _XBE_SECTIONS / va_to_file() — use
-# va_to_file(VA) for all offset calculations; never hand-compute.
-#
-# A. Render cap (manual VBlank loop): FUN_0008fbe0 (present wrapper) waits
-#    for 2 VBlanks between presents via
-#      ADD ECX,2; CMP EAX,ECX; JNC done; BlockUntilVerticalBlank
-#    At 60 Hz display refresh this forces 30 fps rendering.
-#    Patch 1a lowers N from 2 to 1 → 60 fps target.
-#
-# B. Render cap (D3D hardware VSync): FUN_001262d0 (buffer flip, called by
-#    D3DDevice_Present) writes NV2A push buffer value 0x304 (VSync-on-flip).
-#    On real hardware, VSync completes near-instantly because the manual loop
-#    already waited for a VBlank.  In xemu the NV2A VSync may be emulated as
-#    a synchronous CPU block, adding a SECOND ~16.67 ms wait per frame on top
-#    of the manual loop — producing 30/60 fps oscillation and audio desync.
-#    Patch 1b forces the Immediate path (value 0x300), eliminating the
-#    double-wait while the manual VBlank loop remains the sole frame pacer.
-#
-# C. Simulation cap: FUN_00058e40 (main loop) calculates simulation steps as:
-#      steps = ROUND((delta - remainder) * rate)   — clamped to [1, max]
-#    then runs each step with fixed dt.  The "remainder" at [ESP+0x40] is a
-#    Bresenham-style error term written by the catchup path to absorb frame
-#    hitches.  Patch 5 raises the catchup step count from 2 to 4 (matching
-#    Patch 4's clamp) while preserving the remainder computation.
-#
-# Patch 1a: VBlank wait 2→1  (ADD ECX, imm8 at VA 0x8FD19)
-# Present wrapper waits until currentVBlank >= lastVBlank + N.
-# N=2 → 30 fps, N=1 → 60 fps (one VBlank per present, still VSync'd).
-# This manual loop is the SOLE frame pacer after Patch 1b disables D3D VSync.
-FPS_VBLANK_OFFSET = va_to_file(0x08FD19)
-FPS_VBLANK_ORIGINAL = bytes([0x83, 0xC1, 0x02])  # ADD ECX, 0x2
-FPS_VBLANK_PATCH    = bytes([0x83, 0xC1, 0x01])  # ADD ECX, 0x1
-
-# Patch 1b: Disable D3D hardware VSync in Present  (JNZ at VA 0x12635D)
-# D3DDevice_Present (via FUN_001262d0) writes NV2A push buffer value 0x304
-# (VSync-on-flip) when PresentationInterval != IMMEDIATE.  In xemu this may
-# be emulated as a synchronous CPU block, adding a SECOND ~16.67 ms wait on
-# top of the manual VBlank loop — producing the observed 30/60 fps oscillation.
-# NOPing the JNZ forces the Immediate path (push buffer value 0x300), so the
-# GPU flips without an extra VSync wait.  The manual VBlank loop (Patch 1a)
-# remains the sole frame pacer.
-# NOTE: VA 0x12635D is in the D3D section (VA 0x11D5C0, raw 0x118000),
-#       so file_offset = VA - 0x55C0.
-FPS_PRESENT_VSYNC_OFFSET   = va_to_file(0x12635D)
-FPS_PRESENT_VSYNC_ORIGINAL = bytes([0x75, 0x09])    # JNZ +9  (take VSync 0x304 path)
-FPS_PRESENT_VSYNC_PATCH    = bytes([0x90, 0x90])    # NOP NOP (fall through → Immediate 0x300)
-
-# Patch 2: rate multiplier 30.0 → 60.0  (double at VA 0x1A28C8, in .rdata)
-# .rdata section: VA 0x18F3A0, raw 0x188000 → file_offset = VA - 0x73A0
-FPS_RATE_OFFSET = va_to_file(0x1A28C8)
-FPS_RATE_ORIGINAL = bytes([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3E, 0x40])  # double 30.0
-FPS_RATE_PATCH    = bytes([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4E, 0x40])  # double 60.0
-
-# Patch 3: fixed timestep 1/30 → 1/60  (float at VA 0x1983E8, in .rdata)
-FPS_DT_OFFSET = va_to_file(0x1983E8)
-FPS_DT_ORIGINAL = bytes([0x89, 0x88, 0x08, 0x3D])  # float 0.033333335
-FPS_DT_PATCH    = bytes([0x89, 0x88, 0x88, 0x3C])  # float 0.016666668
-
-# Patch 4: FISTP truncation + max step clamp  (VA 0x59AFD, 58 bytes in .text)
-#
-# The original code uses FISTP with round-to-nearest-even to compute
-#   steps = ROUND(delta * rate)
-# At 60 fps, when a frame takes just over 25 ms (delta*60 = 1.5),
-# ROUND(1.5) = 2, doubling the simulation workload.  The extra CPU cost
-# pushes the next frame past 25 ms as well, creating a self-reinforcing
-# feedback loop that locks the game at exactly 30 fps (2 steps per frame).
-# No intermediate frame rates (40, 45, 50 fps) are stable — the system is
-# bistable at 60 fps (1 step) and 30 fps (2 steps).
-#
-# Fix: temporarily switch the x87 FPU to truncation mode (round toward zero)
-# before FISTP, then restore the original rounding mode.  With truncation,
-# TRUNC(1.5) = 1, TRUNC(1.99) = 1.  The step count only reaches 2 when
-# delta*60 >= 2.0 (frame time >= 33.33 ms), which is the mathematically
-# correct threshold.  This eliminates the premature death spiral.
-#
-# This patch subsumes the old Patch 4 (CMP ESI, 2 → CMP ESI, 4) since
-# it replaces the entire step-calculation block including the max clamp.
-FPS_TRUNC_OFFSET = va_to_file(0x059AFD)
-FPS_TRUNC_ORIGINAL = bytes([
-    0xDD, 0x5C, 0x24, 0x60,                           # FSTP double [ESP+0x60]
-    0xDD, 0x44, 0x24, 0x60,                            # FLD double [ESP+0x60]
-    0xDB, 0x5C, 0x24, 0x30,                            # FISTP dword [ESP+0x30]
-    0x8B, 0x44, 0x24, 0x30,                            # MOV EAX, [ESP+0x30]
-    0x89, 0x44, 0x24, 0x14,                            # MOV [ESP+0x14], EAX
-    0xC7, 0x44, 0x24, 0x60, 0x01, 0x00, 0x00, 0x00,   # MOV dword [ESP+0x60], 1
-    0x8B, 0x44, 0x24, 0x14,                            # MOV EAX, [ESP+0x14]
-    0x3B, 0x44, 0x24, 0x60,                            # CMP EAX, [ESP+0x60]
-    0x0F, 0x4C, 0x44, 0x24, 0x60,                      # CMOVL EAX, [ESP+0x60]
-    0x89, 0x44, 0x24, 0x68,                            # MOV [ESP+0x68], EAX
-    0x8B, 0x74, 0x24, 0x68,                            # MOV ESI, [ESP+0x68]
-    0x83, 0xFE, 0x02,                                  # CMP ESI, 0x2
-    0x89, 0x74, 0x24, 0x14,                            # MOV [ESP+0x14], ESI
-    0x7E, 0x36,                                        # JLE 0x59B6D
-])
-FPS_TRUNC_PATCH = bytes([
-    # --- Save FPU control word, set truncation mode ---
-    0xD9, 0x7C, 0x24, 0x60,                            # FNSTCW [ESP+0x60]
-    0x66, 0x8B, 0x44, 0x24, 0x60,                      # MOV AX, [ESP+0x60]
-    0x66, 0x0D, 0x00, 0x0C,                            # OR AX, 0x0C00  (RC=11 truncate)
-    0x66, 0x89, 0x44, 0x24, 0x62,                      # MOV [ESP+0x62], AX
-    0xD9, 0x6C, 0x24, 0x62,                            # FLDCW [ESP+0x62]
-    # --- Truncate delta*rate to integer ---
-    0xDB, 0x5C, 0x24, 0x30,                            # FISTP dword [ESP+0x30]
-    # --- Restore original FPU rounding mode ---
-    0xD9, 0x6C, 0x24, 0x60,                            # FLDCW [ESP+0x60]
-    # --- Clamp to [1, 4], store, and branch ---
-    0x8B, 0x74, 0x24, 0x30,                            # MOV ESI, [ESP+0x30]
-    0x83, 0xFE, 0x01,                                  # CMP ESI, 1
-    0x7D, 0x05,                                        # JGE +5 (skip min clamp)
-    0xBE, 0x01, 0x00, 0x00, 0x00,                      # MOV ESI, 1
-    0x89, 0x74, 0x24, 0x14,                            # MOV [ESP+0x14], ESI
-    0x83, 0xFE, 0x04,                                  # CMP ESI, 0x4
-    0x7E, 0x3B,                                        # JLE 0x59B6D (+0x3B from here)
-    0x90, 0x90, 0x90, 0x90, 0x90,                      # 5x NOP (fill to 58 bytes)
-])
-
-# Patch 5: catchup code — raise step cap to 4, keep remainder (VA 0x59B37, 30 bytes)
-#
-# The main loop uses a Bresenham-style remainder at [ESP+0x40] for hitch recovery.
-# When a frame hitch causes steps > max, the catchup block:
-#   1. Caps ESI to the max step count
-#   2. Computes remainder = raw_delta - max_steps * dt
-# On the next frame, the FSUB at 0x59AF3 subtracts this remainder from delta,
-# which immediately restores 1-step-per-frame operation.  The "lost" hitch time
-# is absorbed into the remainder and effectively discarded.
-#
-# Original: steps=2, remainder = raw_delta - 2*dt
-# Patched:  steps=4, remainder = raw_delta - 4*dt
-#
-# The cap of 4 matches the CMP ESI, 4 in Patch 4.  We compute 4*dt via two
-# FADD ST0,ST0 (dt→2dt→4dt).  The FSUBR/FSTP pair is preserved so the
-# remainder mechanism keeps working.
-FPS_CATCHUP_OFFSET = va_to_file(0x059B37)
-FPS_CATCHUP_ORIGINAL = bytes([
-    0xD9, 0x05, 0xE8, 0x83, 0x19, 0x00,              # FLD float ptr [0x1983E8]
-    0xBE, 0x02, 0x00, 0x00, 0x00,                      # MOV ESI, 0x2
-    0xDC, 0xC0,                                         # FADD ST0, ST0
-    0x89, 0x74, 0x24, 0x14,                             # MOV [ESP+0x14], ESI
-    0xDC, 0xAC, 0x24, 0x80, 0x00, 0x00, 0x00,          # FSUBR double [ESP+0x80]
-    0xDD, 0x5C, 0x24, 0x40,                             # FSTP double [ESP+0x40]
-    0xEB, 0x18,                                         # JMP +0x18
-])
-FPS_CATCHUP_PATCH = bytes([
-    0xD9, 0x05, 0xE8, 0x83, 0x19, 0x00,              # FLD float ptr [0x1983E8]  (dt)
-    0x6A, 0x04,                                        # PUSH 0x4
-    0x5E,                                              # POP ESI                  (ESI = 4)
-    0xDC, 0xC0,                                        # FADD ST0, ST0            (2*dt)
-    0xDC, 0xC0,                                        # FADD ST0, ST0            (4*dt)
-    0x89, 0x74, 0x24, 0x14,                            # MOV [ESP+0x14], ESI
-    0xDC, 0xAC, 0x24, 0x80, 0x00, 0x00, 0x00,         # FSUBR double [ESP+0x80]  (raw_delta - 4*dt)
-    0xDD, 0x5C, 0x24, 0x40,                            # FSTP double [ESP+0x40]   (store remainder)
-    0xEB, 0x18,                                        # JMP +0x18
-])
-
-# ---------------------------------------------------------------------------
-# Patches 7+: Subsystem .rdata 1/30 → 1/60 constants
-# ---------------------------------------------------------------------------
-# The engine duplicates the 1/30 (0.033333335) float constant across .rdata for
-# each subsystem (camera, animation, physics, FSM, scheduler, etc.). Each copy
-# is used as a per-call timestep or scheduler interval.  At 60 fps these
-# subsystems are invoked twice as often, so each constant must be halved to
-# preserve wall-clock behaviour.
-#
-# All share the same 4-byte IEEE-754 pattern and the same .rdata VA→file mapping:
-#   file_offset = VA - 0x73A0
-#
-# Known limitation — FUN_00043a00 blend math:
-#   Computes [0x198628] * [0x1A2740] = (1/30)*(1/30) = 1/900.
-#   After patching both to 1/60 the product is 1/3600; at 60 fps (2× calls/sec)
-#   the net blend rate is half the original wall-time rate.  Layered animation
-#   transitions may take ~2× longer.  Fixing this would require code injection
-#   to replace one factor with a separate constant.
-#
-# Known limitation — scheduler quantum:
-#   FUN_000ab830 reads a per-context quantum from [ctx+0xC] that is initialized
-#   at runtime, not from a static .rdata pool.  Cannot be fixed by static binary
-#   patching; scheduler time-snapping may round differently at 60 Hz.
-#
-# Known limitation — camera per-frame damping:
-#   Camera lerp factors (e.g. lerp(old, target, factor)) lack * dt scaling and
-#   are buried in virtual dispatch chains.  Camera smoothing may feel slightly
-#   different at 60 fps.
-#
-# Previously unpatched — 0x198580 (animation event scheduling):
-#   Used as 1/30 * 5.0 = 1/6 in FUN_00048400 / FUN_00048630.  Now patched:
-#   at 60fps the per-frame dt must be 1/60 so the product becomes 1/60*5 = 1/12.
-
-FPS_SUBSYSTEM_ORIGINAL = bytes([0x89, 0x88, 0x08, 0x3D])  # float 1/30
-FPS_SUBSYSTEM_PATCH    = bytes([0x89, 0x88, 0x88, 0x3C])  # float 1/60
-
-FPS_SUBSYSTEM_OFFSETS = [
-    # Tier 1 — High Impact (visual smoothness / game speed)
-    ("camera",          va_to_file(0x1981C8)),  # 8 xrefs — also fixes min-timestep floor
-    ("animation",       va_to_file(0x198628)),  # 10 xrefs
-    ("physics",         va_to_file(0x198688)),  # 10 xrefs
-    ("character_fsm",   va_to_file(0x1980A0)),  # 11 xrefs
-    # Tier 2 — Medium Impact (gameplay feel)
-    ("entity_init",     va_to_file(0x198410)),  # 5 xrefs
-    ("player_ctrl",     va_to_file(0x198560)),  # 2 xrefs
-    ("lod_blend",       va_to_file(0x1981E0)),  # 6 xrefs
-    ("movement",        va_to_file(0x19873C)),  # 6 xrefs
-    # Tier 3 — Scheduler Intervals
-    ("timer_cooldown",  va_to_file(0x198120)),  # 1 xref
-    ("effect_sched",    va_to_file(0x1981F0)),  # 2 xrefs
-    ("world_sched",     va_to_file(0x198228)),  # 1 xref
-    ("minor_sched",     va_to_file(0x1985D0)),  # 1 xref
-    ("anim_blend",      va_to_file(0x198700)),  # 4 xrefs
-    ("per_tick_accum",  va_to_file(0x198758)),  # 5 xrefs
-    ("fsm_integration", va_to_file(0x198788)),  # 3 xrefs
-    ("sched_requant",   va_to_file(0x198AB0)),  # 2 xrefs
-    ("anim_blend2",     va_to_file(0x1A2740)),  # 4 xrefs
-    # Tier 4 — Newly Discovered (previously thought dead)
-    ("object_update",   va_to_file(0x1981B8)),  # 2 xrefs
-    ("entity_setup",    va_to_file(0x198968)),  # 1 xref
-    ("timestep_accum",  va_to_file(0x1989A8)),  # 2 xrefs
-    ("state_reset",     va_to_file(0x198C98)),  # 2 xrefs
-    ("critter_ai_timer",va_to_file(0x198660)),  # 1 xref — critter AI state transitions
-    ("anim_event_sched",va_to_file(0x198580)),  # 2 xrefs — animation event scheduling dt
-    # Tier 5 — Effect config table (accessed via base pointer + stride, no direct xrefs)
-    ("effect_config_1", va_to_file(0x198138)),  # table-driven
-    ("effect_config_2", va_to_file(0x1985B8)),  # table-driven
-    ("effect_config_3", va_to_file(0x1986E8)),  # table-driven
-    ("effect_config_4", va_to_file(0x1989C8)),  # table-driven
-    ("effect_config_5", va_to_file(0x198A38)),  # table-driven
-]
-
-# ---------------------------------------------------------------------------
-# Patch: double 1/30 → 1/60 for animation time accumulators (VA 0x1A2750)
-# ---------------------------------------------------------------------------
-# FUN_00066D00 and FUN_00066D70 add double 1/30 per frame to animation
-# scheduler clocks.  At 60fps they fire every 16.67ms, so the advance
-# must be 1/60 to maintain real-time parity.
-FPS_ANIM_DBL_OFFSET   = va_to_file(0x1A2750)
-FPS_ANIM_DBL_ORIGINAL = bytes([0x11, 0x11, 0x11, 0x11,
-                               0x11, 0x11, 0xA1, 0x3F])       # double 1/30
-FPS_ANIM_DBL_PATCH    = bytes([0x11, 0x11, 0x11, 0x11,
-                               0x11, 0x11, 0x91, 0x3F])       # double 1/60
-
-# ---------------------------------------------------------------------------
-# Patches: float 30.0 → 60.0  (fps-rate multipliers)
-# ---------------------------------------------------------------------------
-# Several subsystems convert wall-clock time to frame indices or velocities
-# by multiplying by 30.0.  At 60fps these must use 60.0.
-
-FPS_RATE_30_ORIGINAL = bytes([0x00, 0x00, 0xF0, 0x41])        # float 30.0
-FPS_RATE_30_PATCH    = bytes([0x00, 0x00, 0x70, 0x42])         # float 60.0
-
-FPS_RATE_30_OFFSETS = [
-    ("hud_frame_conv",  va_to_file(0x198A74)),  # 1 xref — HUD anim scroll
-    ("anim_keyframe",   va_to_file(0x198B7C)),  # 1 xref — keyframe iteration
-]
-
-# ---------------------------------------------------------------------------
-# Patch: shared float 30.0 → 60.0 + angular xref redirects (VA 0x1A2650)
-# ---------------------------------------------------------------------------
-# 20 xrefs share float 30.0 at VA 0x1A2650.  16 are fps-dependent (velocity,
-# bone velocity, frame index, FPS display, VFX seed, init compute) and need
-# 60.0.  4 compute "30 degrees" (deg2rad * 30) for collision/physics geometry
-# and MUST keep reading 30.0.
-#
-# Solution: patch 0x1A2650 to 60.0, redirect the 4 angular instructions to
-# read from VA 0x1A2524 — a naturally dead float 30.0 in .rdata (0 xrefs).
-FPS_SHARED_30_OFFSET   = va_to_file(0x1A2650)
-FPS_SHARED_30_ORIGINAL = bytes([0x00, 0x00, 0xF0, 0x41])       # float 30.0
-FPS_SHARED_30_PATCH    = bytes([0x00, 0x00, 0x70, 0x42])       # float 60.0
-
-# Angular xref redirects: change the 4-byte address operand inside each FMUL
-# instruction from 0x001A2650 → 0x001A2524 (dead float 30.0 in .rdata).
-# Each instruction is  D8 0D <addr32>  (FMUL dword ptr [addr]).
-# We patch bytes 2-5 (the address operand) only.
-FPS_ANGULAR_ADDR_ORIGINAL = bytes([0x50, 0x26, 0x1A, 0x00])    # LE 0x001A2650
-FPS_ANGULAR_ADDR_PATCH    = bytes([0x24, 0x25, 0x1A, 0x00])    # LE 0x001A2524
-
-FPS_ANGULAR_REDIRECTS = [
-    ("frustum_cone",    va_to_file(0x4E9D9)),   # FUN_0004e870 sin/cos(30°)
-    ("projectile_rot",  va_to_file(0x89AAC)),   # FUN_00089a70 projectile physics
-    ("static_init_1",   va_to_file(0xFB518)),   # C++ static init thunk → [0x38BC1C]
-    ("static_init_2",   va_to_file(0xFB608)),   # C++ static init thunk → [0x38BBE4]
-]
-
-# ---------------------------------------------------------------------------
-# Patch: D3D Present spin-wait bypass (VA 0x1263E2, D3D section)
-# ---------------------------------------------------------------------------
-# D3DDevice_Present has a spin-wait that blocks when outstanding GPU flips >= 2.
-# Even with immediate NV2A flips (Patch 1b), xemu may tie the fence completion
-# counter to VBlank timing, adding up to 16.67ms stall per frame.  Changing
-# JC (0x72) to JMP short (0xEB) always skips the spin-wait.  The relative
-# offset (+0x18) is unchanged, so execution lands at the INC + flip path.
-FPS_PRESENT_SPINWAIT_OFFSET   = va_to_file(0x1263E2)
-FPS_PRESENT_SPINWAIT_ORIGINAL = bytes([0x72])                    # JC rel8
-FPS_PRESENT_SPINWAIT_PATCH    = bytes([0xEB])                    # JMP rel8
-
-# ---------------------------------------------------------------------------
-# Patch: flash/sparkle timer (VA 0x19862C, .rdata)
-# ---------------------------------------------------------------------------
-# FUN_0003ea00 increments a per-render-frame timer by float 1/6 and also
-# divides by the same constant for fade normalisation.  At 60fps the timer
-# runs 2x fast; halving to 1/12 restores the correct real-time duration.
-# Only 2 xrefs, both inside FUN_0003ea00 — no side effects.
-FPS_FLASH_TIMER_OFFSET   = va_to_file(0x19862C)
-FPS_FLASH_TIMER_ORIGINAL = bytes([0xAB, 0xAA, 0x2A, 0x3E])     # float 1/6 (0x3E2AAAAB)
-FPS_FLASH_TIMER_PATCH    = bytes([0xAB, 0xAA, 0xAA, 0x3D])     # float 1/12 (0x3DAAAAAB)
-
-# ---------------------------------------------------------------------------
-# Patch: collision solver bounce limit (VA 0x47EEF, .text)
-# ---------------------------------------------------------------------------
-# FUN_00047380 (collision/physics solver) counts wall bounces per frame in
-# local_100.  When the counter reaches 2, it zeros ALL velocity components
-# and sets the 0x2000 "stuck" flag.  At 30 fps the larger per-frame sweep
-# clears stair steps in 1-2 bounces; at 60 fps the halved sweep requires
-# more bounces, hitting the limit and freezing the player against step faces.
-# Raising the limit from 2 to 4 gives 60 fps the same real-time collision
-# budget as the original 30 fps (4 bounces/frame × 60 fps = 2 bounces × 30).
-FPS_COLLISION_LIMIT_OFFSET   = va_to_file(0x47EEF)
-FPS_COLLISION_LIMIT_ORIGINAL = bytes([0x02])                     # CMP EAX, 0x2
-FPS_COLLISION_LIMIT_PATCH    = bytes([0x04])                     # CMP EAX, 0x4
-
-# ---------------------------------------------------------------------------
-# Patch: ground probe offset — new float 0.05 (VA 0x1A2690, .rdata)
-# ---------------------------------------------------------------------------
-# FUN_00085f50 (ground walking state) casts a downward probe 0.1 units below
-# the sweep result each frame, then recomputes velocity as (new_pos-old_pos)/dt.
-# The 0.1 offset is a fixed world-space constant (at VA 0x1A2674) that does NOT
-# scale with dt.  Its velocity contribution is -0.1*hit_fraction/dt, which
-# doubles at 60 fps.  Halving the offset to 0.05 restores the original 30 fps
-# velocity: -0.05*f/(1/60) = -3f = -0.1*f/(1/30).
-#
-# Step A: write float 0.05 (0x3D4CCCCD) at unused .rdata padding.
-FPS_PROBE_CONST_OFFSET   = va_to_file(0x1A2690)
-FPS_PROBE_CONST_ORIGINAL = bytes([0x00, 0x00, 0x00, 0x00])      # unused padding
-FPS_PROBE_CONST_PATCH    = bytes([0xCD, 0xCC, 0x4C, 0x3D])      # float 0.05
-
-# Step B: redirect the FSUB at VA 0x86160 (file 0x76160) to load from the new
-# constant at VA 0x1A2690 instead of the shared 0.1 at VA 0x1A2674.
-# Instruction: D8 25 74 26 1A 00 — bytes 2-5 hold the address operand.
-FPS_PROBE_REDIR_OFFSET   = va_to_file(0x86162)
-FPS_PROBE_REDIR_ORIGINAL = bytes([0x74, 0x26, 0x1A, 0x00])      # LE addr 0x001A2674 (0.1)
-FPS_PROBE_REDIR_PATCH    = bytes([0x90, 0x26, 0x1A, 0x00])      # LE addr 0x001A2690 (0.05)
-
-# ---------------------------------------------------------------------------
-# Patch: collision solver impulse scaling (FUN_00047380)
-# ---------------------------------------------------------------------------
-# The solver computes a correction impulse as min(2*local_174, cap) / dt.
-# local_174 is a contact correction depth (world-space length).  The 2x
-# multiplier (FADD ST0,ST0) and division by dt cause the impulse to double
-# at 60 fps.  NOP-ing the doubling and halving the cap makes the impulse
-# identical to 30 fps: min(L, cap/2)/(1/60) = min(L, cap/2)*60 matches
-# min(2L, cap)/(1/30) = min(2L, cap)*30.
-#
-# Step A: NOP the FADD ST0,ST0 in branch 1 (VA 0x47BC6).
-FPS_SOLVER_NOP1_OFFSET   = va_to_file(0x47BC6)
-FPS_SOLVER_NOP1_ORIGINAL = bytes([0xDC, 0xC0])                   # FADD ST0,ST0
-FPS_SOLVER_NOP1_PATCH    = bytes([0x90, 0x90])                   # NOP NOP
-
-# Step B: NOP the FADD ST0,ST0 in branch 2 (VA 0x47CF3).
-FPS_SOLVER_NOP2_OFFSET   = va_to_file(0x47CF3)
-FPS_SOLVER_NOP2_ORIGINAL = bytes([0xDC, 0xC0])                   # FADD ST0,ST0
-FPS_SOLVER_NOP2_PATCH    = bytes([0x90, 0x90])                   # NOP NOP
-
-# Step C: halve the correction cap from ~0.001 to ~0.0005 (VA 0x1AA230).
-FPS_SOLVER_CAP_OFFSET    = va_to_file(0x1AA230)
-FPS_SOLVER_CAP_ORIGINAL  = bytes([0x6F, 0x12, 0x83, 0x3A])      # float ~0.001
-FPS_SOLVER_CAP_PATCH     = bytes([0x6F, 0x12, 0x03, 0x3A])      # float ~0.0005
+# 60 FPS and QoL patch definitions live in the patches/ package.
+from patches.fps_unlock import apply_fps_patches
+from patches.qol_patches import apply_qol_patches, apply_player_character_patch
 
 # ---------------------------------------------------------------------------
 # Level connection randomization
@@ -1921,26 +1512,6 @@ def _rename_all_refs(data: bytearray, old_name: str, new_name: str, primary_offs
         pos += 1
 
 
-def _apply_xbe_patch(xbe_data: bytearray, label: str, offset: int,
-                     original: bytes, patch: bytes):
-    """Apply a single XBE binary patch with verification."""
-    size = len(original)
-    if offset + size > len(xbe_data):
-        print(f"  WARNING: {label} — offset 0x{offset:X} out of range, skipping")
-        return False
-    current = bytes(xbe_data[offset:offset + size])
-    if current == original:
-        xbe_data[offset:offset + size] = patch
-        print(f"  {label}")
-        return True
-    if current == patch:
-        print(f"  {label} (already applied)")
-        return True
-    print(f"  WARNING: {label} — bytes at 0x{offset:X} don't match "
-          f"(got {current.hex()}, expected {original.hex()})")
-    return False
-
-
 def cmd_randomize_full(args):
     """Full game randomizer: major items, keys, gems, barriers + QoL patches."""
     xdvdfs = require_xdvdfs()
@@ -2356,120 +1927,30 @@ def cmd_randomize_full(args):
         else:
             print(f"\n[6/7] Level connections — skipped")
 
-        # Step 7: QoL XBE patches
-        if do_qol:
-            print(f"\n[7/7] Applying QoL patches to default.xbe...")
+        # Step 7: XBE patches (QoL + FPS unlock + player character)
+        needs_xbe = (do_qol
+                      or getattr(args, 'fps_unlock', False)
+                      or getattr(args, 'player_character', None))
+        if needs_xbe:
+            print(f"\n[7/7] Applying XBE patches to default.xbe...")
             xbe_path = extract_dir / "default.xbe"
             xbe_data = bytearray(xbe_path.read_bytes())
 
-            # Disable gem first-pickup popups
-            for off in GEM_POPUP_OFFSETS:
-                if off < len(xbe_data):
-                    xbe_data[off] = 0x00
-            print(f"  Disabled 5 gem first-pickup popups")
+            if do_qol:
+                apply_qol_patches(xbe_data, args)
+            else:
+                print(f"  QoL patches — skipped (--no-qol)")
 
-            # Disable obsidian fist pump animation
-            if OBSIDIAN_ANIM_OFFSET + 6 <= len(xbe_data):
-                current = bytes(xbe_data[OBSIDIAN_ANIM_OFFSET:OBSIDIAN_ANIM_OFFSET + 6])
-                if current == OBSIDIAN_ANIM_ORIGINAL:
-                    xbe_data[OBSIDIAN_ANIM_OFFSET:OBSIDIAN_ANIM_OFFSET + 6] = OBSIDIAN_ANIM_PATCH
-                    print(f"  Disabled obsidian first-pickup notification")
-                else:
-                    print(f"  WARNING: XBE bytes at 0x{OBSIDIAN_ANIM_OFFSET:X} don't match expected "
-                          f"(got {current.hex()}, expected {OBSIDIAN_ANIM_ORIGINAL.hex()})")
+            if getattr(args, 'fps_unlock', False):
+                apply_fps_patches(xbe_data)
 
-            # Disable per-pickup fist pump animation
-            if FIST_PUMP_OFFSET + 2 <= len(xbe_data):
-                current = bytes(xbe_data[FIST_PUMP_OFFSET:FIST_PUMP_OFFSET + 2])
-                if current == FIST_PUMP_ORIGINAL:
-                    xbe_data[FIST_PUMP_OFFSET:FIST_PUMP_OFFSET + 2] = FIST_PUMP_PATCH
-                    print(f"  Disabled per-pickup fist pump animation")
-                else:
-                    print(f"  WARNING: XBE bytes at 0x{FIST_PUMP_OFFSET:X} don't match expected "
-                          f"(got {current.hex()}, expected {FIST_PUMP_ORIGINAL.hex()})")
-
-            # Player character swap (experimental)
             player_char = getattr(args, 'player_character', None)
             if player_char:
-                if len(player_char) > PLAYER_CHAR_MAX_LEN:
-                    print(f"  WARNING: Player character name '{player_char}' too long "
-                          f"(max {PLAYER_CHAR_MAX_LEN} chars), skipping")
-                elif PLAYER_CHAR_OFFSET + 12 <= len(xbe_data):
-                    current = bytes(xbe_data[PLAYER_CHAR_OFFSET:PLAYER_CHAR_OFFSET + 12])
-                    if current == PLAYER_CHAR_ORIGINAL:
-                        new_bytes = player_char.encode("ascii") + b"\x00"
-                        new_bytes = new_bytes + b"\x00" * (12 - len(new_bytes))
-                        xbe_data[PLAYER_CHAR_OFFSET:PLAYER_CHAR_OFFSET + 12] = new_bytes
-                        print(f"  Player character: garret4 -> {player_char} (EXPERIMENTAL)")
-                    else:
-                        print(f"  WARNING: Player char bytes don't match expected, skipping")
-
-            # 60 FPS unlock (experimental)
-            if getattr(args, 'fps_unlock', False):
-                _apply_xbe_patch(xbe_data, "60 FPS VBlank wait (2→1 per present)",
-                                 FPS_VBLANK_OFFSET, FPS_VBLANK_ORIGINAL, FPS_VBLANK_PATCH)
-                _apply_xbe_patch(xbe_data, "60 FPS disable D3D Present VSync (fix double-wait)",
-                                 FPS_PRESENT_VSYNC_OFFSET, FPS_PRESENT_VSYNC_ORIGINAL,
-                                 FPS_PRESENT_VSYNC_PATCH)
-                _apply_xbe_patch(xbe_data, "60 FPS rate multiplier (30→60)",
-                                 FPS_RATE_OFFSET, FPS_RATE_ORIGINAL, FPS_RATE_PATCH)
-                _apply_xbe_patch(xbe_data, "60 FPS timestep (1/30→1/60)",
-                                 FPS_DT_OFFSET, FPS_DT_ORIGINAL, FPS_DT_PATCH)
-                _apply_xbe_patch(xbe_data, "60 FPS FISTP truncation + step clamp (anti-death-spiral)",
-                                 FPS_TRUNC_OFFSET, FPS_TRUNC_ORIGINAL, FPS_TRUNC_PATCH)
-                _apply_xbe_patch(xbe_data, "60 FPS catchup (ESI=4, remainder=raw_delta-4*dt)",
-                                 FPS_CATCHUP_OFFSET, FPS_CATCHUP_ORIGINAL, FPS_CATCHUP_PATCH)
-                for name, offset in FPS_SUBSYSTEM_OFFSETS:
-                    _apply_xbe_patch(xbe_data,
-                                     f"60 FPS subsystem dt {name} (1/30->1/60)",
-                                     offset, FPS_SUBSYSTEM_ORIGINAL,
-                                     FPS_SUBSYSTEM_PATCH)
-                _apply_xbe_patch(xbe_data, "60 FPS anim scheduler double (1/30->1/60)",
-                                 FPS_ANIM_DBL_OFFSET, FPS_ANIM_DBL_ORIGINAL,
-                                 FPS_ANIM_DBL_PATCH)
-                for name, offset in FPS_RATE_30_OFFSETS:
-                    _apply_xbe_patch(xbe_data,
-                                     f"60 FPS rate multiplier {name} (30->60)",
-                                     offset, FPS_RATE_30_ORIGINAL,
-                                     FPS_RATE_30_PATCH)
-                _apply_xbe_patch(xbe_data, "60 FPS shared velocity constant (30->60)",
-                                 FPS_SHARED_30_OFFSET, FPS_SHARED_30_ORIGINAL,
-                                 FPS_SHARED_30_PATCH)
-                for name, offset in FPS_ANGULAR_REDIRECTS:
-                    _apply_xbe_patch(xbe_data,
-                                     f"60 FPS angular redirect {name} (keep 30deg)",
-                                     offset, FPS_ANGULAR_ADDR_ORIGINAL,
-                                     FPS_ANGULAR_ADDR_PATCH)
-                _apply_xbe_patch(xbe_data, "60 FPS disable Present spin-wait (fix frame stall)",
-                                 FPS_PRESENT_SPINWAIT_OFFSET, FPS_PRESENT_SPINWAIT_ORIGINAL,
-                                 FPS_PRESENT_SPINWAIT_PATCH)
-                _apply_xbe_patch(xbe_data, "60 FPS flash timer (1/6->1/12)",
-                                 FPS_FLASH_TIMER_OFFSET, FPS_FLASH_TIMER_ORIGINAL,
-                                 FPS_FLASH_TIMER_PATCH)
-                _apply_xbe_patch(xbe_data, "60 FPS collision bounce limit (2->4)",
-                                 FPS_COLLISION_LIMIT_OFFSET, FPS_COLLISION_LIMIT_ORIGINAL,
-                                 FPS_COLLISION_LIMIT_PATCH)
-
-                _apply_xbe_patch(xbe_data, "60 FPS ground probe constant (write 0.05)",
-                                 FPS_PROBE_CONST_OFFSET, FPS_PROBE_CONST_ORIGINAL,
-                                 FPS_PROBE_CONST_PATCH)
-                _apply_xbe_patch(xbe_data, "60 FPS ground probe redirect (0.1->0.05)",
-                                 FPS_PROBE_REDIR_OFFSET, FPS_PROBE_REDIR_ORIGINAL,
-                                 FPS_PROBE_REDIR_PATCH)
-
-                _apply_xbe_patch(xbe_data, "60 FPS solver impulse NOP doubling (branch 1)",
-                                 FPS_SOLVER_NOP1_OFFSET, FPS_SOLVER_NOP1_ORIGINAL,
-                                 FPS_SOLVER_NOP1_PATCH)
-                _apply_xbe_patch(xbe_data, "60 FPS solver impulse NOP doubling (branch 2)",
-                                 FPS_SOLVER_NOP2_OFFSET, FPS_SOLVER_NOP2_ORIGINAL,
-                                 FPS_SOLVER_NOP2_PATCH)
-                _apply_xbe_patch(xbe_data, "60 FPS solver correction cap (0.001->0.0005)",
-                                 FPS_SOLVER_CAP_OFFSET, FPS_SOLVER_CAP_ORIGINAL,
-                                 FPS_SOLVER_CAP_PATCH)
+                apply_player_character_patch(xbe_data, player_char)
 
             xbe_path.write_bytes(xbe_data)
         else:
-            print(f"\n[7/7] QoL patches — skipped")
+            print(f"\n[7/7] XBE patches — skipped")
 
         # Config.xbr patches (from --config-mod)
         config_mod_arg = getattr(args, 'config_mod', None)
@@ -2545,7 +2026,6 @@ def cmd_randomize_full(args):
                 for i, thresh in enumerate(thresholds):
                     off = table_base + i * OBSIDIAN_LOCK_ENTRY_SIZE
                     if off + 4 <= len(town_data):
-                        old_val = struct.unpack_from("<f", town_data, off)[0]
                         struct.pack_into("<f", town_data, off, float(thresh))
             print(f"  Thresholds: {thresholds}")
 
@@ -2661,14 +2141,16 @@ def main():
     p_full = sub.add_parser("randomize-full",
         help="Full game randomizer: major items, keys, gems, barriers + QoL",
         description=(
-            "Full game randomizer with 4 shuffle pools:\n"
+            "Full game randomizer with 5 shuffle pools:\n"
             "  1. Major items: fragments + powers + town powers + obsidians (cross-level)\n"
             "  2. Keys: shuffled within elemental realm\n"
             "  3. Gems: diamond/emerald/sapphire/ruby shuffled per-level\n"
             "  4. Barriers: element vulnerability randomized per-level\n"
+            "  5. Connections: level transition destinations shuffled\n"
             "\n"
-            "Also applies QoL patches: disable gem popups + obsidian animation.\n"
-            "Use --no-major, --no-keys, --no-gems, --no-barriers, --no-qol to skip."
+            "Also applies QoL patches: disable gem popups, obsidian/fist-pump animation.\n"
+            "Use --no-major, --no-keys, --no-gems, --no-barriers, --no-connections,\n"
+            "--no-qol to skip individual categories."
         ))
     p_full.add_argument("--iso", required=True, help="Original game .iso")
     p_full.add_argument("--seed", "-s", type=int, default=42,
@@ -2687,7 +2169,13 @@ def main():
     p_full.add_argument("--no-connections", action="store_true",
                          help="Skip level connection randomization")
     p_full.add_argument("--no-qol", action="store_true",
-                         help="Skip QoL patches (gem popups, obsidian animation)")
+                         help="Skip all QoL patches")
+    p_full.add_argument("--no-gem-popups", action="store_true",
+                         help="Skip gem first-pickup popup suppression")
+    p_full.add_argument("--no-obsidian-anim", action="store_true",
+                         help="Skip obsidian pickup animation patch")
+    p_full.add_argument("--no-fist-pump", action="store_true",
+                         help="Skip per-pickup fist pump animation patch")
     p_full.add_argument("--obsidian-cost", type=int, metavar="N",
                          help="Obsidian cost per temple lock (default: 10 = locks at 10,20,...100)")
     p_full.add_argument("--item-pool",

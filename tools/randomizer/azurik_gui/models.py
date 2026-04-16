@@ -26,8 +26,13 @@ class RandomizerConfig:
     do_connections: bool = False
     do_qol: bool = True
     fps_unlock: bool = False
+    disable_gem_popups: bool = True
+    disable_obsidian_anim: bool = True
+    disable_fist_pump: bool = True
     output_path: Path | None = None
     item_pool: dict[str, int] | None = None
+    obsidian_cost: int | None = None
+    config_edits: dict | None = None
     force_unsolvable: bool = False
 
     def to_args(self, iso_path: Path) -> list[str]:
@@ -53,8 +58,18 @@ class RandomizerConfig:
             args.append("--no-qol")
         if self.fps_unlock:
             args.append("--fps-unlock")
+        if not self.disable_gem_popups:
+            args.append("--no-gem-popups")
+        if not self.disable_obsidian_anim:
+            args.append("--no-obsidian-anim")
+        if not self.disable_fist_pump:
+            args.append("--no-fist-pump")
         if self.item_pool:
             args.extend(["--item-pool", json.dumps(self.item_pool)])
+        if self.obsidian_cost is not None:
+            args.extend(["--obsidian-cost", str(self.obsidian_cost)])
+        if self.config_edits:
+            args.extend(["--config-mod", json.dumps(self.config_edits)])
         if self.force_unsolvable:
             args.append("--force")
         return args
