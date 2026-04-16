@@ -25,8 +25,10 @@ QOL_PATCHES = [
         "key": "fps_unlock",
         "label": "60 FPS unlock (experimental)",
         "description": "Unlocks 60 fps: removes the 30 fps VBlank cap, doubles the "
-                       "simulation rate to 60 Hz, patches 23 subsystem timesteps, "
-                       "velocity/collision constants, animation accumulators, and "
+                       "simulation rate to 60 Hz, patches 28 subsystem timesteps, "
+                       "velocity/collision constants, animation accumulators, "
+                       "disables the D3D Present spin-wait to prevent frame stalls, "
+                       "corrects render-phase flash timers, and "
                        "uses FISTP truncation to prevent the 60→30 fps death spiral.",
         "default": False,
         "included_in_randomizer": False,

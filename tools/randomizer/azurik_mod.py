@@ -1171,7 +1171,13 @@ FPS_SUBSYSTEM_OFFSETS = [
     ("timestep_accum",  0x191608),  # VA 0x1989A8, 2 xrefs
     ("state_reset",     0x1918F8),  # VA 0x198C98, 2 xrefs
     ("critter_ai_timer",0x1912C0),  # VA 0x198660, 1 xref — critter AI state transitions
-    ("anim_event_sched",0x191BE0),  # VA 0x198580, 2 xrefs — animation event scheduling dt
+    ("anim_event_sched",0x1911E0),  # VA 0x198580, 2 xrefs — animation event scheduling dt
+    # Tier 5 — Effect config table (accessed via base pointer + stride, no direct xrefs)
+    ("effect_config_1", 0x190D98),  # VA 0x198138, table-driven
+    ("effect_config_2", 0x191218),  # VA 0x1985B8, table-driven
+    ("effect_config_3", 0x191348),  # VA 0x1986E8, table-driven
+    ("effect_config_4", 0x191628),  # VA 0x1989C8, table-driven
+    ("effect_config_5", 0x191698),  # VA 0x198A38, table-driven
 ]
 
 # ---------------------------------------------------------------------------
@@ -1228,6 +1234,28 @@ FPS_ANGULAR_REDIRECTS = [
     ("static_init_2",   0x0EB608),  # VA 0xFB608 — C++ static init thunk → [0x38BBE4]
 ]
 
+# ---------------------------------------------------------------------------
+# Patch: D3D Present spin-wait bypass (VA 0x1263E2, D3D section)
+# ---------------------------------------------------------------------------
+# D3DDevice_Present has a spin-wait that blocks when outstanding GPU flips >= 2.
+# Even with immediate NV2A flips (Patch 1b), xemu may tie the fence completion
+# counter to VBlank timing, adding up to 16.67ms stall per frame.  Changing
+# JC (0x72) to JMP short (0xEB) always skips the spin-wait.  The relative
+# offset (+0x18) is unchanged, so execution lands at the INC + flip path.
+FPS_PRESENT_SPINWAIT_OFFSET   = 0x120E22                        # VA 0x1263E2, D3D section (VA - 0x55C0)
+FPS_PRESENT_SPINWAIT_ORIGINAL = bytes([0x72])                    # JC rel8
+FPS_PRESENT_SPINWAIT_PATCH    = bytes([0xEB])                    # JMP rel8
+
+# ---------------------------------------------------------------------------
+# Patch: flash/sparkle timer (VA 0x19862C, .rdata)
+# ---------------------------------------------------------------------------
+# FUN_0003ea00 increments a per-render-frame timer by float 1/6 and also
+# divides by the same constant for fade normalisation.  At 60fps the timer
+# runs 2x fast; halving to 1/12 restores the correct real-time duration.
+# Only 2 xrefs, both inside FUN_0003ea00 — no side effects.
+FPS_FLASH_TIMER_OFFSET   = 0x19128C                             # VA 0x19862C, .rdata (VA - 0x73A0)
+FPS_FLASH_TIMER_ORIGINAL = bytes([0xAB, 0xAA, 0x2A, 0x3E])     # float 1/6 (0x3E2AAAAB)
+FPS_FLASH_TIMER_PATCH    = bytes([0xAB, 0xAA, 0xAA, 0x3D])     # float 1/12 (0x3DAAAAAB)
 
 # ---------------------------------------------------------------------------
 # Level connection randomization
@@ -2327,6 +2355,12 @@ def cmd_randomize_full(args):
                                      f"60 FPS angular redirect {name} (keep 30deg)",
                                      offset, FPS_ANGULAR_ADDR_ORIGINAL,
                                      FPS_ANGULAR_ADDR_PATCH)
+                _apply_xbe_patch(xbe_data, "60 FPS disable Present spin-wait (fix frame stall)",
+                                 FPS_PRESENT_SPINWAIT_OFFSET, FPS_PRESENT_SPINWAIT_ORIGINAL,
+                                 FPS_PRESENT_SPINWAIT_PATCH)
+                _apply_xbe_patch(xbe_data, "60 FPS flash timer (1/6->1/12)",
+                                 FPS_FLASH_TIMER_OFFSET, FPS_FLASH_TIMER_ORIGINAL,
+                                 FPS_FLASH_TIMER_PATCH)
 
             xbe_path.write_bytes(xbe_data)
         else:
