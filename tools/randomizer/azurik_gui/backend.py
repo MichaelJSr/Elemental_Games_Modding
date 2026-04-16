@@ -67,6 +67,7 @@ def run_randomizer(
     do_barriers: bool = True,
     do_connections: bool = True,
     do_qol: bool = True,
+    fps_unlock: bool = False,
     item_pool: dict[str, int] | None = None,
     obsidian_cost: int | None = None,
     config_edits: dict | None = None,
@@ -101,6 +102,8 @@ def run_randomizer(
             args.append("--no-connections")
         if not do_qol:
             args.append("--no-qol")
+        if fps_unlock:
+            args.append("--fps-unlock")
         if item_pool:
             args.extend(["--item-pool", json.dumps(item_pool)])
         if obsidian_cost is not None:

@@ -25,6 +25,7 @@ class RandomizerConfig:
     do_barriers: bool = True
     do_connections: bool = False
     do_qol: bool = True
+    fps_unlock: bool = False
     output_path: Path | None = None
     item_pool: dict[str, int] | None = None
     force_unsolvable: bool = False
@@ -50,6 +51,8 @@ class RandomizerConfig:
             args.append("--no-connections")
         if not self.do_qol:
             args.append("--no-qol")
+        if self.fps_unlock:
+            args.append("--fps-unlock")
         if self.item_pool:
             args.extend(["--item-pool", json.dumps(self.item_pool)])
         if self.force_unsolvable:

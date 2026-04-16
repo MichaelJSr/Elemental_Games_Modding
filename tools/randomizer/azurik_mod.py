@@ -951,6 +951,175 @@ TOWN_BARRIER_SCALE = 0.5
 # Offsets of scale floats relative to the entity name offset
 SCALE_OFFSETS = [-56, -36, -20]
 
+# 60 FPS unlock — three independent caps must be lifted:
+#
+# XBE section VA-to-file-offset mappings (from section headers):
+#   .text:  VA 0x11000,  raw 0x1000   → file_offset = VA - 0x10000
+#   .rdata: VA 0x18F3A0, raw 0x188000 → file_offset = VA - 0x73A0
+#
+# A. Render cap (manual VBlank loop): FUN_0008fbe0 (present wrapper) waits
+#    for 2 VBlanks between presents via
+#      ADD ECX,2; CMP EAX,ECX; JNC done; BlockUntilVerticalBlank
+#    At 60 Hz display refresh this forces 30 fps rendering.
+#    Patch 1a lowers N from 2 to 1 → 60 fps target.
+#
+# B. Render cap (D3D hardware VSync): FUN_001262d0 (buffer flip, called by
+#    D3DDevice_Present) writes NV2A push buffer value 0x304 (VSync-on-flip).
+#    On real hardware, VSync completes near-instantly because the manual loop
+#    already waited for a VBlank.  In xemu the NV2A VSync may be emulated as
+#    a synchronous CPU block, adding a SECOND ~16.67 ms wait per frame on top
+#    of the manual loop — producing 30/60 fps oscillation and audio desync.
+#    Patch 1b forces the Immediate path (value 0x300), eliminating the
+#    double-wait while the manual VBlank loop remains the sole frame pacer.
+#
+# C. Simulation cap: FUN_00058e40 (main loop) calculates simulation steps as:
+#      steps = ROUND((delta - remainder) * rate)   — clamped to [1, max]
+#    then runs each step with fixed dt.  The "remainder" at [ESP+0x40] is a
+#    Bresenham-style error term written by the catchup path to absorb frame
+#    hitches.  Patch 5 raises the catchup step count from 2 to 4 (matching
+#    Patch 4's clamp) while preserving the remainder computation.
+#
+# Patch 1a: VBlank wait 2→1  (ADD ECX, imm8 at VA 0x8FD19)
+# Present wrapper waits until currentVBlank >= lastVBlank + N.
+# N=2 → 30 fps, N=1 → 60 fps (one VBlank per present, still VSync'd).
+# This manual loop is the SOLE frame pacer after Patch 1b disables D3D VSync.
+FPS_VBLANK_OFFSET = 0x07FD19
+FPS_VBLANK_ORIGINAL = bytes([0x83, 0xC1, 0x02])  # ADD ECX, 0x2
+FPS_VBLANK_PATCH    = bytes([0x83, 0xC1, 0x01])  # ADD ECX, 0x1
+
+# Patch 1b: Disable D3D hardware VSync in Present  (JNZ at VA 0x12635D)
+# D3DDevice_Present (via FUN_001262d0) writes NV2A push buffer value 0x304
+# (VSync-on-flip) when PresentationInterval != IMMEDIATE.  In xemu this may
+# be emulated as a synchronous CPU block, adding a SECOND ~16.67 ms wait on
+# top of the manual VBlank loop — producing the observed 30/60 fps oscillation.
+# NOPing the JNZ forces the Immediate path (push buffer value 0x300), so the
+# GPU flips without an extra VSync wait.  The manual VBlank loop (Patch 1a)
+# remains the sole frame pacer.
+# NOTE: VA 0x12635D is in the D3D section (VA 0x11D5C0, raw 0x118000),
+#       so file_offset = VA - 0x55C0.
+FPS_PRESENT_VSYNC_OFFSET   = 0x120D9D              # VA 0x12635D, in D3D section
+FPS_PRESENT_VSYNC_ORIGINAL = bytes([0x75, 0x09])    # JNZ +9  (take VSync 0x304 path)
+FPS_PRESENT_VSYNC_PATCH    = bytes([0x90, 0x90])    # NOP NOP (fall through → Immediate 0x300)
+
+# Patch 2: rate multiplier 30.0 → 60.0  (double at VA 0x1A28C8, in .rdata)
+# .rdata section: VA 0x18F3A0, raw 0x188000 → file_offset = VA - 0x73A0
+FPS_RATE_OFFSET = 0x19B528
+FPS_RATE_ORIGINAL = bytes([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3E, 0x40])  # double 30.0
+FPS_RATE_PATCH    = bytes([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4E, 0x40])  # double 60.0
+
+# Patch 3: fixed timestep 1/30 → 1/60  (float at VA 0x1983E8, in .rdata)
+FPS_DT_OFFSET = 0x191048
+FPS_DT_ORIGINAL = bytes([0x89, 0x88, 0x08, 0x3D])  # float 0.033333335
+FPS_DT_PATCH    = bytes([0x89, 0x88, 0x88, 0x3C])  # float 0.016666668
+
+# Patch 4: max step clamp 2 → 4  (CMP ESI, imm8 at VA 0x59B2E)
+FPS_CLAMP_OFFSET = 0x049B2E
+FPS_CLAMP_ORIGINAL = bytes([0x83, 0xFE, 0x02])  # CMP ESI, 0x2
+FPS_CLAMP_PATCH    = bytes([0x83, 0xFE, 0x04])  # CMP ESI, 0x4
+
+# Patch 5: catchup code — raise step cap to 4, keep remainder (VA 0x59B37, 30 bytes)
+#
+# The main loop uses a Bresenham-style remainder at [ESP+0x40] for hitch recovery.
+# When a frame hitch causes steps > max, the catchup block:
+#   1. Caps ESI to the max step count
+#   2. Computes remainder = raw_delta - max_steps * dt
+# On the next frame, the FSUB at 0x59AF3 subtracts this remainder from delta,
+# which immediately restores 1-step-per-frame operation.  The "lost" hitch time
+# is absorbed into the remainder and effectively discarded.
+#
+# Original: steps=2, remainder = raw_delta - 2*dt
+# Patched:  steps=4, remainder = raw_delta - 4*dt
+#
+# We raise the cap from 2 to 4 (matching Patch 4's CMP) and compute 4*dt via
+# two FADD ST0,ST0 (dt→2dt→4dt).  The FSUBR/FSTP pair is preserved so the
+# remainder mechanism keeps working — this prevents the fast-forward behaviour
+# that occurred when the remainder was zeroed.
+FPS_CATCHUP_OFFSET = 0x049B37
+FPS_CATCHUP_ORIGINAL = bytes([
+    0xD9, 0x05, 0xE8, 0x83, 0x19, 0x00,              # FLD float ptr [0x1983E8]
+    0xBE, 0x02, 0x00, 0x00, 0x00,                      # MOV ESI, 0x2
+    0xDC, 0xC0,                                         # FADD ST0, ST0
+    0x89, 0x74, 0x24, 0x14,                             # MOV [ESP+0x14], ESI
+    0xDC, 0xAC, 0x24, 0x80, 0x00, 0x00, 0x00,          # FSUBR double [ESP+0x80]
+    0xDD, 0x5C, 0x24, 0x40,                             # FSTP double [ESP+0x40]
+    0xEB, 0x18,                                         # JMP +0x18
+])
+FPS_CATCHUP_PATCH = bytes([
+    0xD9, 0x05, 0xE8, 0x83, 0x19, 0x00,              # FLD float ptr [0x1983E8]  (dt)
+    0x6A, 0x04,                                        # PUSH 0x4
+    0x5E,                                              # POP ESI                  (ESI = 4)
+    0xDC, 0xC0,                                        # FADD ST0, ST0            (2*dt)
+    0xDC, 0xC0,                                        # FADD ST0, ST0            (4*dt)
+    0x89, 0x74, 0x24, 0x14,                            # MOV [ESP+0x14], ESI
+    0xDC, 0xAC, 0x24, 0x80, 0x00, 0x00, 0x00,         # FSUBR double [ESP+0x80]  (raw_delta - 4*dt)
+    0xDD, 0x5C, 0x24, 0x40,                            # FSTP double [ESP+0x40]   (store remainder)
+    0xEB, 0x18,                                        # JMP +0x18
+])
+
+# ---------------------------------------------------------------------------
+# Patches 7+: Subsystem .rdata 1/30 → 1/60 constants
+# ---------------------------------------------------------------------------
+# The engine duplicates the 1/30 (0.033333335) float constant across .rdata for
+# each subsystem (camera, animation, physics, FSM, scheduler, etc.). Each copy
+# is used as a per-call timestep or scheduler interval.  At 60 fps these
+# subsystems are invoked twice as often, so each constant must be halved to
+# preserve wall-clock behaviour.
+#
+# All share the same 4-byte IEEE-754 pattern and the same .rdata VA→file mapping:
+#   file_offset = VA - 0x73A0
+#
+# Known limitation — FUN_00043a00 blend math:
+#   Computes [0x198628] * [0x1A2740] = (1/30)*(1/30) = 1/900.
+#   After patching both to 1/60 the product is 1/3600; at 60 fps (2× calls/sec)
+#   the net blend rate is half the original wall-time rate.  Layered animation
+#   transitions may take ~2× longer.  Fixing this would require code injection
+#   to replace one factor with a separate constant.
+#
+# Known limitation — scheduler quantum:
+#   FUN_000ab830 reads a per-context quantum from [ctx+0xC] that is initialized
+#   at runtime, not from a static .rdata pool.  Cannot be fixed by static binary
+#   patching; scheduler time-snapping may round differently at 60 Hz.
+#
+# Known limitation — camera per-frame damping:
+#   Camera lerp factors (e.g. lerp(old, target, factor)) lack * dt scaling and
+#   are buried in virtual dispatch chains.  Camera smoothing may feel slightly
+#   different at 60 fps.
+#
+# Known limitation — 0x198580 (1/6-second sub-rate scheduler):
+#   Used as 1/30 * 5.0 = 1/6 in FUN_00048400 / FUN_00048630.  NOT patched —
+#   the subsystem intentionally runs at 6 Hz.
+
+FPS_SUBSYSTEM_ORIGINAL = bytes([0x89, 0x88, 0x08, 0x3D])  # float 1/30
+FPS_SUBSYSTEM_PATCH    = bytes([0x89, 0x88, 0x88, 0x3C])  # float 1/60
+
+FPS_SUBSYSTEM_OFFSETS = [
+    # Tier 1 — High Impact (visual smoothness / game speed)
+    ("camera",          0x190E28),  # VA 0x1981C8, 8 xrefs — also fixes min-timestep floor
+    ("animation",       0x191288),  # VA 0x198628, 10 xrefs
+    ("physics",         0x1912E8),  # VA 0x198688, 10 xrefs
+    ("character_fsm",   0x190D00),  # VA 0x1980A0, 11 xrefs
+    # Tier 2 — Medium Impact (gameplay feel)
+    ("entity_init",     0x191070),  # VA 0x198410, 5 xrefs
+    ("player_ctrl",     0x1911C0),  # VA 0x198560, 2 xrefs
+    ("lod_blend",       0x190E40),  # VA 0x1981E0, 6 xrefs
+    ("movement",        0x19139C),  # VA 0x19873C, 6 xrefs
+    # Tier 3 — Scheduler Intervals
+    ("timer_cooldown",  0x190D80),  # VA 0x198120, 1 xref
+    ("effect_sched",    0x190E50),  # VA 0x1981F0, 2 xrefs
+    ("world_sched",     0x190E88),  # VA 0x198228, 1 xref
+    ("minor_sched",     0x191230),  # VA 0x1985D0, 1 xref
+    ("anim_blend",      0x191360),  # VA 0x198700, 4 xrefs
+    ("per_tick_accum",  0x1913B8),  # VA 0x198758, 5 xrefs
+    ("fsm_integration", 0x1913E8),  # VA 0x198788, 3 xrefs
+    ("sched_requant",   0x191710),  # VA 0x198AB0, 2 xrefs
+    ("anim_blend2",     0x19B3A0),  # VA 0x1A2740, 4 xrefs
+    # Tier 4 — Newly Discovered (previously thought dead)
+    ("object_update",   0x190E18),  # VA 0x1981B8, 2 xrefs
+    ("entity_setup",    0x1915C8),  # VA 0x198968, 1 xref
+    ("timestep_accum",  0x191608),  # VA 0x1989A8, 2 xrefs
+    ("state_reset",     0x1918F8),  # VA 0x198C98, 2 xrefs
+]
+
 
 # ---------------------------------------------------------------------------
 # Level connection randomization
@@ -1531,6 +1700,26 @@ def _rename_all_refs(data: bytearray, old_name: str, new_name: str, primary_offs
         pos += 1
 
 
+def _apply_xbe_patch(xbe_data: bytearray, label: str, offset: int,
+                     original: bytes, patch: bytes):
+    """Apply a single XBE binary patch with verification."""
+    size = len(original)
+    if offset + size > len(xbe_data):
+        print(f"  WARNING: {label} — offset 0x{offset:X} out of range, skipping")
+        return False
+    current = bytes(xbe_data[offset:offset + size])
+    if current == original:
+        xbe_data[offset:offset + size] = patch
+        print(f"  {label}")
+        return True
+    if current == patch:
+        print(f"  {label} (already applied)")
+        return True
+    print(f"  WARNING: {label} — bytes at 0x{offset:X} don't match "
+          f"(got {current.hex()}, expected {original.hex()})")
+    return False
+
+
 def cmd_randomize_full(args):
     """Full game randomizer: major items, keys, gems, barriers + QoL patches."""
     xdvdfs = require_xdvdfs()
@@ -1994,6 +2183,27 @@ def cmd_randomize_full(args):
                     else:
                         print(f"  WARNING: Player char bytes don't match expected, skipping")
 
+            # 60 FPS unlock (experimental)
+            if getattr(args, 'fps_unlock', False):
+                _apply_xbe_patch(xbe_data, "60 FPS VBlank wait (2→1 per present)",
+                                 FPS_VBLANK_OFFSET, FPS_VBLANK_ORIGINAL, FPS_VBLANK_PATCH)
+                _apply_xbe_patch(xbe_data, "60 FPS disable D3D Present VSync (fix double-wait)",
+                                 FPS_PRESENT_VSYNC_OFFSET, FPS_PRESENT_VSYNC_ORIGINAL,
+                                 FPS_PRESENT_VSYNC_PATCH)
+                _apply_xbe_patch(xbe_data, "60 FPS rate multiplier (30→60)",
+                                 FPS_RATE_OFFSET, FPS_RATE_ORIGINAL, FPS_RATE_PATCH)
+                _apply_xbe_patch(xbe_data, "60 FPS timestep (1/30→1/60)",
+                                 FPS_DT_OFFSET, FPS_DT_ORIGINAL, FPS_DT_PATCH)
+                _apply_xbe_patch(xbe_data, "60 FPS max step clamp (2→4)",
+                                 FPS_CLAMP_OFFSET, FPS_CLAMP_ORIGINAL, FPS_CLAMP_PATCH)
+                _apply_xbe_patch(xbe_data, "60 FPS catchup (ESI=4, remainder=raw_delta-4*dt)",
+                                 FPS_CATCHUP_OFFSET, FPS_CATCHUP_ORIGINAL, FPS_CATCHUP_PATCH)
+                for name, offset in FPS_SUBSYSTEM_OFFSETS:
+                    _apply_xbe_patch(xbe_data,
+                                     f"60 FPS subsystem dt {name} (1/30->1/60)",
+                                     offset, FPS_SUBSYSTEM_ORIGINAL,
+                                     FPS_SUBSYSTEM_PATCH)
+
             xbe_path.write_bytes(xbe_data)
         else:
             print(f"\n[7/7] QoL patches — skipped")
@@ -2226,6 +2436,9 @@ def main():
     p_full.add_argument("--player-character",
                          help="Replace player model (e.g. evil_noreht, overlord, flicken). "
                               "EXPERIMENTAL: animations may break. Max 11 chars.")
+    p_full.add_argument("--fps-unlock", action="store_true",
+                         help="Unlock 60 FPS (changes simulation from 30 Hz to 60 Hz). "
+                              "EXPERIMENTAL: game physics are tied to the timestep.")
     p_full.add_argument("--config-mod",
                          help="Config mod JSON to apply (file path or inline JSON). "
                               "Patches config.xbr values (entity stats, damage, etc.)")

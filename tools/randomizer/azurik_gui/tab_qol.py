@@ -21,6 +21,16 @@ QOL_PATCHES = [
         "default": True,
         "included_in_randomizer": True,
     },
+    {
+        "key": "fps_unlock",
+        "label": "60 FPS unlock (experimental)",
+        "description": "Removes the 30 fps VBlank cap and doubles the simulation "
+                       "rate from 30 Hz to 60 Hz.  Patches subsystem timesteps "
+                       "and catchup logic.  Some animations or timers may still "
+                       "behave slightly differently at 60 fps.",
+        "default": False,
+        "included_in_randomizer": False,
+    },
 ]
 
 
@@ -64,3 +74,7 @@ class QoLTab(ttk.Frame):
         ttk.Label(self, text="More QoL patches coming soon: fast text, "
                   "skip cutscenes, custom start location...",
                   foreground="gray").pack(anchor=tk.W, padx=10)
+
+    def get_patch_flags(self) -> dict[str, bool]:
+        """Return current checkbox values keyed by patch key."""
+        return {k: v.get() for k, v in self._vars.items()}

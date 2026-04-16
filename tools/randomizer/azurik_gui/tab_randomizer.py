@@ -407,6 +407,7 @@ class RandomizerTab(ttk.Frame):
                         self._pending_force = False
                         self.log.append("\nRetrying with --force...\n")
                         self.progress.start("Rebuilding (forced)...")
+                        qol_flags = self.app.tab_qol.get_patch_flags()
                         self._thread = backend.run_randomizer(
                             iso_path=iso_path,
                             output_path=output_path,
@@ -417,6 +418,7 @@ class RandomizerTab(ttk.Frame):
                             do_barriers=self._vars["do_barriers"].get(),
                             do_connections=self._vars["do_connections"].get(),
                             do_qol=self._vars["do_qol"].get(),
+                            fps_unlock=qol_flags.get("fps_unlock", False),
                             item_pool=item_pool,
                             obsidian_cost=self._get_obsidian_cost(),
                             config_edits=config_edits,
@@ -440,6 +442,7 @@ class RandomizerTab(ttk.Frame):
                     self.app.state.last_output = result.output_path
             self.after(0, _finish)
 
+        qol_flags = self.app.tab_qol.get_patch_flags()
         self._thread = backend.run_randomizer(
             iso_path=iso_path,
             output_path=output_path,
@@ -450,6 +453,7 @@ class RandomizerTab(ttk.Frame):
             do_barriers=self._vars["do_barriers"].get(),
             do_connections=self._vars["do_connections"].get(),
             do_qol=self._vars["do_qol"].get(),
+            fps_unlock=qol_flags.get("fps_unlock", False),
             item_pool=item_pool,
             obsidian_cost=self._get_obsidian_cost(),
             config_edits=config_edits,
