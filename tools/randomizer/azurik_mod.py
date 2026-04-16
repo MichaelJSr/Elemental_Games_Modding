@@ -1012,10 +1012,63 @@ FPS_DT_OFFSET = 0x191048
 FPS_DT_ORIGINAL = bytes([0x89, 0x88, 0x08, 0x3D])  # float 0.033333335
 FPS_DT_PATCH    = bytes([0x89, 0x88, 0x88, 0x3C])  # float 0.016666668
 
-# Patch 4: max step clamp 2 → 4  (CMP ESI, imm8 at VA 0x59B2E)
-FPS_CLAMP_OFFSET = 0x049B2E
-FPS_CLAMP_ORIGINAL = bytes([0x83, 0xFE, 0x02])  # CMP ESI, 0x2
-FPS_CLAMP_PATCH    = bytes([0x83, 0xFE, 0x04])  # CMP ESI, 0x4
+# Patch 4: FISTP truncation + max step clamp  (VA 0x59AFD, 58 bytes in .text)
+#
+# The original code uses FISTP with round-to-nearest-even to compute
+#   steps = ROUND(delta * rate)
+# At 60 fps, when a frame takes just over 25 ms (delta*60 = 1.5),
+# ROUND(1.5) = 2, doubling the simulation workload.  The extra CPU cost
+# pushes the next frame past 25 ms as well, creating a self-reinforcing
+# feedback loop that locks the game at exactly 30 fps (2 steps per frame).
+# No intermediate frame rates (40, 45, 50 fps) are stable — the system is
+# bistable at 60 fps (1 step) and 30 fps (2 steps).
+#
+# Fix: temporarily switch the x87 FPU to truncation mode (round toward zero)
+# before FISTP, then restore the original rounding mode.  With truncation,
+# TRUNC(1.5) = 1, TRUNC(1.99) = 1.  The step count only reaches 2 when
+# delta*60 >= 2.0 (frame time >= 33.33 ms), which is the mathematically
+# correct threshold.  This eliminates the premature death spiral.
+#
+# This patch subsumes the old Patch 4 (CMP ESI, 2 → CMP ESI, 4) since
+# it replaces the entire step-calculation block including the max clamp.
+FPS_TRUNC_OFFSET = 0x049AFD   # VA 0x059AFD, in .text
+FPS_TRUNC_ORIGINAL = bytes([
+    0xDD, 0x5C, 0x24, 0x60,                           # FSTP double [ESP+0x60]
+    0xDD, 0x44, 0x24, 0x60,                            # FLD double [ESP+0x60]
+    0xDB, 0x5C, 0x24, 0x30,                            # FISTP dword [ESP+0x30]
+    0x8B, 0x44, 0x24, 0x30,                            # MOV EAX, [ESP+0x30]
+    0x89, 0x44, 0x24, 0x14,                            # MOV [ESP+0x14], EAX
+    0xC7, 0x44, 0x24, 0x60, 0x01, 0x00, 0x00, 0x00,   # MOV dword [ESP+0x60], 1
+    0x8B, 0x44, 0x24, 0x14,                            # MOV EAX, [ESP+0x14]
+    0x3B, 0x44, 0x24, 0x60,                            # CMP EAX, [ESP+0x60]
+    0x0F, 0x4C, 0x44, 0x24, 0x60,                      # CMOVL EAX, [ESP+0x60]
+    0x89, 0x44, 0x24, 0x68,                            # MOV [ESP+0x68], EAX
+    0x8B, 0x74, 0x24, 0x68,                            # MOV ESI, [ESP+0x68]
+    0x83, 0xFE, 0x02,                                  # CMP ESI, 0x2
+    0x89, 0x74, 0x24, 0x14,                            # MOV [ESP+0x14], ESI
+    0x7E, 0x36,                                        # JLE 0x59B6D
+])
+FPS_TRUNC_PATCH = bytes([
+    # --- Save FPU control word, set truncation mode ---
+    0xD9, 0x7C, 0x24, 0x60,                            # FNSTCW [ESP+0x60]
+    0x66, 0x8B, 0x44, 0x24, 0x60,                      # MOV AX, [ESP+0x60]
+    0x66, 0x0D, 0x00, 0x0C,                            # OR AX, 0x0C00  (RC=11 truncate)
+    0x66, 0x89, 0x44, 0x24, 0x62,                      # MOV [ESP+0x62], AX
+    0xD9, 0x6C, 0x24, 0x62,                            # FLDCW [ESP+0x62]
+    # --- Truncate delta*rate to integer ---
+    0xDB, 0x5C, 0x24, 0x30,                            # FISTP dword [ESP+0x30]
+    # --- Restore original FPU rounding mode ---
+    0xD9, 0x6C, 0x24, 0x60,                            # FLDCW [ESP+0x60]
+    # --- Clamp to [1, 4], store, and branch ---
+    0x8B, 0x74, 0x24, 0x30,                            # MOV ESI, [ESP+0x30]
+    0x83, 0xFE, 0x01,                                  # CMP ESI, 1
+    0x7D, 0x05,                                        # JGE +5 (skip min clamp)
+    0xBE, 0x01, 0x00, 0x00, 0x00,                      # MOV ESI, 1
+    0x89, 0x74, 0x24, 0x14,                            # MOV [ESP+0x14], ESI
+    0x83, 0xFE, 0x04,                                  # CMP ESI, 0x4
+    0x7E, 0x3B,                                        # JLE 0x59B6D (+0x3B from here)
+    0x90, 0x90, 0x90, 0x90, 0x90,                      # 5x NOP (fill to 58 bytes)
+])
 
 # Patch 5: catchup code — raise step cap to 4, keep remainder (VA 0x59B37, 30 bytes)
 #
@@ -1030,10 +1083,9 @@ FPS_CLAMP_PATCH    = bytes([0x83, 0xFE, 0x04])  # CMP ESI, 0x4
 # Original: steps=2, remainder = raw_delta - 2*dt
 # Patched:  steps=4, remainder = raw_delta - 4*dt
 #
-# We raise the cap from 2 to 4 (matching Patch 4's CMP) and compute 4*dt via
-# two FADD ST0,ST0 (dt→2dt→4dt).  The FSUBR/FSTP pair is preserved so the
-# remainder mechanism keeps working — this prevents the fast-forward behaviour
-# that occurred when the remainder was zeroed.
+# The cap of 4 matches the CMP ESI, 4 in Patch 4.  We compute 4*dt via two
+# FADD ST0,ST0 (dt→2dt→4dt).  The FSUBR/FSTP pair is preserved so the
+# remainder mechanism keeps working.
 FPS_CATCHUP_OFFSET = 0x049B37
 FPS_CATCHUP_ORIGINAL = bytes([
     0xD9, 0x05, 0xE8, 0x83, 0x19, 0x00,              # FLD float ptr [0x1983E8]
@@ -1085,9 +1137,9 @@ FPS_CATCHUP_PATCH = bytes([
 #   are buried in virtual dispatch chains.  Camera smoothing may feel slightly
 #   different at 60 fps.
 #
-# Known limitation — 0x198580 (1/6-second sub-rate scheduler):
-#   Used as 1/30 * 5.0 = 1/6 in FUN_00048400 / FUN_00048630.  NOT patched —
-#   the subsystem intentionally runs at 6 Hz.
+# Previously unpatched — 0x198580 (animation event scheduling):
+#   Used as 1/30 * 5.0 = 1/6 in FUN_00048400 / FUN_00048630.  Now patched:
+#   at 60fps the per-frame dt must be 1/60 so the product becomes 1/60*5 = 1/12.
 
 FPS_SUBSYSTEM_ORIGINAL = bytes([0x89, 0x88, 0x08, 0x3D])  # float 1/30
 FPS_SUBSYSTEM_PATCH    = bytes([0x89, 0x88, 0x88, 0x3C])  # float 1/60
@@ -1118,6 +1170,62 @@ FPS_SUBSYSTEM_OFFSETS = [
     ("entity_setup",    0x1915C8),  # VA 0x198968, 1 xref
     ("timestep_accum",  0x191608),  # VA 0x1989A8, 2 xrefs
     ("state_reset",     0x1918F8),  # VA 0x198C98, 2 xrefs
+    ("critter_ai_timer",0x1912C0),  # VA 0x198660, 1 xref — critter AI state transitions
+    ("anim_event_sched",0x191BE0),  # VA 0x198580, 2 xrefs — animation event scheduling dt
+]
+
+# ---------------------------------------------------------------------------
+# Patch: double 1/30 → 1/60 for animation time accumulators (VA 0x1A2750)
+# ---------------------------------------------------------------------------
+# FUN_00066D00 and FUN_00066D70 add double 1/30 per frame to animation
+# scheduler clocks.  At 60fps they fire every 16.67ms, so the advance
+# must be 1/60 to maintain real-time parity.
+FPS_ANIM_DBL_OFFSET   = 0x19B3B0                              # VA 0x1A2750, .rdata
+FPS_ANIM_DBL_ORIGINAL = bytes([0x11, 0x11, 0x11, 0x11,
+                               0x11, 0x11, 0xA1, 0x3F])       # double 1/30
+FPS_ANIM_DBL_PATCH    = bytes([0x11, 0x11, 0x11, 0x11,
+                               0x11, 0x11, 0x91, 0x3F])       # double 1/60
+
+# ---------------------------------------------------------------------------
+# Patches: float 30.0 → 60.0  (fps-rate multipliers)
+# ---------------------------------------------------------------------------
+# Several subsystems convert wall-clock time to frame indices or velocities
+# by multiplying by 30.0.  At 60fps these must use 60.0.
+
+FPS_RATE_30_ORIGINAL = bytes([0x00, 0x00, 0xF0, 0x41])        # float 30.0
+FPS_RATE_30_PATCH    = bytes([0x00, 0x00, 0x70, 0x42])         # float 60.0
+
+FPS_RATE_30_OFFSETS = [
+    ("hud_frame_conv",  0x1916D4),  # VA 0x198A74, 1 xref — HUD anim scroll
+    ("anim_keyframe",   0x1917DC),  # VA 0x198B7C, 1 xref — keyframe iteration
+]
+
+# ---------------------------------------------------------------------------
+# Patch: shared float 30.0 → 60.0 + angular xref redirects (VA 0x1A2650)
+# ---------------------------------------------------------------------------
+# 20 xrefs share float 30.0 at VA 0x1A2650.  16 are fps-dependent (velocity,
+# bone velocity, frame index, FPS display, VFX seed, init compute) and need
+# 60.0.  4 compute "30 degrees" (deg2rad * 30) for collision/physics geometry
+# and MUST keep reading 30.0.
+#
+# Solution: patch 0x1A2650 to 60.0, redirect the 4 angular instructions to
+# read from VA 0x1A2524 — a naturally dead float 30.0 in .rdata (0 xrefs).
+FPS_SHARED_30_OFFSET   = 0x19B2B0                              # VA 0x1A2650, .rdata
+FPS_SHARED_30_ORIGINAL = bytes([0x00, 0x00, 0xF0, 0x41])       # float 30.0
+FPS_SHARED_30_PATCH    = bytes([0x00, 0x00, 0x70, 0x42])       # float 60.0
+
+# Angular xref redirects: change the 4-byte address operand inside each FMUL
+# instruction from 0x001A2650 → 0x001A2524 (dead float 30.0 in .rdata).
+# Each instruction is  D8 0D <addr32>  (FMUL dword ptr [addr]).
+# We patch bytes 2-5 (the address operand) only.
+FPS_ANGULAR_ADDR_ORIGINAL = bytes([0x50, 0x26, 0x1A, 0x00])    # LE 0x001A2650
+FPS_ANGULAR_ADDR_PATCH    = bytes([0x24, 0x25, 0x1A, 0x00])    # LE 0x001A2524
+
+FPS_ANGULAR_REDIRECTS = [
+    ("frustum_cone",    0x03E9D9),  # VA 0x4E9D9 — FUN_0004e870 sin/cos(30°)
+    ("projectile_rot",  0x079AAC),  # VA 0x89AAC — FUN_00089a70 projectile physics
+    ("static_init_1",   0x0EB518),  # VA 0xFB518 — C++ static init thunk → [0x38BC1C]
+    ("static_init_2",   0x0EB608),  # VA 0xFB608 — C++ static init thunk → [0x38BBE4]
 ]
 
 
@@ -2194,8 +2302,8 @@ def cmd_randomize_full(args):
                                  FPS_RATE_OFFSET, FPS_RATE_ORIGINAL, FPS_RATE_PATCH)
                 _apply_xbe_patch(xbe_data, "60 FPS timestep (1/30→1/60)",
                                  FPS_DT_OFFSET, FPS_DT_ORIGINAL, FPS_DT_PATCH)
-                _apply_xbe_patch(xbe_data, "60 FPS max step clamp (2→4)",
-                                 FPS_CLAMP_OFFSET, FPS_CLAMP_ORIGINAL, FPS_CLAMP_PATCH)
+                _apply_xbe_patch(xbe_data, "60 FPS FISTP truncation + step clamp (anti-death-spiral)",
+                                 FPS_TRUNC_OFFSET, FPS_TRUNC_ORIGINAL, FPS_TRUNC_PATCH)
                 _apply_xbe_patch(xbe_data, "60 FPS catchup (ESI=4, remainder=raw_delta-4*dt)",
                                  FPS_CATCHUP_OFFSET, FPS_CATCHUP_ORIGINAL, FPS_CATCHUP_PATCH)
                 for name, offset in FPS_SUBSYSTEM_OFFSETS:
@@ -2203,6 +2311,22 @@ def cmd_randomize_full(args):
                                      f"60 FPS subsystem dt {name} (1/30->1/60)",
                                      offset, FPS_SUBSYSTEM_ORIGINAL,
                                      FPS_SUBSYSTEM_PATCH)
+                _apply_xbe_patch(xbe_data, "60 FPS anim scheduler double (1/30->1/60)",
+                                 FPS_ANIM_DBL_OFFSET, FPS_ANIM_DBL_ORIGINAL,
+                                 FPS_ANIM_DBL_PATCH)
+                for name, offset in FPS_RATE_30_OFFSETS:
+                    _apply_xbe_patch(xbe_data,
+                                     f"60 FPS rate multiplier {name} (30->60)",
+                                     offset, FPS_RATE_30_ORIGINAL,
+                                     FPS_RATE_30_PATCH)
+                _apply_xbe_patch(xbe_data, "60 FPS shared velocity constant (30->60)",
+                                 FPS_SHARED_30_OFFSET, FPS_SHARED_30_ORIGINAL,
+                                 FPS_SHARED_30_PATCH)
+                for name, offset in FPS_ANGULAR_REDIRECTS:
+                    _apply_xbe_patch(xbe_data,
+                                     f"60 FPS angular redirect {name} (keep 30deg)",
+                                     offset, FPS_ANGULAR_ADDR_ORIGINAL,
+                                     FPS_ANGULAR_ADDR_PATCH)
 
             xbe_path.write_bytes(xbe_data)
         else:
