@@ -28,8 +28,11 @@ QOL_PATCHES = [
                        "simulation rate to 60 Hz, patches 28 subsystem timesteps, "
                        "velocity/collision constants, animation accumulators, "
                        "disables the D3D Present spin-wait to prevent frame stalls, "
-                       "corrects render-phase flash timers, and "
-                       "uses FISTP truncation to prevent the 60→30 fps death spiral.",
+                       "corrects render-phase flash timers, tunes the collision "
+                       "solver bounce limit and impulse scaling for correct stair "
+                       "climbing, scales the ground probe offset to fix edge-walk "
+                       "velocity, and uses FISTP truncation to prevent the "
+                       "60→30 fps death spiral.",
         "default": False,
         "included_in_randomizer": False,
     },
