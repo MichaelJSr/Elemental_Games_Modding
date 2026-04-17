@@ -106,12 +106,17 @@ class ConfigEditorTab(ttk.Frame):
         with open(registry_path) as f:
             reg = json.load(f)
 
-        if section not in reg:
+        sections = reg.get("sections", {})
+        if section not in sections:
+            self._status.config(text=f"Section '{section}' not found in registry")
             return
 
-        data = reg[section]
-        if entity and entity in data:
-            data = {entity: data[entity]}
+        data = sections[section]
+        entities = data.get("entities", {})
+        if entity and entity in entities:
+            data = {entity: entities[entity]}
+        elif entities:
+            data = entities
 
         text = json.dumps(data, indent=2)
         self._text.config(state=tk.NORMAL)

@@ -65,4 +65,9 @@ class AzurikApp:
         return self.iso_picker.get_path()
 
     def run(self):
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.mainloop()
+
+    def _on_close(self):
+        backend.cleanup_temp_dirs()
+        self.root.destroy()
