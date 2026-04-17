@@ -914,31 +914,8 @@ BARRIER_OFFSETS = {
 BARRIER_FOURCCS = [b"watr", b"fire", b"smsh", b"wind"]
 BARRIER_FOURCCS_HARD = [b"watr", b"fire", b"smsh", b"wind", b"stem", b"acid", b"ice\x00", b"litn"]
 
-# XBE QoL patch offsets
-# Gem popup string file offsets (null first byte to disable)
-GEM_POPUP_OFFSETS = [0x197858, 0x19783C, 0x197820, 0x197800, 0x1977D8]
-# Disable all pickup celebration animations (file 0x0313EE, VA 0x0413EE).
-# The pickup handler FUN_00041390 enters a block for non-gem pickups that:
-#   (A) FUN_00061360  — sets "collected" flag, adds to save list
-#   (B) virtual call  — FUN_0006FC90, decrements pickup counter (persistence)
-#   (C) linked-list cleanup — zeroes [this+0x1EC/0x1F0]
-#   (D) counter update — writes [[[this+0x154]+0xD8]+4]
-# Steps C and D keep the pickup entity's animation data live, which its
-# per-frame update (FUN_00037950 → FUN_00037AB0) reads to play anim 0x52
-# (the celebration).  We replace the first instruction of step C with a JMP
-# to the epilog (0x4146F), skipping C+D.  Steps A+B still run for persistence.
-# Both null-check JZ branches (0x413CA, 0x413D1) already target 0x413EE,
-# so they naturally hit our JMP — no other code changes needed.
-PICKUP_ANIM_OFFSET = 0x0313EE
-PICKUP_ANIM_ORIGINAL = bytes([0x8B, 0x8A, 0xEC, 0x01, 0x00])  # MOV ECX,[EDX+0x1EC] (5 of 6 bytes)
-PICKUP_ANIM_PATCH = bytes([0xE9, 0x7C, 0x00, 0x00, 0x00])     # JMP 0x4146F (epilog)
-
-# Player character swap: replace "garret4" with another character model
-# At file offset 0x1976C8, "garret4\0d:\" = 12 bytes, can fit any name up to 11 chars
-PLAYER_CHAR_OFFSET = 0x1976C8
-PLAYER_CHAR_ORIGINAL = bytes([0x67,0x61,0x72,0x72,0x65,0x74,0x34,0x00,
-                               0x64,0x3a,0x5c,0x00])  # "garret4\0d:\\0"
-PLAYER_CHAR_MAX_LEN = 11  # max chars (12 bytes with null)
+# QoL patch constants (PICKUP_ANIM, GEM_POPUP, PLAYER_CHAR) live in
+# patches/qol_patches.py; they are applied via apply_qol_patches().
 
 # Obsidian lock threshold tables in town.xbr
 # Two identical tables of 10 entries (48 bytes each), threshold float at +0
@@ -960,6 +937,9 @@ TOWN_BARRIER_SCALE = 0.5
 # Offsets of scale floats relative to the entity name offset
 SCALE_OFFSETS = [-56, -36, -20]
 
+# 60 FPS and QoL patch definitions live in the patches/ package.
+from patches.fps_unlock import apply_fps_patches
+from patches.qol_patches import apply_qol_patches, apply_player_character_patch
 
 # ---------------------------------------------------------------------------
 # Level connection randomization
@@ -1959,50 +1939,30 @@ def cmd_randomize_full(args):
         else:
             print(f"\n[6/7] Level connections — skipped")
 
-        # Step 7: QoL XBE patches
-        if do_qol:
-            print(f"\n[7/7] Applying QoL patches to default.xbe...")
+        # Step 7: XBE patches (QoL + FPS unlock + player character)
+        needs_xbe = (do_qol
+                      or getattr(args, 'fps_unlock', False)
+                      or getattr(args, 'player_character', None))
+        if needs_xbe:
+            print(f"\n[7/7] Applying XBE patches to default.xbe...")
             xbe_path = extract_dir / "default.xbe"
             xbe_data = bytearray(xbe_path.read_bytes())
 
-            # Disable gem first-pickup popups (null first byte of popup string path)
-            popup_count = 0
-            for off in GEM_POPUP_OFFSETS:
-                if off < len(xbe_data) and xbe_data[off] != 0x00:
-                    xbe_data[off] = 0x00
-                    popup_count += 1
-            print(f"  Disabled {popup_count} gem first-pickup popups")
+            if do_qol:
+                apply_qol_patches(xbe_data, args)
+            else:
+                print(f"  QoL patches — skipped (--no-qol)")
 
-            # Disable all pickup celebration animations (skip linked-list cleanup + counter update)
-            patch_len = len(PICKUP_ANIM_ORIGINAL)
-            if PICKUP_ANIM_OFFSET + patch_len <= len(xbe_data):
-                current = bytes(xbe_data[PICKUP_ANIM_OFFSET:PICKUP_ANIM_OFFSET + patch_len])
-                if current == PICKUP_ANIM_ORIGINAL:
-                    xbe_data[PICKUP_ANIM_OFFSET:PICKUP_ANIM_OFFSET + patch_len] = PICKUP_ANIM_PATCH
-                    print(f"  Disabled pickup celebration animation")
-                else:
-                    print(f"  WARNING: XBE bytes at 0x{PICKUP_ANIM_OFFSET:X} don't match expected "
-                          f"(got {current.hex()}, expected {PICKUP_ANIM_ORIGINAL.hex()})")
+            if getattr(args, 'fps_unlock', False):
+                apply_fps_patches(xbe_data)
 
-            # Player character swap (experimental)
             player_char = getattr(args, 'player_character', None)
             if player_char:
-                if len(player_char) > PLAYER_CHAR_MAX_LEN:
-                    print(f"  WARNING: Player character name '{player_char}' too long "
-                          f"(max {PLAYER_CHAR_MAX_LEN} chars), skipping")
-                elif PLAYER_CHAR_OFFSET + 12 <= len(xbe_data):
-                    current = bytes(xbe_data[PLAYER_CHAR_OFFSET:PLAYER_CHAR_OFFSET + 12])
-                    if current == PLAYER_CHAR_ORIGINAL:
-                        new_bytes = player_char.encode("ascii") + b"\x00"
-                        new_bytes = new_bytes + b"\x00" * (12 - len(new_bytes))
-                        xbe_data[PLAYER_CHAR_OFFSET:PLAYER_CHAR_OFFSET + 12] = new_bytes
-                        print(f"  Player character: garret4 -> {player_char} (EXPERIMENTAL)")
-                    else:
-                        print(f"  WARNING: Player char bytes don't match expected, skipping")
+                apply_player_character_patch(xbe_data, player_char)
 
             xbe_path.write_bytes(xbe_data)
         else:
-            print(f"\n[7/7] QoL patches — skipped")
+            print(f"\n[7/7] XBE patches — skipped")
 
         # Config.xbr patches (from --config-mod)
         config_mod_arg = getattr(args, 'config_mod', None)
@@ -2106,6 +2066,144 @@ def cmd_randomize_full(args):
 
 
 # ---------------------------------------------------------------------------
+# verify-patches command
+# ---------------------------------------------------------------------------
+
+def _extract_xbe_from_iso(iso_path: Path) -> bytearray:
+    """Pull default.xbe out of an Xbox ISO via xdvdfs copy-out."""
+    xdvdfs = require_xdvdfs()
+    with tempfile.TemporaryDirectory(prefix="azurik_verify_") as tmpdir:
+        out_file = Path(tmpdir) / "default.xbe"
+        run_xdvdfs(xdvdfs, ["copy-out", str(iso_path),
+                             "default.xbe", str(out_file)])
+        if not out_file.exists():
+            print(f"ERROR: Could not extract default.xbe from {iso_path}")
+            sys.exit(1)
+        return bytearray(out_file.read_bytes())
+
+
+def _read_xbe(iso_or_xbe: Path) -> bytearray:
+    """Return the default.xbe bytes from either an .iso or a raw .xbe path."""
+    if iso_or_xbe.suffix.lower() == ".iso":
+        return _extract_xbe_from_iso(iso_or_xbe)
+    return bytearray(iso_or_xbe.read_bytes())
+
+
+def cmd_verify_patches(args):
+    """Verify that a patched default.xbe contains every expected 60 FPS
+    patch, and optionally whitelist-diff against an unpatched original."""
+    from patches.fps_unlock import FPS_PATCH_SITES, FPS_SAFETY_CRITICAL_SITES
+    from patches.xbe_utils import verify_patch_spec
+
+    target = Path(args.xbe if args.xbe else args.iso)
+    if not target.exists():
+        print(f"ERROR: target not found: {target}")
+        sys.exit(1)
+
+    print(f"Reading patched XBE from {target}...")
+    patched = _read_xbe(target)
+    print(f"  {len(patched)} bytes")
+
+    # --- Per-patch verification ---------------------------------------
+    counts = {"applied": 0, "original": 0, "mismatch": 0, "out-of-range": 0}
+    mismatches: list[tuple] = []
+    unapplied: list[tuple] = []
+    for spec in FPS_PATCH_SITES:
+        status = verify_patch_spec(patched, spec)
+        counts[status] += 1
+        if status == "mismatch" or status == "out-of-range":
+            mismatches.append((spec, status))
+        elif status == "original":
+            unapplied.append((spec, status))
+
+    print()
+    print(f"Per-patch status ({len(FPS_PATCH_SITES)} sites):")
+    print(f"  applied:      {counts['applied']}")
+    print(f"  original:     {counts['original']}  (patch NOT applied)")
+    print(f"  mismatch:     {counts['mismatch']}  (bytes unrecognised)")
+    print(f"  out-of-range: {counts['out-of-range']}")
+
+    if unapplied:
+        print()
+        print("Sites still at original bytes (expected if fps_unlock wasn't requested):")
+        for spec, _ in unapplied:
+            print(f"  VA=0x{spec.va:06X}  {spec.label}")
+
+    if mismatches:
+        print()
+        print("*** MISMATCHES — bytes do not match original or patch ***")
+        for spec, status in mismatches:
+            hex_got = bytes(patched[spec.file_offset:
+                                    spec.file_offset + len(spec.patch)]).hex()
+            print(f"  [{status}] VA=0x{spec.va:06X}  {spec.label}")
+            print(f"             got:      {hex_got}")
+            print(f"             original: {spec.original.hex()}")
+            print(f"             patch:    {spec.patch.hex()}")
+
+    # --- Safety-critical guard ---------------------------------------
+    print()
+    print(f"Safety-critical guard ({len(FPS_SAFETY_CRITICAL_SITES)} sites):")
+    safety_fail = False
+    for spec in FPS_SAFETY_CRITICAL_SITES:
+        status = verify_patch_spec(patched, spec)
+        ok = status in ("applied", "original")  # either state is self-consistent
+        marker = "OK " if ok else "FAIL"
+        print(f"  [{marker}] {status:<9s}  VA=0x{spec.va:06X}  {spec.label}")
+        if not ok:
+            safety_fail = True
+
+    # --- Whitelist diff vs original ----------------------------------
+    if args.original:
+        orig_path = Path(args.original)
+        if not orig_path.exists():
+            print(f"\nERROR: original file not found: {orig_path}")
+            sys.exit(1)
+        print(f"\nWhitelist-diff against {orig_path}...")
+        original = _read_xbe(orig_path)
+        if len(original) != len(patched):
+            print(f"  WARNING: size mismatch — original {len(original)} vs "
+                  f"patched {len(patched)}; diff may be unreliable")
+
+        # Build per-site (offset, length) allow ranges from every spec.
+        allow_ranges: list[tuple[int, int]] = [
+            (s.file_offset, s.file_offset + len(s.patch)) for s in FPS_PATCH_SITES
+        ]
+        allow_ranges.sort()
+
+        def _in_allow(off: int) -> bool:
+            # Small linear scan; the list is tiny.
+            for lo, hi in allow_ranges:
+                if lo <= off < hi:
+                    return True
+                if off < lo:
+                    return False
+            return False
+
+        n = min(len(original), len(patched))
+        unexpected = 0
+        first_unexpected: list[int] = []
+        for i in range(n):
+            if original[i] != patched[i] and not _in_allow(i):
+                unexpected += 1
+                if len(first_unexpected) < 16:
+                    first_unexpected.append(i)
+        if unexpected == 0:
+            print(f"  Clean: every differing byte is inside a declared "
+                  f"FPS_PATCH_SITES range.")
+        else:
+            print(f"  *** {unexpected} bytes differ outside any declared "
+                  f"FPS_PATCH_SITES range ***")
+            print(f"  First offsets: "
+                  f"{', '.join(f'0x{o:X}' for o in first_unexpected)}")
+            if args.strict:
+                safety_fail = True
+
+    # Exit code: non-zero on safety failure or mismatch so CI can catch it.
+    if mismatches or safety_fail:
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -2198,14 +2296,17 @@ def main():
     p_full = sub.add_parser("randomize-full",
         help="Full game randomizer: major items, keys, gems, barriers + QoL",
         description=(
-            "Full game randomizer with 4 shuffle pools:\n"
+            "Full game randomizer with 5 shuffle pools:\n"
             "  1. Major items: fragments + powers + town powers + obsidians (cross-level)\n"
             "  2. Keys: shuffled within elemental realm\n"
             "  3. Gems: diamond/emerald/sapphire/ruby shuffled per-level\n"
             "  4. Barriers: element vulnerability randomized per-level\n"
+            "  5. Connections: level transition destinations shuffled\n"
             "\n"
-            "Also applies QoL patches: disable gem popups + pickup animations.\n"
-            "Use --no-major, --no-keys, --no-gems, --no-barriers, --no-qol to skip."
+            "Also applies QoL patches: disable gem popups + pickup celebration animations.\n"
+            "Use --no-major, --no-keys, --no-gems, --no-barriers, --no-connections,\n"
+            "--no-qol to skip individual categories; --no-gem-popups / --no-pickup-anim\n"
+            "for finer-grained QoL opt-outs."
         ))
     p_full.add_argument("--iso", required=True, help="Original game .iso")
     p_full.add_argument("--seed", "-s", type=int, default=42,
@@ -2224,7 +2325,11 @@ def main():
     p_full.add_argument("--no-connections", action="store_true",
                          help="Skip level connection randomization")
     p_full.add_argument("--no-qol", action="store_true",
-                         help="Skip QoL patches (gem popups, pickup animations)")
+                         help="Skip all QoL patches (gem popups + pickup animations)")
+    p_full.add_argument("--no-gem-popups", action="store_true",
+                         help="Skip gem first-pickup popup suppression")
+    p_full.add_argument("--no-pickup-anim", action="store_true",
+                         help="Skip the unified pickup celebration animation patch")
     p_full.add_argument("--obsidian-cost", type=int, metavar="N",
                          help="Obsidian cost per temple lock (default: 10 = locks at 10,20,...100)")
     p_full.add_argument("--item-pool",
@@ -2236,9 +2341,35 @@ def main():
     p_full.add_argument("--player-character",
                          help="Replace player model (e.g. evil_noreht, overlord, flicken). "
                               "EXPERIMENTAL: animations may break. Max 11 chars.")
+    p_full.add_argument("--fps-unlock", action="store_true",
+                         help="Unlock 60 FPS (changes simulation from 30 Hz to 60 Hz). "
+                              "EXPERIMENTAL: game physics are tied to the timestep.")
     p_full.add_argument("--config-mod",
                          help="Config mod JSON to apply (file path or inline JSON). "
                               "Patches config.xbr values (entity stats, damage, etc.)")
+
+    # verify-patches (post-build sanity check)
+    p_verify = sub.add_parser("verify-patches",
+        help="Verify 60 FPS patches are correctly applied to a built ISO/XBE",
+        description=(
+            "Reads a patched default.xbe (extracted from an ISO or passed as a\n"
+            "raw file) and reports which FPS_PATCH_SITES are applied, still at\n"
+            "original bytes, or corrupted.  Pins safety-critical patches (e.g.\n"
+            "the 60fps step cap of 2) and optionally whitelist-diffs against an\n"
+            "unpatched original to confirm no stray bytes were modified.\n"
+            "\n"
+            "Exit code is non-zero on any mismatch or safety failure, so this\n"
+            "command is safe to use in CI."
+        ))
+    verify_source = p_verify.add_mutually_exclusive_group(required=True)
+    verify_source.add_argument("--iso",
+        help="Patched .iso (default.xbe is extracted via xdvdfs)")
+    verify_source.add_argument("--xbe",
+        help="Patched default.xbe file directly")
+    p_verify.add_argument("--original",
+        help="Unpatched .iso or .xbe to whitelist-diff against")
+    p_verify.add_argument("--strict", action="store_true",
+        help="Treat unexpected whitelist-diff changes as a failure (non-zero exit)")
 
     args = parser.parse_args()
     if not args.command:
@@ -2248,7 +2379,8 @@ def main():
     {"list": cmd_list, "dump": cmd_dump, "diff": cmd_diff, "patch": cmd_patch,
      "randomize-gems": cmd_randomize_gems,
      "randomize": cmd_randomize,
-     "randomize-full": cmd_randomize_full}[args.command](args)
+     "randomize-full": cmd_randomize_full,
+     "verify-patches": cmd_verify_patches}[args.command](args)
 
 
 if __name__ == "__main__":

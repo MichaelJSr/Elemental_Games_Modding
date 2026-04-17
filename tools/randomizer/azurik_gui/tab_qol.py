@@ -21,6 +21,22 @@ QOL_PATCHES = [
         "default": True,
         "included_in_randomizer": True,
     },
+    {
+        "key": "fps_unlock",
+        "label": "60 FPS unlock (experimental)",
+        "description": "Unlocks 60 fps: removes the 30 fps VBlank cap, doubles the "
+                       "simulation rate to 60 Hz, patches 28 subsystem timesteps, "
+                       "velocity/collision constants, animation accumulators, "
+                       "disables the D3D Present spin-wait to prevent frame stalls, "
+                       "corrects render-phase flash timers, tunes the collision "
+                       "solver bounce limit and impulse scaling for correct stair "
+                       "climbing, scales the ground probe offset to fix edge-walk "
+                       "velocity, uses FISTP truncation to prevent the "
+                       "60→30 fps death spiral, and caps simulation steps at 2 "
+                       "per frame to prevent crash on death at low FPS.",
+        "default": False,
+        "included_in_randomizer": False,
+    },
 ]
 
 
@@ -35,9 +51,8 @@ class QoLTab(ttk.Frame):
         ttk.Label(self, text="Quality of Life Patches",
                   font=("", 11, "bold")).pack(anchor=tk.W, padx=10, pady=(10, 5))
 
-        ttk.Label(self, text="These patches are automatically applied when the "
-                  "randomizer's QoL option is enabled.\n"
-                  "Future standalone patches will be configurable here.",
+        ttk.Label(self, text="Toggle individual patches below. These are applied "
+                  "when the randomizer's QoL option is enabled.",
                   wraplength=500, justify=tk.LEFT).pack(anchor=tk.W, padx=10, pady=(0, 10))
 
         for patch in QOL_PATCHES:
@@ -64,3 +79,7 @@ class QoLTab(ttk.Frame):
         ttk.Label(self, text="More QoL patches coming soon: fast text, "
                   "skip cutscenes, custom start location...",
                   foreground="gray").pack(anchor=tk.W, padx=10)
+
+    def get_patch_flags(self) -> dict[str, bool]:
+        """Return current checkbox values keyed by patch key."""
+        return {k: v.get() for k, v in self._vars.items()}

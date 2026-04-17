@@ -68,6 +68,9 @@ def run_randomizer(
     do_barriers: bool = True,
     do_connections: bool = True,
     do_qol: bool = True,
+    fps_unlock: bool = False,
+    disable_gem_popups: bool = True,
+    disable_pickup_anims: bool = True,
     item_pool: dict[str, int] | None = None,
     obsidian_cost: int | None = None,
     config_edits: dict | None = None,
@@ -108,6 +111,12 @@ def run_randomizer(
             args.append("--no-connections")
         if not do_qol:
             args.append("--no-qol")
+        if fps_unlock:
+            args.append("--fps-unlock")
+        if not disable_gem_popups:
+            args.append("--no-gem-popups")
+        if not disable_pickup_anims:
+            args.append("--no-pickup-anim")
         if item_pool:
             args.extend(["--item-pool", json.dumps(item_pool)])
         if obsidian_cost is not None:

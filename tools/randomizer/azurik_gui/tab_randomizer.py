@@ -385,6 +385,8 @@ class RandomizerTab(ttk.Frame):
         seed = self.seed.get_seed()
         self._pending_force = False
 
+        qol_flags = self.app.tab_qol.get_patch_flags()
+
         def _start_build(force=False):
             self._thread, self._msg_queue = backend.run_randomizer(
                 iso_path=iso_path,
@@ -396,6 +398,9 @@ class RandomizerTab(ttk.Frame):
                 do_barriers=self._vars["do_barriers"].get(),
                 do_connections=self._vars["do_connections"].get(),
                 do_qol=self._vars["do_qol"].get(),
+                fps_unlock=qol_flags.get("fps_unlock", False),
+                disable_gem_popups=qol_flags.get("disable_gem_popups", True),
+                disable_pickup_anims=qol_flags.get("disable_pickup_anims", True),
                 item_pool=item_pool,
                 obsidian_cost=self._get_obsidian_cost(),
                 config_edits=config_edits,
