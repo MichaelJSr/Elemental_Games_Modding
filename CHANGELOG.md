@@ -24,14 +24,33 @@
 
 ### Patches
 
-- `qol` split: the single `qol` pack has been replaced by two
+- `qol_skip_logo` (new pack, default OFF): NOPs the 10-byte
+  `PUSH &"AdreniumLogo.bik"; CALL play_movie` pair at VA 0x05F6E0 so
+  the unskippable Adrenium logo movie no longer plays on boot.
+  Noticeably shortens game launch.  The intro prophecy cutscene is
+  left alone.  Surgical instruction-level patch, stack-balanced,
+  passes `verify-patches --strict`.  Opt in via `--skip-logo` CLI
+  flag or by ticking the pack on the Patches page.
+- `qol` split: the single `qol` pack has been replaced by three
   independently-toggleable packs so users can pick exactly which QoL
-  tweaks they want.  Both default to OFF:
-  * `qol_gem_popups` — hide the first-time gem pickup message.
+  tweaks they want.  All default to OFF:
+  * `qol_gem_popups` — hide the "Collect 100 &lt;gem&gt;" popup that
+    appears the first time you collect each gem type.  (The old
+    description said "You found X for the first time!" which was
+    never the actual in-game wording.)
+  * `qol_other_popups` — hide the remaining first-time popups: swim
+    tutorial, first key pickup, first health pickup, first of each
+    elemental / chromatic power-up, and the six-keys-collected
+    milestone.  The death-screen "gameover" popup is deliberately
+    left alone.
   * `qol_pickup_anims` — skip the post-pickup celebration animation.
+  All three use the same "null the first byte of the localisation
+  resource-key path" mechanism so the game's popup lookup silently
+  fails; the popup text itself lives in a separate localisation
+  `.xbr` file, not in `default.xbe`.
   CLI: former `--no-qol` / `--no-gem-popups` / `--no-pickup-anim` opt-out
   flags are deprecated (still accepted as no-ops) and replaced by
-  opt-in `--gem-popups` / `--pickup-anims`.
+  opt-in `--gem-popups` / `--other-popups` / `--pickup-anims`.
 - `fps_unlock`: raised the simulation step cap from 2 to 4.  At 60 Hz
   sim cap=2 causes game time to drift below real time whenever render
   FPS dips below 30; cap=4 preserves real-time game speed down to

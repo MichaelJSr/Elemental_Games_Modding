@@ -16,7 +16,6 @@ import json
 import queue
 import shutil
 import subprocess
-import sys
 import tempfile
 import threading
 import traceback
@@ -174,7 +173,9 @@ def run_randomizer(
     do_barriers: bool = False,
     do_connections: bool = False,
     gem_popups: bool = False,
+    other_popups: bool = False,
     pickup_anims: bool = False,
+    skip_logo: bool = False,
     fps_unlock: bool = False,
     item_pool: dict[str, int] | None = None,
     obsidian_cost: int | None = None,
@@ -214,7 +215,8 @@ def run_randomizer(
                 f"# iso     : {iso_path}\n"
                 f"# output  : {output_path}\n"
                 f"# patches : fps={fps_unlock}  gem_popups={gem_popups}  "
-                f"pickup_anims={pickup_anims}\n"
+                f"other_popups={other_popups}  pickup_anims={pickup_anims}  "
+                f"skip_logo={skip_logo}\n"
                 f"# pools   : major={do_major} keys={do_keys} gems={do_gems} "
                 f"barriers={do_barriers} connections={do_connections}\n"
                 f"# pack_params: {pack_params}\n"
@@ -259,11 +261,15 @@ def run_randomizer(
             hard_barriers=False,
             # New opt-in QoL flags (one per sub-patch).
             gem_popups=gem_popups,
+            other_popups=other_popups,
             pickup_anims=pickup_anims,
+            skip_logo=skip_logo,
             # Legacy grouped flags stay False so they're no-ops.
             no_qol=False,
             no_gem_popups=False,
+            no_other_popups=False,
             no_pickup_anim=False,
+            no_skip_logo=False,
             obsidian_cost=obsidian_cost,
             item_pool=json.dumps(item_pool) if item_pool else None,
             force=force_unsolvable,

@@ -53,6 +53,20 @@ class PatchPack:
     tags: tuple[str, ...] = field(default_factory=tuple)
     """Free-form tags like 'fps', 'qol', 'player', 'experimental'."""
 
+    extra_whitelist_ranges: tuple[tuple[int, int], ...] = field(default_factory=tuple)
+    """Extra ``(lo, hi)`` file-offset half-open byte ranges this pack is
+    allowed to touch at apply time, beyond the ranges implied by its
+    ``PatchSpec`` / ``ParametricPatch`` sites.
+
+    Packs that mutate bytes imperatively (e.g. the popup-suppression
+    packs that null the first byte of a localisation resource key)
+    declare their offsets here so ``verify-patches --strict`` doesn't
+    flag those byte flips as unexpected.  Ranges are compared against
+    the XBE's FILE offset space (not VA), matching the whitelist diff's
+    coordinate system.  Callers typically spell them as
+    ``tuple((off, off + 1) for off in OFFSETS)`` for single-byte nulls.
+    """
+
     def patch_specs(self) -> list[PatchSpec]:
         """Return only the PatchSpec entries in this pack."""
         return [s for s in self.sites if isinstance(s, PatchSpec)]

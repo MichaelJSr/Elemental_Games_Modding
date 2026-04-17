@@ -119,7 +119,9 @@ class TestRegistry(unittest.TestCase):
         self.assertIn("fps_unlock", names)
         # QoL is now split into two independently-toggleable packs.
         self.assertIn("qol_gem_popups", names)
+        self.assertIn("qol_other_popups", names)
         self.assertIn("qol_pickup_anims", names)
+        self.assertIn("qol_skip_logo", names)
 
     def test_all_sites_dedupes(self):
         # Real (non-virtual) sites: deduped by VA.

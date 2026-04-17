@@ -6,8 +6,23 @@ default — the user opts into whichever they want.
 
 Current packs:
 
-- ``qol_gem_popups``    — skip the first-time gem pickup message
+- ``qol_gem_popups``    — skip the first-time "Collect 100 <gem>" popup
 - ``qol_pickup_anims``  — skip the item-pickup celebration animation
+- ``qol_other_popups``  — skip the tutorial / key / health / power-up
+                          first-time popups (the death-screen "gameover"
+                          popup is deliberately excluded)
+- ``qol_skip_logo``     — skip the unskippable Adrenium logo cutscene
+                          that plays when the game first boots
+
+Popup-suppression mechanism
+---------------------------
+The popup system looks up its message by a localisation resource key
+like ``loc/english/popups/diamonds``.  We null the FIRST byte of that
+key string in .rdata, turning it into an empty string; the resource
+lookup fails silently and the popup never renders.  The actual popup
+text (e.g. "Collect 100 Diamonds") lives in a localisation ``.xbr``
+referenced by the key, not in ``default.xbe``, so searching the XBE
+for the popup body itself will turn up nothing.
 
 Plus a non-pack helper:
 
@@ -23,22 +38,29 @@ from azurik_mod.patching.registry import PatchPack, register_pack
 
 
 # ---------------------------------------------------------------------------
-# Pack 1 — skip the gem first-pickup popup
+# Shared helper — null the first byte of a list of resource-key paths.
 # ---------------------------------------------------------------------------
-# File offsets of each popup string's first byte.  Nulling those bytes
-# terminates the string before it reaches the renderer, so the popup
-# silently no-ops.  Imperative patch (variable targets, not a single
-# PatchSpec), so this pack has no `sites` entries but still participates
-# in the registry via its own apply function.
-GEM_POPUP_OFFSETS = [0x197858, 0x19783C, 0x197820, 0x197800, 0x1977D8]
+def _null_resource_keys(
+    xbe_data: bytearray,
+    offsets: list[int],
+    label: str,
+) -> None:
+    """Break the localisation lookup for every resource key in ``offsets``.
 
+    Each offset is expected to point at the first byte of a
+    null-terminated ASCII string like ``loc/english/popups/<name>``.
+    Replacing the first byte with ``0x00`` turns the path into an empty
+    string, the game's resource lookup fails silently, and the
+    associated popup / tutorial never renders.
 
-def apply_gem_popups_patch(xbe_data: bytearray) -> None:
-    """Suppress every "You found X for the first time!" gem message."""
+    Callers pass printable-ASCII-typed offsets; non-printable bytes are
+    treated as "wrong target" and reported as a warning rather than
+    blindly overwritten.
+    """
     patched, skipped = 0, 0
-    for off in GEM_POPUP_OFFSETS:
+    for off in offsets:
         if off >= len(xbe_data):
-            print(f"  WARNING: Gem popup offset 0x{off:X} out of range")
+            print(f"  WARNING: {label} offset 0x{off:X} out of range")
             skipped += 1
         elif xbe_data[off] == 0x00:
             patched += 1  # already nulled from a previous run
@@ -46,11 +68,78 @@ def apply_gem_popups_patch(xbe_data: bytearray) -> None:
             xbe_data[off] = 0x00
             patched += 1
         else:
-            print(f"  WARNING: Gem popup byte at 0x{off:X} is 0x{xbe_data[off]:02X} "
+            print(f"  WARNING: {label} byte at 0x{off:X} is 0x{xbe_data[off]:02X} "
                   f"(expected printable ASCII), skipping")
             skipped += 1
-    print(f"  Skipping first-pickup gem popups ({patched} strings)"
+    print(f"  Suppressed {patched} {label}"
           + (f"  [{skipped} warnings]" if skipped else ""))
+
+
+# ---------------------------------------------------------------------------
+# Pack 1 — skip the gem first-pickup popup
+# ---------------------------------------------------------------------------
+# File offsets of each gem popup's resource-key string in .rdata.  In the
+# USA XBE the five keys are:
+#   0x1977D8  loc/english/popups/collect_obsidians
+#   0x197800  loc/english/popups/sapphires
+#   0x197820  loc/english/popups/rubies
+#   0x19783C  loc/english/popups/diamonds
+#   0x197858  loc/english/popups/emeralds
+# The in-game message is "Collect 100 <gem>" the first time you pick
+# up each gem type; nulling the key's first byte makes the resource
+# lookup fail so the message never renders.  Imperative patch
+# (variable-length strings, not a single PatchSpec), so this pack has
+# no `sites` entries but still participates in the registry via its
+# own apply function.
+GEM_POPUP_OFFSETS = [0x197858, 0x19783C, 0x197820, 0x197800, 0x1977D8]
+
+
+def apply_gem_popups_patch(xbe_data: bytearray) -> None:
+    """Hide the first-time "Collect 100 <gem>" popup for every gem type."""
+    _null_resource_keys(xbe_data, GEM_POPUP_OFFSETS, "gem pickup popups")
+
+
+# ---------------------------------------------------------------------------
+# Pack 3 — skip the remaining first-time / milestone popups
+# ---------------------------------------------------------------------------
+# Same resource-key nulling mechanism as qol_gem_popups, applied to the
+# other nine popup keys in the XBE.  The .rdata keys are:
+#   0x194A78  loc/english/popups/swim              — first-swim tutorial
+#   0x197760  loc/english/popups/6keys             — six-keys milestone
+#   0x19777C  loc/english/popups/key               — first key pickup
+#   0x197794  loc/english/popups/chromatic_powerup
+#   0x1977BC  loc/english/popups/health            — first health pickup
+#   0x197874  loc/english/popups/water_powerup
+#   0x197898  loc/english/popups/fire_powerup
+#   0x1978B8  loc/english/popups/air_powerup
+#   0x1978D8  loc/english/popups/earth_powerup
+#
+# IMPORTANT: 0x194910 (loc/english/popups/gameover) is NOT in this
+# list.  That key drives the death-screen message, not a pickup popup;
+# nulling it would make the player die silently and likely confuse
+# anyone who then can't work out why they got kicked to the menu.
+OTHER_POPUP_OFFSETS = [
+    0x194A78,  # swim              — first-swim tutorial
+    0x197760,  # 6keys             — all six keys collected milestone
+    0x19777C,  # key               — first key pickup
+    0x197794,  # chromatic_powerup
+    0x1977BC,  # health            — first health pickup
+    0x197874,  # water_powerup
+    0x197898,  # fire_powerup
+    0x1978B8,  # air_powerup
+    0x1978D8,  # earth_powerup
+]
+
+
+def apply_other_popups_patch(xbe_data: bytearray) -> None:
+    """Hide the remaining first-time / tutorial / milestone popups.
+
+    Covers the swim tutorial, the "all six keys collected" milestone,
+    first-time key / health pickups, and the first pickup of each
+    elemental / chromatic power-up.  Leaves the death-screen popup
+    alone (see OTHER_POPUP_OFFSETS for why).
+    """
+    _null_resource_keys(xbe_data, OTHER_POPUP_OFFSETS, "tutorial / pickup popups")
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +160,43 @@ PICKUP_ANIM_SPEC = PatchSpec(
 def apply_pickup_anim_patch(xbe_data: bytearray) -> None:
     """Replace the pickup celebration animation block with an early JMP."""
     apply_patch_spec(xbe_data, PICKUP_ANIM_SPEC)
+
+
+# ---------------------------------------------------------------------------
+# Pack 4 — skip the AdreniumLogo boot movie
+# ---------------------------------------------------------------------------
+# The boot sequence in sim.cpp (strings at 0x196D80 confirm the source
+# file) plays two BINK movies before reaching the title screen:
+#
+#   VA 0x05F6E0   PUSH &"AdreniumLogo.bik"   ; 68 50 E1 19 00
+#   VA 0x05F6E5   CALL play_movie_fn         ; E8 96 92 FB FF
+#   ... 0x5A bytes of other work ...
+#   VA 0x05F73F   PUSH &"prophecy.bik"       ; same pattern
+#
+# The logo is unskippable in-game (player input isn't polled during
+# boot), so we NOP the 10-byte PUSH+CALL pair.  The CALL is
+# fire-and-forget (its return value is discarded), and the PUSH is
+# balanced by the CALL's RET, so replacing both with NOPs leaves the
+# stack and every subsequent instruction identical — control just
+# falls through to the prophecy.bik call at 0x05F73F.
+#
+# We DO NOT touch prophecy.bik; that cutscene has plot content the
+# user may want.  A parallel qol_skip_prophecy pack would be trivial
+# to add later using the same mechanism.
+SKIP_LOGO_SPEC = PatchSpec(
+    label="Skip AdreniumLogo startup movie",
+    va=0x05F6E0,
+    original=bytes([
+        0x68, 0x50, 0xE1, 0x19, 0x00,   # PUSH 0x0019E150 (&"AdreniumLogo.bik")
+        0xE8, 0x96, 0x92, 0xFB, 0xFF,   # CALL play_movie_fn (rel32)
+    ]),
+    patch=bytes([0x90] * 10),            # NOP x10
+)
+
+
+def apply_skip_logo_patch(xbe_data: bytearray) -> None:
+    """Skip the unskippable AdreniumLogo boot cutscene."""
+    apply_patch_spec(xbe_data, SKIP_LOGO_SPEC)
 
 
 # ---------------------------------------------------------------------------
@@ -110,22 +236,26 @@ def apply_player_character_patch(xbe_data: bytearray, player_char: str) -> None:
 # independently.  Keeping each scoped to a single behaviour means the
 # user can describe exactly what they want without sub-checkbox trees.
 # ---------------------------------------------------------------------------
-QOL_PATCH_SITES: list[PatchSpec] = [PICKUP_ANIM_SPEC]
-"""All QoL PatchSpec sites (for verify-patches iteration).  Gem popup
-suppression is imperative byte-null and not a PatchSpec."""
+QOL_PATCH_SITES: list[PatchSpec] = [PICKUP_ANIM_SPEC, SKIP_LOGO_SPEC]
+"""All QoL PatchSpec sites (for verify-patches iteration).  The gem-popup
+and other-popup suppressors are imperative byte-nulls, not PatchSpec."""
 
 
 register_pack(PatchPack(
     name="qol_gem_popups",
     description=(
-        "Skip the \u201cYou found X for the first time!\u201d message that "
-        "pops up the first time you collect each gem type."
+        "Hide the \u201cCollect 100 <gem>\u201d popup that appears the first "
+        "time you collect each gem type (diamonds, emeralds, rubies, "
+        "sapphires, obsidians)."
     ),
     sites=[],
     apply=apply_gem_popups_patch,
     default_on=False,
     included_in_randomizer_qol=False,
     tags=("qol",),
+    # Every offset is a single-byte null into a resource-key string.
+    # Declare them so verify-patches --strict whitelist-diff stays clean.
+    extra_whitelist_ranges=tuple((off, off + 1) for off in GEM_POPUP_OFFSETS),
 ))
 
 register_pack(PatchPack(
@@ -136,6 +266,36 @@ register_pack(PatchPack(
     ),
     sites=[PICKUP_ANIM_SPEC],
     apply=apply_pickup_anim_patch,
+    default_on=False,
+    included_in_randomizer_qol=False,
+    tags=("qol",),
+))
+
+register_pack(PatchPack(
+    name="qol_other_popups",
+    description=(
+        "Hide the first-time tutorial, key, health, power-up, and "
+        "six-keys-collected popups.  The death-screen popup is "
+        "deliberately left alone."
+    ),
+    sites=[],
+    apply=apply_other_popups_patch,
+    default_on=False,
+    included_in_randomizer_qol=False,
+    tags=("qol",),
+    # Same single-byte-null mechanism as qol_gem_popups.
+    extra_whitelist_ranges=tuple((off, off + 1) for off in OTHER_POPUP_OFFSETS),
+))
+
+register_pack(PatchPack(
+    name="qol_skip_logo",
+    description=(
+        "Skip the unskippable Adrenium logo movie that plays when the "
+        "game first boots, cutting launch time noticeably.  The "
+        "prophecy intro cutscene is left alone."
+    ),
+    sites=[SKIP_LOGO_SPEC],
+    apply=apply_skip_logo_patch,
     default_on=False,
     included_in_randomizer_qol=False,
     tags=("qol",),
@@ -152,9 +312,11 @@ def apply_qol_patches(xbe_data: bytearray, args) -> None:
     """Back-compat dispatcher for callers that still pass an argparse namespace.
 
     Honours three flag styles, in order of precedence:
-      * opt-in   : `--gem-popups` / `--pickup-anims` (preferred)
-      * opt-out  : `--no-gem-popups` / `--no-pickup-anim` (legacy)
-      * grouped  : `--no-qol` (legacy; disables everything)
+      * opt-in   : `--gem-popups` / `--other-popups` / `--pickup-anims`
+                   / `--skip-logo`
+      * opt-out  : `--no-gem-popups` / `--no-other-popups`
+                   / `--no-pickup-anim` / `--no-skip-logo`
+      * grouped  : `--no-qol` (disables every QoL pack)
     """
     group_off = bool(getattr(args, "no_qol", False))
 
@@ -165,9 +327,19 @@ def apply_qol_patches(xbe_data: bytearray, args) -> None:
         # used; the new opt-in style leaves this branch unused.
         pass
 
+    if getattr(args, "other_popups", False):
+        apply_other_popups_patch(xbe_data)
+    elif not group_off and not getattr(args, "no_other_popups", False):
+        pass
+
     if getattr(args, "pickup_anims", False):
         apply_pickup_anim_patch(xbe_data)
     elif not group_off and not getattr(args, "no_pickup_anim", False):
+        pass
+
+    if getattr(args, "skip_logo", False):
+        apply_skip_logo_patch(xbe_data)
+    elif not group_off and not getattr(args, "no_skip_logo", False):
         pass
 
     player_char = getattr(args, "player_character", None)

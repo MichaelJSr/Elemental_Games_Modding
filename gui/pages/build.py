@@ -72,6 +72,15 @@ class BuildPage(Page):
         self._open_last_btn.pack(side=tk.LEFT)
         self._last_log_path: Path | None = None
 
+        # If a previous session left a log on disk, seed the "Open last
+        # log" button with it so the user can inspect prior runs without
+        # having to kick off a new build first.  The button stays
+        # disabled only when the log folder is genuinely empty.
+        prior_log = backend.latest_log_file()
+        if prior_log is not None:
+            self._last_log_path = prior_log
+            self._open_last_btn.configure(state=tk.NORMAL)
+
         # Status line.
         self._status = ttk.Label(self._body, text="Ready")
         self._status.pack(fill=tk.X, pady=(0, 4))
@@ -128,7 +137,9 @@ class BuildPage(Page):
             do_connections=config.do_connections,
             # Each QoL sub-patch is now its own independently-toggleable pack.
             gem_popups=packs.get("qol_gem_popups", False),
+            other_popups=packs.get("qol_other_popups", False),
             pickup_anims=packs.get("qol_pickup_anims", False),
+            skip_logo=packs.get("qol_skip_logo", False),
             fps_unlock=packs.get("fps_unlock", False),
             item_pool=config.item_pool,
             obsidian_cost=config.obsidian_cost,

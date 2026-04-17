@@ -115,6 +115,22 @@ class RandomizerConfig:
     …) live on the Patches page and are merged into the build thread
     separately — they are NOT fields on this dataclass.  Everything here
     defaults to OFF so an untouched build is a no-op.
+
+    Fields marked "(pipeline-only)" are forwarded end-to-end from this
+    dataclass through `gui.backend.run_randomizer` to the `azurik-mod`
+    argparse namespace, but the Randomize page does not yet expose a UI
+    for composing them — scripts / tests can still set them directly
+    on a `RandomizerConfig` instance:
+
+    * ``config_edits``   — dict passed as ``--config-mod`` JSON.  The
+                           Config Editor tab is WIP and will populate
+                           this once its edit buffer is finalised.
+    * ``force_unsolvable`` — passes ``--force`` to the randomizer, for
+                           rebuilding unsolvable seeds on purpose.  The
+                           Build page sets this at runtime when the
+                           user confirms the "Seed unsolvable → build
+                           anyway?" prompt; never set from the
+                           Randomize page directly.
     """
 
     seed: int = 42
@@ -126,42 +142,5 @@ class RandomizerConfig:
     output_path: Path | None = None
     item_pool: dict[str, int] | None = None
     obsidian_cost: int | None = None
-    config_edits: dict | None = None
-    force_unsolvable: bool = False
-
-    def to_args(self, iso_path: Path) -> list[str]:
-        """Build CLI argument list for `azurik-mod randomize-full`.
-
-        Only shuffle-pool / advanced flags are emitted here.  Patch
-        packs (`--gem-popups`, `--pickup-anims`, `--fps-unlock`,
-        `--gravity`, `--player-walk-scale`, `--player-run-scale`) are
-        added by the Build page from the Patches-page state before
-        this method is called — or passed straight into
-        `backend.run_randomizer` which bypasses CLI serialisation.
-        """
-        args = [
-            "randomize-full",
-            "--iso", str(iso_path),
-            "--seed", str(self.seed),
-            "--output", str(self.output_path or
-                            iso_path.with_name("Azurik_randomized.iso")),
-        ]
-        if not self.do_major:
-            args.append("--no-major")
-        if not self.do_keys:
-            args.append("--no-keys")
-        if not self.do_gems:
-            args.append("--no-gems")
-        if not self.do_barriers:
-            args.append("--no-barriers")
-        if not self.do_connections:
-            args.append("--no-connections")
-        if self.item_pool:
-            args.extend(["--item-pool", json.dumps(self.item_pool)])
-        if self.obsidian_cost is not None:
-            args.extend(["--obsidian-cost", str(self.obsidian_cost)])
-        if self.config_edits:
-            args.extend(["--config-mod", json.dumps(self.config_edits)])
-        if self.force_unsolvable:
-            args.append("--force")
-        return args
+    config_edits: dict | None = None    # pipeline-only (see class docstring)
+    force_unsolvable: bool = False      # pipeline-only (see class docstring)

@@ -293,12 +293,17 @@ class Page(ttk.Frame):
     is wrapped in a `ScrollableFrame` so long pages remain reachable
     on short windows.
 
-    A `title` and optional `description` are rendered as a header at
-    the top.
+    Pages that manage their own internal scrolling (e.g. the Entity
+    Editor's property grid inside its own Canvas) should set
+    ``scrollable_body = False`` to opt out of the outer
+    ScrollableFrame — stacking two canvas-based scrollers makes the
+    mouse-wheel event fight between both.  In that case ``self._body``
+    is a plain ``ttk.Frame`` and ``self._scroll`` is ``None``.
     """
 
     title: str = "Page"
     description: str = ""
+    scrollable_body: bool = True
 
     def __init__(self, parent, app):
         super().__init__(parent, padding=(16, 12))
@@ -314,10 +319,16 @@ class Page(ttk.Frame):
                       foreground="gray", wraplength=720, justify=tk.LEFT).pack(
                 anchor=tk.W, pady=(2, 0))
 
-        # Scrollable body — every child page builds into this.
-        self._scroll = ScrollableFrame(self)
-        self._scroll.pack(fill=tk.BOTH, expand=True)
-        self._body = self._scroll.inner
+        # Body — scrollable by default, or a plain Frame if the page
+        # manages its own scrolling.
+        if self.scrollable_body:
+            self._scroll: ScrollableFrame | None = ScrollableFrame(self)
+            self._scroll.pack(fill=tk.BOTH, expand=True)
+            self._body = self._scroll.inner
+        else:
+            self._scroll = None
+            self._body = ttk.Frame(self)
+            self._body.pack(fill=tk.BOTH, expand=True)
         self._build()
 
     def _build(self) -> None:  # pragma: no cover - overridden by subclasses

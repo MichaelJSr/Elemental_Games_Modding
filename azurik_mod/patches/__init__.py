@@ -16,10 +16,13 @@ from azurik_mod.patches.player_physics import (
 )
 from azurik_mod.patches.qol import (
     QOL_PATCH_SITES,
+    SKIP_LOGO_SPEC,
     apply_gem_popups_patch,
+    apply_other_popups_patch,
     apply_pickup_anim_patch,
     apply_player_character_patch,
     apply_qol_patches,
+    apply_skip_logo_patch,
 )
 
 __all__ = [
@@ -30,12 +33,15 @@ __all__ = [
     "PLAYER_PHYSICS_SITES",
     "QOL_PATCH_SITES",
     "RUN_SPEED_SCALE",
+    "SKIP_LOGO_SPEC",
     "WALK_SPEED_SCALE",
     "apply_fps_patches",
     "apply_gem_popups_patch",
+    "apply_other_popups_patch",
     "apply_pickup_anim_patch",
     "apply_player_character_patch",
     "apply_player_physics",
     "apply_player_speed",
     "apply_qol_patches",
+    "apply_skip_logo_patch",
 ]

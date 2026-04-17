@@ -1,4 +1,12 @@
-"""Entity Editor tab — browse, edit, and randomize critter/player/damage config values."""
+"""Entity Editor page — browse, edit, and randomize critter / player /
+damage config values.
+
+Subclasses `Page` with ``scrollable_body=False`` because the property
+grid runs inside its own ``tk.Canvas`` (the list can be hundreds of
+rows long and we want it to scroll independently while the top
+controls stay fixed).  Enabling the outer ``ScrollableFrame`` on top
+of that internal canvas would cause both wheel handlers to fight.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +17,7 @@ from tkinter import ttk, messagebox, filedialog
 from pathlib import Path
 
 from .. import backend
+from ..widgets import Page
 
 # Sections available for editing, organized by user-facing category.
 # format: "keyed" (uses keyed_table_parser) or "variant" (uses config_registry.json)
@@ -32,10 +41,18 @@ NON_GAMEPLAY_ENTITIES = {
 }
 
 
-class EntityEditorTab(ttk.Frame):
-    def __init__(self, parent, app):
-        super().__init__(parent)
-        self.app = app
+class EntityEditorTab(Page):
+    title = "Entity Editor"
+    description = ("Browse, edit, and randomize critter / player / damage "
+                   "config values.  Load values from an ISO to populate "
+                   "the grid, tweak individual properties or roll a "
+                   "randomized pass, then Export Mod JSON for the "
+                   "`--config-mod` randomize-full flag.")
+    scrollable_body = False  # internal canvas handles scrolling
+
+    def _build(self):
+        # Subclass-specific state (initialised here rather than __init__
+        # because Page.__init__ runs _build() before returning).
         self._registry = None
         self._schema = None
         self._keyed_tables = None
@@ -43,12 +60,10 @@ class EntityEditorTab(ttk.Frame):
         self._edits: dict[str, dict[str, dict[str, float]]] = {}
         self._value_widgets: dict[str, tk.Variable] = {}
         self._default_values: dict[str, dict[str, dict[str, float]]] = {}
-        self._build()
 
-    def _build(self):
         # -- Top controls --
-        ctrl = ttk.Frame(self)
-        ctrl.pack(fill=tk.X, padx=10, pady=(10, 5))
+        ctrl = ttk.Frame(self._body)
+        ctrl.pack(fill=tk.X, pady=(0, 5))
 
         ttk.Label(ctrl, text="Section:").pack(side=tk.LEFT, padx=(0, 5))
         self._section_var = tk.StringVar()
@@ -68,8 +83,8 @@ class EntityEditorTab(ttk.Frame):
         self._entity_combo.bind("<<ComboboxSelected>>", lambda e: self._rebuild_property_grid())
 
         # -- Button row --
-        btn_frame = ttk.Frame(self)
-        btn_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
+        btn_frame = ttk.Frame(self._body)
+        btn_frame.pack(fill=tk.X, pady=(0, 5))
 
         ttk.Button(btn_frame, text="Load from ISO",
                    command=self._load_from_iso).pack(side=tk.LEFT, padx=(0, 5))
@@ -82,8 +97,8 @@ class EntityEditorTab(ttk.Frame):
                    command=self._reset_edits).pack(side=tk.RIGHT)
 
         # -- Randomize controls --
-        rand_frame = ttk.LabelFrame(self, text="Randomize Stats")
-        rand_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
+        rand_frame = ttk.LabelFrame(self._body, text="Randomize Stats")
+        rand_frame.pack(fill=tk.X, pady=(0, 5))
 
         rand_inner = ttk.Frame(rand_frame)
         rand_inner.pack(fill=tk.X, padx=5, pady=4)
@@ -104,8 +119,8 @@ class EntityEditorTab(ttk.Frame):
                    command=self._randomize_section).pack(side=tk.LEFT, padx=(0, 5))
 
         # -- Property editor (scrollable) --
-        editor_frame = ttk.Frame(self)
-        editor_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        editor_frame = ttk.Frame(self._body)
+        editor_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         canvas = tk.Canvas(editor_frame, highlightthickness=0)
         scrollbar = ttk.Scrollbar(editor_frame, orient=tk.VERTICAL,
@@ -130,8 +145,9 @@ class EntityEditorTab(ttk.Frame):
         self._canvas = canvas
 
         # -- Status --
-        self._status = ttk.Label(self, text="Select a section and entity, then Load from ISO")
-        self._status.pack(fill=tk.X, padx=10, pady=(0, 10))
+        self._status = ttk.Label(self._body,
+            text="Select a section and entity, then Load from ISO")
+        self._status.pack(fill=tk.X, pady=(0, 10))
 
         # Load data
         self._load_registry()

@@ -44,7 +44,6 @@ import io
 import struct
 import sys
 import json
-from pathlib import Path
 
 
 def set_cell_double(data: bytearray, cell_file_offset: int, new_value: float) -> None:

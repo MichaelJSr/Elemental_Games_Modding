@@ -130,8 +130,10 @@ def main() -> None:
             "to skip individual shuffle pools.\n"
             "\n"
             "Patches are OFF by default; opt in explicitly:\n"
-            "  --gem-popups    Skip first-time gem pickup popups.\n"
+            "  --gem-popups    Hide the first-time \"Collect 100 <gem>\" popups.\n"
+            "  --other-popups  Hide the tutorial / key / health / power-up popups.\n"
             "  --pickup-anims  Skip item pickup celebration animation.\n"
+            "  --skip-logo     Skip the unskippable Adrenium logo boot movie.\n"
             "  --fps-unlock    Run the game at 60 FPS (experimental).\n"
             "  --gravity N     World gravity in m/s^2 (default 9.8, range 0.98-29.4).\n"
             "  --player-walk-scale N / --player-run-scale N   Player speed multipliers."
@@ -155,14 +157,28 @@ def main() -> None:
     # for back-compat (store_true, hidden from --help) but do nothing when
     # the opt-in flags are absent because defaults are already off.
     p_full.add_argument("--gem-popups", action="store_true",
-                        help="Hide the \"You found X for the first time!\" gem popup.")
+                        help="Hide the first-time \"Collect 100 <gem>\" popup "
+                             "for diamonds / emeralds / rubies / sapphires / "
+                             "obsidians.")
+    p_full.add_argument("--other-popups", action="store_true",
+                        help="Hide the first-time tutorial, key, health, "
+                             "power-up, and six-keys-collected popups.  "
+                             "Leaves the death-screen popup alone.")
     p_full.add_argument("--pickup-anims", action="store_true",
-                        help="Skip the short celebration animation after picking up items.")
+                        help="Skip the short celebration animation after "
+                             "picking up items.")
+    p_full.add_argument("--skip-logo", action="store_true",
+                        help="Skip the unskippable Adrenium logo movie that "
+                             "plays when the game first boots.")
     p_full.add_argument("--no-qol", action="store_true",
                         help=argparse.SUPPRESS)  # deprecated alias; no-op
     p_full.add_argument("--no-gem-popups", action="store_true",
                         help=argparse.SUPPRESS)  # deprecated alias; no-op
+    p_full.add_argument("--no-other-popups", action="store_true",
+                        help=argparse.SUPPRESS)  # deprecated alias; no-op
     p_full.add_argument("--no-pickup-anim", action="store_true",
+                        help=argparse.SUPPRESS)  # deprecated alias; no-op
+    p_full.add_argument("--no-skip-logo", action="store_true",
                         help=argparse.SUPPRESS)  # deprecated alias; no-op
     p_full.add_argument("--obsidian-cost", type=int, metavar="N",
                         help="Obsidian cost per temple lock (default: 10 = locks at 10,20,...100)")

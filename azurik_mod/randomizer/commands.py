@@ -18,7 +18,6 @@ from pathlib import Path
 from azurik_mod.iso.pack import (
     CONFIG_XBR_REL,
     GAMEDATA_REL,
-    extract_config_from_iso,
     extract_xbe_from_iso,
     read_config_data,
     read_xbe_bytes,
@@ -33,7 +32,9 @@ from azurik_mod.patches.player_physics import (
 )
 from azurik_mod.patches.qol import (
     apply_gem_popups_patch,
+    apply_other_popups_patch,
     apply_pickup_anim_patch,
+    apply_skip_logo_patch,
     apply_player_character_patch,
 )
 from azurik_mod.patching import verify_patch_spec
@@ -44,19 +45,15 @@ from azurik_mod.randomizer.shufflers import (
     BARRIER_OFFSETS,
     GEM_TYPES,
     KEY_REALMS,
-    LEVEL_PATHS,
     LEVEL_XBRS,
     NAME_FIELD_SIZE,
     OBSIDIAN_LOCK_COUNT,
-    OBSIDIAN_LOCK_DEFAULTS,
     OBSIDIAN_LOCK_ENTRY_SIZE,
     OBSIDIAN_LOCK_TABLE_A,
     OBSIDIAN_LOCK_TABLE_B,
-    POWER_ELEMENTS,
     SCALE_OFFSETS,
     TOWN_BARRIER_ITEMS,
     TOWN_BARRIER_SCALE,
-    TOWN_POWERS,
     _find_all_entities_in_level,
     _find_cross_level_entities,
     _find_level_gem_entities,
@@ -67,8 +64,6 @@ from azurik_mod.randomizer.shufflers import (
     _rename_all_refs,
     _write_name,
     apply_level_patches,
-    find_level_entities,
-    find_null_terminated_string,
     flatten_mod,
     format_value,
     load_mod,
@@ -692,9 +687,15 @@ def cmd_randomize_full(args):
     want_gem_popups = (bool(getattr(args, 'gem_popups', False))
                        and not legacy_no_qol
                        and not getattr(args, 'no_gem_popups', False))
+    want_other_popups = (bool(getattr(args, 'other_popups', False))
+                         and not legacy_no_qol
+                         and not getattr(args, 'no_other_popups', False))
     want_pickup_anims = (bool(getattr(args, 'pickup_anims', False))
                          and not legacy_no_qol
                          and not getattr(args, 'no_pickup_anim', False))
+    want_skip_logo = (bool(getattr(args, 'skip_logo', False))
+                      and not legacy_no_qol
+                      and not getattr(args, 'no_skip_logo', False))
 
     # Parse custom item pool if provided
     custom_pool = None
@@ -714,7 +715,9 @@ def cmd_randomize_full(args):
 
     qol_names = []
     if want_gem_popups: qol_names.append("gem popups")
+    if want_other_popups: qol_names.append("other popups")
     if want_pickup_anims: qol_names.append("pickup anims")
+    if want_skip_logo: qol_names.append("skip logo")
     qol_label = f"QoL ({', '.join(qol_names)})" if qol_names else None
     categories = [t for t, f in [("major items", do_major), ("keys", do_keys),
                                   ("gems", do_gems), ("barriers", do_barriers),
@@ -1095,7 +1098,9 @@ def cmd_randomize_full(args):
         # Step 7: XBE patches (granular QoL + FPS unlock + player character + gravity)
         gravity_val = getattr(args, 'gravity', None)
         needs_xbe = (want_gem_popups
+                      or want_other_popups
                       or want_pickup_anims
+                      or want_skip_logo
                       or getattr(args, 'fps_unlock', False)
                       or getattr(args, 'player_character', None)
                       or gravity_val is not None)
@@ -1106,8 +1111,12 @@ def cmd_randomize_full(args):
 
             if want_gem_popups:
                 apply_gem_popups_patch(xbe_data)
+            if want_other_popups:
+                apply_other_popups_patch(xbe_data)
             if want_pickup_anims:
                 apply_pickup_anim_patch(xbe_data)
+            if want_skip_logo:
+                apply_skip_logo_patch(xbe_data)
 
             if getattr(args, 'fps_unlock', False):
                 apply_fps_patches(xbe_data)
@@ -1369,8 +1378,12 @@ def cmd_verify_patches(args):
             print(f"  WARNING: size mismatch — original {len(original)} vs "
                   f"patched {len(patched)}; diff may be unreliable")
 
-        # Allow ranges: both fixed PatchSpec sites and non-virtual
-        # ParametricPatch sites.
+        # Allow ranges.  Three sources contribute:
+        #   1. every fixed PatchSpec site (VA -> file offset + length);
+        #   2. every non-virtual ParametricPatch site;
+        #   3. each pack's `extra_whitelist_ranges`, which covers
+        #      imperative byte-level patches like the popup-key nulls
+        #      that aren't PatchSpecs but are still intentional writes.
         allow_ranges: list[tuple[int, int]] = [
             (s.file_offset, s.file_offset + len(s.patch)) for s in specs
         ]
@@ -1378,6 +1391,9 @@ def cmd_verify_patches(args):
             if not pp.is_virtual:
                 allow_ranges.append(
                     (pp.file_offset, pp.file_offset + pp.size))
+        for pack in all_packs():
+            for lo, hi in pack.extra_whitelist_ranges:
+                allow_ranges.append((lo, hi))
         allow_ranges.sort()
 
         def _in_allow(off: int) -> bool:

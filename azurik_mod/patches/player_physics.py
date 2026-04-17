@@ -23,7 +23,6 @@ import struct
 from azurik_mod.patching import (
     ParametricPatch,
     apply_parametric_patch,
-    read_parametric_value,
 )
 from azurik_mod.patching.registry import PatchPack, register_pack
 

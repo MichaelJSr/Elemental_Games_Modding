@@ -1,4 +1,8 @@
-"""Config Editor tab — browse and (future) edit config.xbr values."""
+"""Config Editor page — browse and (future) edit config.xbr values.
+
+Subclasses `Page` so it participates in the scrollable-body shell and
+renders the standard title + description header like every other page.
+"""
 
 from __future__ import annotations
 
@@ -6,61 +10,77 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from .. import backend
+from ..widgets import Page
 
 
-class ConfigEditorTab(ttk.Frame):
-    def __init__(self, parent, app):
-        super().__init__(parent)
-        self.app = app
-        self._build()
+class ConfigEditorTab(Page):
+    title = "Config Editor"
+    description = ("Browse live config.xbr values for a given section / "
+                   "entity.  Editing is a work in progress — for now the "
+                   "page is read-only and falls back to the registry JSON "
+                   "if no ISO is selected.")
 
-    def _build(self):
-        # -- WIP banner --
-        banner = tk.Frame(self, bg="#CC8800")
-        banner.pack(fill=tk.X, padx=10, pady=(10, 0))
-        tk.Label(banner, text="\u26A0  This feature is still a work in progress",
-                 bg="#CC8800", fg="white", font=("Segoe UI", 9, "bold"),
+    def _build(self) -> None:
+        # WIP banner (subtle, doesn't take over the whole page).
+        banner = tk.Frame(self._body, bg="#CC8800")
+        banner.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(banner,
+                 text="\u26A0  This feature is a work in progress — read-only for now",
+                 bg="#CC8800", fg="white", font=("", 9, "bold"),
                  pady=4).pack()
 
-        # -- Section/entity selectors --
-        ctrl = ttk.Frame(self)
-        ctrl.pack(fill=tk.X, padx=10, pady=(10, 5))
+        # Section / entity selectors.
+        ctrl = ttk.Frame(self._body)
+        ctrl.pack(fill=tk.X, pady=(0, 8))
 
         ttk.Label(ctrl, text="Section:").pack(side=tk.LEFT, padx=(0, 5))
         self._section_var = tk.StringVar()
         sections = backend.list_sections()
-        self._section_combo = ttk.Combobox(ctrl, textvariable=self._section_var,
-                                           values=sections, state="readonly", width=22)
+        self._section_combo = ttk.Combobox(
+            ctrl, textvariable=self._section_var,
+            values=sections, state="readonly", width=22)
         self._section_combo.pack(side=tk.LEFT, padx=(0, 10))
-        self._section_combo.bind("<<ComboboxSelected>>", self._on_section_change)
+        self._section_combo.bind(
+            "<<ComboboxSelected>>", self._on_section_change)
 
         ttk.Label(ctrl, text="Entity:").pack(side=tk.LEFT, padx=(0, 5))
         self._entity_var = tk.StringVar()
-        self._entity_combo = ttk.Combobox(ctrl, textvariable=self._entity_var,
-                                          values=[], state="readonly", width=22)
+        self._entity_combo = ttk.Combobox(
+            ctrl, textvariable=self._entity_var,
+            values=[], state="readonly", width=22)
         self._entity_combo.pack(side=tk.LEFT, padx=(0, 10))
 
-        ttk.Button(ctrl, text="Load Values", command=self._load_values).pack(side=tk.LEFT)
+        ttk.Button(ctrl, text="Load Values",
+                   command=self._load_values).pack(side=tk.LEFT)
 
-        # -- Values display --
-        self._text = tk.Text(self, height=22, wrap=tk.WORD, state=tk.DISABLED,
-                             font=("Consolas", 9), bg="#1e1e1e", fg="#d4d4d4")
-        scrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL, command=self._text.yview)
+        # Values display.  The outer Page body is scrollable, but the
+        # text widget gets its own scrollbar for long entity dumps.
+        text_row = ttk.Frame(self._body)
+        text_row.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
+        self._text = tk.Text(
+            text_row, height=22, wrap=tk.WORD, state=tk.DISABLED,
+            font=("Consolas", 9), bg="#1e1e1e", fg="#d4d4d4")
+        scrollbar = ttk.Scrollbar(
+            text_row, orient=tk.VERTICAL, command=self._text.yview)
         self._text.config(yscrollcommand=scrollbar.set)
+        self._text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        self._text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=5)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 10), pady=5)
+        # Status line.
+        self._status = ttk.Label(
+            self._body,
+            text="Select a section and entity, then click Load Values")
+        self._status.pack(fill=tk.X, pady=(0, 4))
 
-        # -- Status --
-        self._status = ttk.Label(self, text="Select a section and entity, then click Load Values")
-        self._status.pack(fill=tk.X, padx=10, pady=(0, 10))
-
-        # Set default
+        # Seed the first section so the entity dropdown isn't empty on
+        # open — makes the page usable without having to click through.
         if sections:
             self._section_combo.set(sections[0])
             self._on_section_change()
 
-    def _on_section_change(self, event=None):
+    # --- event handlers --------------------------------------------------
+
+    def _on_section_change(self, event=None) -> None:
         section = self._section_var.get()
         if not section:
             return
@@ -69,11 +89,13 @@ class ConfigEditorTab(ttk.Frame):
         if entities:
             self._entity_combo.set(entities[0])
 
-    def _load_values(self):
+    def _load_values(self) -> None:
         iso_path = self.app.get_iso_path()
         if not iso_path or not iso_path.exists():
-            messagebox.showinfo("Info", "Select a game ISO first to load live values.\n"
-                               "Showing registry data instead.")
+            messagebox.showinfo(
+                "Info",
+                "Select a game ISO first to load live values.\n"
+                "Showing registry data instead.")
             self._show_registry_data()
             return
 
@@ -83,7 +105,8 @@ class ConfigEditorTab(ttk.Frame):
             return
 
         self._status.config(text="Loading...")
-        output = backend.run_config_dump(iso_path, section, entity if entity else None)
+        output = backend.run_config_dump(
+            iso_path, section, entity if entity else None)
 
         self._text.config(state=tk.NORMAL)
         self._text.delete("1.0", tk.END)
@@ -91,8 +114,8 @@ class ConfigEditorTab(ttk.Frame):
         self._text.config(state=tk.DISABLED)
         self._status.config(text=f"Loaded {section}/{entity or 'all'}")
 
-    def _show_registry_data(self):
-        """Show raw registry info without an ISO."""
+    def _show_registry_data(self) -> None:
+        """Fallback when no ISO is selected: dump the bundled registry JSON."""
         section = self._section_var.get()
         entity = self._entity_var.get()
         if not section:

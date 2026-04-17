@@ -1,12 +1,14 @@
 # Patch Pack Catalog
 
-Each pack is a module under [`azurik_mod/patches/`](../azurik_mod/patches/) that exports a list of `PatchSpec` entries and registers itself with the central registry.  The CLI (`azurik-mod verify-patches`) and the GUI (`gui/tabs/patches.py`) discover packs automatically — there is no hard-coded list to update when a new pack ships.
+Each pack is a module under [`azurik_mod/patches/`](../azurik_mod/patches/) that exports a list of `PatchSpec` entries and registers itself with the central registry.  The CLI (`azurik-mod verify-patches`) and the GUI ([`gui/pages/patches.py`](../gui/pages/patches.py)) discover packs automatically — there is no hard-coded list to update when a new pack ships.
 
 | Pack                 | Sites | Default-on | Tags                | Module |
 |----------------------|-------|------------|---------------------|--------|
 | `fps_unlock`         | 50    | no         | fps, experimental   | [azurik_mod/patches/fps_unlock.py](../azurik_mod/patches/fps_unlock.py) |
 | `qol_gem_popups`     | 0     | no         | qol                 | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
+| `qol_other_popups`   | 0     | no         | qol                 | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
 | `qol_pickup_anims`   | 1     | no         | qol                 | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
+| `qol_skip_logo`      | 1     | no         | qol                 | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
 | `player_physics`     | 3     | no         | player, physics     | [azurik_mod/patches/player_physics.py](../azurik_mod/patches/player_physics.py) |
 
 ---
@@ -48,13 +50,63 @@ A clean whitelist diff confirms only the 50 declared sites were modified.
 
 Each QoL tweak is its own pack so the GUI's Patches page can toggle them independently.  All default to OFF; the user opts in.
 
+### How the popup suppression works
+
+The popup system looks up its message by a localisation resource key like `loc/english/popups/diamonds`.  We null the first byte of that key in `.rdata`, turning it into an empty string; the resource lookup fails silently and the popup never renders.  The actual popup text (e.g. "Collect 100 Diamonds") lives in a localisation `.xbr` referenced by the key, **not** in `default.xbe`, so searching the XBE for the literal popup body turns up nothing — the key is the only thing we can touch from a static binary patch.
+
 ### `qol_gem_popups` (opt-in: `--gem-popups`)
 
-Hides the "You found X for the first time!" message that pops up the first time you collect each gem type.  Implementation: nulls the first byte of each popup string at five file offsets (0x1977D8 … 0x197858), terminating the string before it reaches the renderer.
+Hides the "Collect 100 &lt;gem&gt;" popup that appears the first time you collect each gem type (diamonds, emeralds, rubies, sapphires, obsidians).  Nulls five resource-key bytes:
+
+| Offset    | Key                                |
+|-----------|------------------------------------|
+| `0x1977D8` | `loc/english/popups/collect_obsidians` |
+| `0x197800` | `loc/english/popups/sapphires`     |
+| `0x197820` | `loc/english/popups/rubies`        |
+| `0x19783C` | `loc/english/popups/diamonds`      |
+| `0x197858` | `loc/english/popups/emeralds`      |
+
+### `qol_other_popups` (opt-in: `--other-popups`)
+
+Hides the remaining non-gem first-time / milestone / tutorial popups — the swim tutorial, the "all six keys collected" milestone, first-time key / health pickups, and the first pickup of each elemental and chromatic power-up.  Nine resource-key bytes:
+
+| Offset    | Key                                     | What it gates                  |
+|-----------|-----------------------------------------|--------------------------------|
+| `0x194A78` | `loc/english/popups/swim`              | first-swim tutorial            |
+| `0x197760` | `loc/english/popups/6keys`             | all-six-keys milestone         |
+| `0x19777C` | `loc/english/popups/key`               | first key pickup               |
+| `0x197794` | `loc/english/popups/chromatic_powerup` | first chromatic power-up pickup|
+| `0x1977BC` | `loc/english/popups/health`            | first health pickup            |
+| `0x197874` | `loc/english/popups/water_powerup`     | first water power-up pickup    |
+| `0x197898` | `loc/english/popups/fire_powerup`      | first fire power-up pickup     |
+| `0x1978B8` | `loc/english/popups/air_powerup`       | first air power-up pickup      |
+| `0x1978D8` | `loc/english/popups/earth_powerup`     | first earth power-up pickup    |
+
+**Deliberately excluded:** `0x194910` (`loc/english/popups/gameover`) is **not** in the offset list.  That key drives the death-screen message, not a pickup popup; nulling it would leave the player with no feedback on death, which is bad UX.  [`tests/test_qol_other_popups.py`](../tests/test_qol_other_popups.py) pins this exclusion.
 
 ### `qol_pickup_anims` (opt-in: `--pickup-anims`)
 
 Skips the short celebration animation that plays after picking up an item.  Implementation: replaces the first instruction of the non-gem pickup handler's animation block with a `JMP` to its epilog at VA 0x4146F (file offset 0x313EE, 5 bytes).  The "collected" flag and save-list update still run, so picked-up items remain collected and saves stay consistent.  Supersedes the earlier OBSIDIAN_ANIM + FIST_PUMP pair that could drop state.
+
+### `qol_skip_logo` (opt-in: `--skip-logo`)
+
+Skips the unskippable Adrenium logo movie that plays when the game first boots, cutting launch time noticeably.  The intro prophecy cutscene that plays immediately after is deliberately left alone.
+
+Implementation: NOPs the 10-byte `PUSH &"AdreniumLogo.bik"; CALL play_movie_fn` instruction pair at VA 0x05F6E0 (file offset 0x04F6E0).
+
+```
+BEFORE (10 B):
+  0x05F6E0: 68 50 E1 19 00     PUSH 0x0019E150   ; &"AdreniumLogo.bik"
+  0x05F6E5: E8 96 92 FB FF     CALL play_movie_fn
+
+AFTER (10 B):
+  0x05F6E0: 90 90 90 90 90     NOP x5
+  0x05F6E5: 90 90 90 90 90     NOP x5
+```
+
+Control falls straight through to the `prophecy.bik` call at VA 0x05F73F, which is untouched.  Stack is balanced: both the `PUSH` and its matching `CALL` (the `CALL` pops its own return address via `RET`) are replaced, so stack state is identical to vanilla.  The `AdreniumLogo.bik` string at file offset 0x196DB0 is left intact, keeping the `.rdata` section pristine for the whitelist-diff check in `verify-patches --strict`.
+
+The adjacent call to `prophecy.bik` uses the same pattern at VA 0x05F73F / file offset 0x04F73F.  Adding a parallel `qol_skip_prophecy` pack is a trivial follow-up if you want it — just another 10-byte `PatchSpec`.
 
 ### Player character swap (`--player-character <name>`)
 
@@ -122,4 +174,4 @@ The Patches page renders one `ParametricSlider` per parameter under the `player_
 5. Add to [`azurik_mod/patches/__init__.py`](../azurik_mod/patches/__init__.py).
 6. Update this file.
 
-The GUI's generic patches tab ([`gui/tabs/patches.py`](../gui/tabs/patches.py)) and `azurik-mod verify-patches` will pick the new pack up automatically.
+The GUI's generic Patches page ([`gui/pages/patches.py`](../gui/pages/patches.py)) and `azurik-mod verify-patches` will pick the new pack up automatically.
