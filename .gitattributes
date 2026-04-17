@@ -1,0 +1,29 @@
+# Normalise line endings to avoid breaking bash scripts on checkouts.
+
+# Default: let git auto-detect text / binary.
+* text=auto
+
+# Shell and macOS .command launchers MUST stay LF — bash chokes on CRLF
+# (carriage returns attach to commands as if they were arguments, so
+# `set -e\r` becomes an "invalid option" error, `cd "$(dirname "$0")"\r`
+# tries to cd into a directory containing a CR, etc.).
+*.sh      text eol=lf
+*.command text eol=lf
+
+# Windows .bat launchers MUST stay CRLF.
+*.bat     text eol=crlf
+
+# Python source and common config files — LF everywhere.
+*.py   text eol=lf
+*.toml text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+
+# Binary blobs — git should not touch these.
+*.xbe  binary
+*.iso  binary
+*.png  binary
+*.jpg  binary
+*.gif  binary

@@ -1,0 +1,63 @@
+{
+  "name": "Aggressive Enemies",
+  "author": "Azurik Modding Team",
+  "description": "Makes catalisk and golem enemies more aggressive with shorter stalk times and faster attacks",
+  "patches": [
+    {
+      "section": "critters_walking",
+      "entity": "catalisk",
+      "property": "stalk_time_min",
+      "value": 0.5,
+      "description": "Minimum time (seconds) the entity will stalk before acting"
+    },
+    {
+      "section": "critters_walking",
+      "entity": "catalisk",
+      "property": "stalk_time_max",
+      "value": 1.0,
+      "description": "Maximum time (seconds) the entity will stalk before acting"
+    },
+    {
+      "section": "critters_walking",
+      "entity": "catalisk",
+      "property": "attack_anim_rate",
+      "value": 2.0,
+      "description": "Attack animation playback speed multiplier"
+    },
+    {
+      "section": "critters_walking",
+      "entity": "golem",
+      "property": "stalk_time_min",
+      "value": 0.5,
+      "description": "Minimum time (seconds) the entity will stalk before acting"
+    },
+    {
+      "section": "critters_walking",
+      "entity": "golem",
+      "property": "attack_anim_rate",
+      "value": 2.0,
+      "description": "Attack animation playback speed multiplier"
+    },
+    {
+      "section": "critters_walking",
+      "entity": "air_elemental",
+      "property": "stalk_time_min",
+      "value": 0.75,
+      "description": "Minimum time (seconds) the entity will stalk before acting"
+    },
+    {
+      "section": "critters_walking",
+      "entity": "air_elemental",
+      "property": "stalk_time_max",
+      "value": 1.25,
+      "description": "Maximum time (seconds) the entity will stalk before acting"
+    },
+    {
+      "section": "critters_walking",
+      "entity": "air_elemental",
+      "property": "attack_anim_rate",
+      "value": 2.0,
+      "description": "Attack animation playback speed multiplier"
+    }
+  ]
+}

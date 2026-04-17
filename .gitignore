@@ -6,9 +6,20 @@
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
+build/
+dist/
+.pytest_cache/
 
 # Editor / IDE
 *.swp
 *.swo
 .vscode/
 .idea/
+
+# Game ISOs (users must provide their own)
+iso/*.iso
+
+# xdvdfs cache (auto-downloaded on first use — user-specific)
+tools/xdvdfs
+tools/xdvdfs.exe
