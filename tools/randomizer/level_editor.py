@@ -160,9 +160,13 @@ def find_entities(data: bytes) -> list[dict]:
                 idx += 1
                 continue
 
-            # Extract coordinates
+            # Extract coordinates -- skip entity if coords can't be found
+            # (writing to an invalid coord_offset would corrupt the file)
             result = _try_coords(data, idx)
-            x, y, z, cp = result if result else (0.0, 0.0, 0.0, idx)
+            if result is None:
+                idx = s_end + 1
+                continue
+            x, y, z, cp = result
 
             cat = categorize(name)
             entities.append({
