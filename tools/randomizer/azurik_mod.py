@@ -2049,6 +2049,144 @@ def cmd_randomize_full(args):
 
 
 # ---------------------------------------------------------------------------
+# verify-patches command
+# ---------------------------------------------------------------------------
+
+def _extract_xbe_from_iso(iso_path: Path) -> bytearray:
+    """Pull default.xbe out of an Xbox ISO via xdvdfs copy-out."""
+    xdvdfs = require_xdvdfs()
+    with tempfile.TemporaryDirectory(prefix="azurik_verify_") as tmpdir:
+        out_file = Path(tmpdir) / "default.xbe"
+        run_xdvdfs(xdvdfs, ["copy-out", str(iso_path),
+                             "default.xbe", str(out_file)])
+        if not out_file.exists():
+            print(f"ERROR: Could not extract default.xbe from {iso_path}")
+            sys.exit(1)
+        return bytearray(out_file.read_bytes())
+
+
+def _read_xbe(iso_or_xbe: Path) -> bytearray:
+    """Return the default.xbe bytes from either an .iso or a raw .xbe path."""
+    if iso_or_xbe.suffix.lower() == ".iso":
+        return _extract_xbe_from_iso(iso_or_xbe)
+    return bytearray(iso_or_xbe.read_bytes())
+
+
+def cmd_verify_patches(args):
+    """Verify that a patched default.xbe contains every expected 60 FPS
+    patch, and optionally whitelist-diff against an unpatched original."""
+    from patches.fps_unlock import FPS_PATCH_SITES, FPS_SAFETY_CRITICAL_SITES
+    from patches.xbe_utils import verify_patch_spec
+
+    target = Path(args.xbe if args.xbe else args.iso)
+    if not target.exists():
+        print(f"ERROR: target not found: {target}")
+        sys.exit(1)
+
+    print(f"Reading patched XBE from {target}...")
+    patched = _read_xbe(target)
+    print(f"  {len(patched)} bytes")
+
+    # --- Per-patch verification ---------------------------------------
+    counts = {"applied": 0, "original": 0, "mismatch": 0, "out-of-range": 0}
+    mismatches: list[tuple] = []
+    unapplied: list[tuple] = []
+    for spec in FPS_PATCH_SITES:
+        status = verify_patch_spec(patched, spec)
+        counts[status] += 1
+        if status == "mismatch" or status == "out-of-range":
+            mismatches.append((spec, status))
+        elif status == "original":
+            unapplied.append((spec, status))
+
+    print()
+    print(f"Per-patch status ({len(FPS_PATCH_SITES)} sites):")
+    print(f"  applied:      {counts['applied']}")
+    print(f"  original:     {counts['original']}  (patch NOT applied)")
+    print(f"  mismatch:     {counts['mismatch']}  (bytes unrecognised)")
+    print(f"  out-of-range: {counts['out-of-range']}")
+
+    if unapplied:
+        print()
+        print("Sites still at original bytes (expected if fps_unlock wasn't requested):")
+        for spec, _ in unapplied:
+            print(f"  VA=0x{spec.va:06X}  {spec.label}")
+
+    if mismatches:
+        print()
+        print("*** MISMATCHES — bytes do not match original or patch ***")
+        for spec, status in mismatches:
+            hex_got = bytes(patched[spec.file_offset:
+                                    spec.file_offset + len(spec.patch)]).hex()
+            print(f"  [{status}] VA=0x{spec.va:06X}  {spec.label}")
+            print(f"             got:      {hex_got}")
+            print(f"             original: {spec.original.hex()}")
+            print(f"             patch:    {spec.patch.hex()}")
+
+    # --- Safety-critical guard ---------------------------------------
+    print()
+    print(f"Safety-critical guard ({len(FPS_SAFETY_CRITICAL_SITES)} sites):")
+    safety_fail = False
+    for spec in FPS_SAFETY_CRITICAL_SITES:
+        status = verify_patch_spec(patched, spec)
+        ok = status in ("applied", "original")  # either state is self-consistent
+        marker = "OK " if ok else "FAIL"
+        print(f"  [{marker}] {status:<9s}  VA=0x{spec.va:06X}  {spec.label}")
+        if not ok:
+            safety_fail = True
+
+    # --- Whitelist diff vs original ----------------------------------
+    if args.original:
+        orig_path = Path(args.original)
+        if not orig_path.exists():
+            print(f"\nERROR: original file not found: {orig_path}")
+            sys.exit(1)
+        print(f"\nWhitelist-diff against {orig_path}...")
+        original = _read_xbe(orig_path)
+        if len(original) != len(patched):
+            print(f"  WARNING: size mismatch — original {len(original)} vs "
+                  f"patched {len(patched)}; diff may be unreliable")
+
+        # Build per-site (offset, length) allow ranges from every spec.
+        allow_ranges: list[tuple[int, int]] = [
+            (s.file_offset, s.file_offset + len(s.patch)) for s in FPS_PATCH_SITES
+        ]
+        allow_ranges.sort()
+
+        def _in_allow(off: int) -> bool:
+            # Small linear scan; the list is tiny.
+            for lo, hi in allow_ranges:
+                if lo <= off < hi:
+                    return True
+                if off < lo:
+                    return False
+            return False
+
+        n = min(len(original), len(patched))
+        unexpected = 0
+        first_unexpected: list[int] = []
+        for i in range(n):
+            if original[i] != patched[i] and not _in_allow(i):
+                unexpected += 1
+                if len(first_unexpected) < 16:
+                    first_unexpected.append(i)
+        if unexpected == 0:
+            print(f"  Clean: every differing byte is inside a declared "
+                  f"FPS_PATCH_SITES range.")
+        else:
+            print(f"  *** {unexpected} bytes differ outside any declared "
+                  f"FPS_PATCH_SITES range ***")
+            print(f"  First offsets: "
+                  f"{', '.join(f'0x{o:X}' for o in first_unexpected)}")
+            if args.strict:
+                safety_fail = True
+
+    # Exit code: non-zero on safety failure or mismatch so CI can catch it.
+    if mismatches or safety_fail:
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -2194,6 +2332,29 @@ def main():
                          help="Config mod JSON to apply (file path or inline JSON). "
                               "Patches config.xbr values (entity stats, damage, etc.)")
 
+    # verify-patches (post-build sanity check)
+    p_verify = sub.add_parser("verify-patches",
+        help="Verify 60 FPS patches are correctly applied to a built ISO/XBE",
+        description=(
+            "Reads a patched default.xbe (extracted from an ISO or passed as a\n"
+            "raw file) and reports which FPS_PATCH_SITES are applied, still at\n"
+            "original bytes, or corrupted.  Pins safety-critical patches (e.g.\n"
+            "the 60fps step cap of 2) and optionally whitelist-diffs against an\n"
+            "unpatched original to confirm no stray bytes were modified.\n"
+            "\n"
+            "Exit code is non-zero on any mismatch or safety failure, so this\n"
+            "command is safe to use in CI."
+        ))
+    verify_source = p_verify.add_mutually_exclusive_group(required=True)
+    verify_source.add_argument("--iso",
+        help="Patched .iso (default.xbe is extracted via xdvdfs)")
+    verify_source.add_argument("--xbe",
+        help="Patched default.xbe file directly")
+    p_verify.add_argument("--original",
+        help="Unpatched .iso or .xbe to whitelist-diff against")
+    p_verify.add_argument("--strict", action="store_true",
+        help="Treat unexpected whitelist-diff changes as a failure (non-zero exit)")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -2202,7 +2363,8 @@ def main():
     {"list": cmd_list, "dump": cmd_dump, "diff": cmd_diff, "patch": cmd_patch,
      "randomize-gems": cmd_randomize_gems,
      "randomize": cmd_randomize,
-     "randomize-full": cmd_randomize_full}[args.command](args)
+     "randomize-full": cmd_randomize_full,
+     "verify-patches": cmd_verify_patches}[args.command](args)
 
 
 if __name__ == "__main__":
