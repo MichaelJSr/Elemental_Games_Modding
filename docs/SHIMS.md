@@ -38,12 +38,31 @@ Target: arm64-apple-darwin25.4.0 (host)  →  i386-pc-win32 (output)
 
 ## Authoring a new shim — end-to-end checklist
 
-1. **Write the C source** in [`shims/src/`](../shims/src/).  Export
-   each function with a ``c_`` prefix so the PE-COFF symbol comes out
-   as ``_c_<name>`` (Windows/MSVC leading-underscore convention).
+1. **Scaffold** it from the template:
+
+   ```bash
+   bash shims/toolchain/new_shim.sh my_feature
+   ```
+
+   This produces a pre-filled `shims/src/my_feature.c` with the
+   correct `__stdcall` annotation, the standard includes
+   (`azurik.h` + `azurik_vanilla.h`), and a TODO comment pointing
+   at the function body.  Edit that body with your actual logic.
+   The scaffold rejects names that aren't valid lowercase C
+   identifiers and refuses to overwrite existing shims.
+
+   Tip for the C body: prefer the named fields in
+   [`shims/include/azurik.h`](../shims/include/azurik.h) over raw
+   `[reg + 0xNN]` offsets.  The header defines `PlayerInputState`
+   and `CritterData` with Ghidra-verified fields and flag constants
+   (`PLAYER_FLAG_RUNNING`, `PLAYER_FLAG_FALLING`).  Static asserts
+   in the header catch drift if any field ever shifts.
 
    Phase 1 shims must be relocation-free — no globals, no imports,
-   no strings.  If you need any of those, the shim belongs in Phase 2.
+   no strings.  Phase 2 shims can reference globals, call each
+   other, and invoke any vanilla Azurik function declared in
+   [`shims/include/azurik_vanilla.h`](../shims/include/azurik_vanilla.h)
+   (see [A3 workflow below](#calling-a-vanilla-function-from-a-shim)).
 
 2. **Compile** it with `shims/toolchain/compile.sh`.  Inspect the
    output with `objdump -d shims/build/<name>.o` to confirm the code
@@ -232,23 +251,37 @@ alone instead of stacking a second trampoline.
 shims/
   README.md                     authoring notes (also summarized here)
   toolchain/
-    compile.sh                  clang wrapper
+    compile.sh                  clang wrapper (i386 PE-COFF cross-compile)
+    new_shim.sh                 scaffold a new shim from the template  (B3)
   include/
-    azurik.h                    freestanding typedefs
+    azurik.h                    named structs (CritterData, PlayerInputState,
+                                flag constants, opaque handles)           (B1)
+    azurik_vanilla.h            extern prototypes for vanilla Azurik fns  (A3)
   src/
     skip_logo.c                 Phase 1 proof-of-concept shim
+    _reloc_test.c               fixture — exercises A2 relocation path
+    _vanilla_call_test.c        fixture — exercises A3 vanilla-call path
   build/                        compiled .o outputs (gitignored)
 
 azurik_mod/patching/
-  coff.py                       minimal PE-COFF reader
-  spec.py                       TrampolinePatch NamedTuple
-  xbe.py                        find_text_padding + grow_text_section
-  apply.py                      apply_trampoline_patch + verify_*
-  registry.py                   pack enumeration (trampoline-aware)
+  coff.py                       minimal PE-COFF reader + layout_coff
+  spec.py                       Site descriptors (PatchSpec, ParametricPatch,
+                                TrampolinePatch)
+  xbe.py                        XBE section surgery (find_text_padding,
+                                grow_text_section, append_xbe_section)
+  apply.py                      apply_trampoline_patch + verify_* + carve
+  registry.py                   pack enumeration (trampoline- and
+                                dynamic-whitelist-aware)
+  vanilla_symbols.py            registry of exposed vanilla functions   (A3)
 
 tests/
   test_trampoline_patch.py      low-level COFF + xbe + apply + verify
+  test_append_xbe_section.py    Phase 2 A1 header-shift round-trip + carve
+  test_coff_relocations.py      Phase 2 A2 relocation-aware loader
+  test_vanilla_thunks.py        Phase 2 A3 vanilla-symbol resolution
+  test_shim_authoring.py        Tier B — header offsets + scaffold script
   test_qol_skip_logo.py         end-to-end through the migrated pack
+  test_player_speed.py          player_physics C1 slider end-to-end
 
 docs/
   SHIMS.md                      this file

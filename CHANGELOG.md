@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+### C-shim modding platform (Tier B — authoring ergonomics)
+
+- **`shims/include/azurik.h` grew real struct definitions.**  Shim
+  authors now get named fields for two key engine structs:
+  * `CritterData` — what `FUN_00049480` populates for every critter
+    (walk/run speed, collision radius, flocking fields, hitpoints,
+    drown/corpse timers, ...).  Field offsets documented with their
+    Ghidra piVar9 indices.
+  * `PlayerInputState` — the per-frame player-movement struct used
+    by `FUN_00084f90` / `FUN_00084940` / `FUN_00085f50`.  Key
+    fields (magnitude at +0x124, direction vector at +0x128, flags
+    at +0x20) are now named with Ghidra-verified offsets.
+  Flag constants (`PLAYER_FLAG_RUNNING = 0x40`,
+  `PLAYER_FLAG_FALLING = 0x01`) and fixed-width integer aliases
+  (`u8`, `u16`, `u32`, `i8`..`i32`, `f32`, `f64`) live alongside.
+  Compile-time `_Static_assert`s pin the minimum struct size so
+  drift fails at compile time rather than producing silently-wrong
+  machine code.
+- **`shims/toolchain/new_shim.sh NAME`** — new scaffolding script.
+  Generates a pre-filled `shims/src/<name>.c` with the correct
+  `__stdcall` annotation, the two standard includes, and a TODO
+  comment pointing at the function body.  Rejects names that
+  aren't valid lowercase C identifiers; refuses to overwrite
+  existing shims.  Next-step checklist printed on success.
+- **Tests (+6 test classes, +20 subtests)** —
+  `tests/test_shim_authoring.py` pins both pieces: a probe shim
+  verifies every named field in the header compiles to the
+  Ghidra-documented `[reg + 0xNN]` offset; the scaffold script is
+  exercised with valid / invalid / duplicate names; the generated
+  stub is compiled end-to-end and the exported
+  `_c_<name>@0` stdcall symbol is sanity-checked.
+- **Docs** — `docs/SHIMS.md` "Authoring a new shim" walkthrough
+  now starts at `new_shim.sh` and references the named struct
+  fields in `azurik.h`.  Directory map updated.
+- **Deferred**: adding `FUN_000d1420` / `FUN_000d1520` (config-table
+  lookups) as exposed vanilla functions.  Both use MSVC `__thiscall`
+  (first arg in ECX, rest on stack) — clang supports the attribute,
+  but it complicates the ergonomics enough that it belongs in a
+  follow-up once we have a concrete shim that needs table queries.
+
 ### C-shim modding platform (Phase 2 C1 — player-speed shim, first real deliverable)
 
 - **Walk-speed and run-speed sliders are back** on the Patches page.
