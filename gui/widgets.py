@@ -439,11 +439,16 @@ class SecondaryButton(ttk.Button):
 class ParametricSlider(ttk.Frame):
     """Slider + numeric entry + reset button for a ParametricPatch.
 
-    Calls `on_change(value)` whenever the value changes (either via the
-    slider or via Return in the entry).  Reset returns the slider to
-    the ParametricPatch's `default`.  The widget caps input at the
-    patch's `slider_min` / `slider_max` range so callers can pass the
-    raw float to `apply_parametric_patch` without extra validation.
+    Two bidirectional inputs:
+    - `ttk.Scale` for quick visual tuning across the slider range.
+    - `ttk.Entry` for typing an exact numeric value; any float is
+      accepted and clamped to `[slider_min, slider_max]` on commit,
+      so users can dial in precise values (e.g. gravity = 12.34) that
+      the slider's step granularity alone wouldn't allow.
+
+    Both controls share the same DoubleVar: editing one updates the
+    other.  `on_change(value)` fires on every change.  Reset returns
+    to the patch's `default`.
     """
 
     def __init__(self, parent, patch, *,
@@ -457,13 +462,21 @@ class ParametricSlider(ttk.Frame):
         self._entry_var = tk.StringVar(value=f"{self._var.get():g}")
         self._building = False  # suppress re-entrant callbacks
 
-        # Row 1: label + units badge + current value
+        # Row 1: label + current value / default + range hint.
         head = ttk.Frame(self)
         head.pack(fill=tk.X)
         ttk.Label(head, text=patch.label, font=("", 10, "bold")).pack(
             side=tk.LEFT)
-        ttk.Label(head, text=f"({patch.default} {patch.unit} default)",
-                  foreground="gray").pack(side=tk.LEFT, padx=(6, 0))
+        self._value_lbl = ttk.Label(
+            head,
+            text=self._header_text(self._var.get()),
+            foreground="gray")
+        self._value_lbl.pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Label(
+            head,
+            text=(f"  range: {patch.slider_min:g}..{patch.slider_max:g}"),
+            foreground="gray",
+        ).pack(side=tk.RIGHT)
 
         # Row 2: slider + numeric entry + reset
         row = ttk.Frame(self)
@@ -477,7 +490,7 @@ class ParametricSlider(ttk.Frame):
             command=self._on_scale,
         )
         self._scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
-        self._entry = ttk.Entry(row, textvariable=self._entry_var, width=10)
+        self._entry = ttk.Entry(row, textvariable=self._entry_var, width=12)
         self._entry.pack(side=tk.LEFT, padx=(0, 4))
         self._entry.bind("<Return>", self._on_entry_commit)
         self._entry.bind("<FocusOut>", self._on_entry_commit)
@@ -485,6 +498,10 @@ class ParametricSlider(ttk.Frame):
                   foreground="gray").pack(side=tk.LEFT, padx=(0, 8))
         SecondaryButton(row, text="Reset",
                         command=self._reset).pack(side=tk.LEFT)
+
+    def _header_text(self, value: float) -> str:
+        return (f"= {value:g} {self._patch.unit}"
+                f"  (default {self._patch.default:g})")
 
     # --- public --------------------------------------------------------
 
@@ -496,6 +513,7 @@ class ParametricSlider(ttk.Frame):
         self._building = True
         self._var.set(v)
         self._entry_var.set(f"{v:g}")
+        self._value_lbl.configure(text=self._header_text(v))
         self._building = False
         if self._on_change:
             self._on_change(v)
@@ -510,6 +528,7 @@ class ParametricSlider(ttk.Frame):
             return
         v = float(self._var.get())
         self._entry_var.set(f"{v:.3f}")
+        self._value_lbl.configure(text=self._header_text(v))
         if self._on_change:
             self._on_change(v)
 

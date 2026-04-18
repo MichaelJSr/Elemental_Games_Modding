@@ -500,11 +500,7 @@ def apply_fps_patches(xbe_data: bytearray) -> None:
 # ---------------------------------------------------------------------------
 register_pack(PatchPack(
     name="fps_unlock",
-    description=(
-        "Run the game at 60 FPS instead of 30.  Experimental: some "
-        "animations and physics may feel subtly different from vanilla, "
-        "and older saves should still be compatible."
-    ),
+    description="Runs the game at 60 FPS instead of 30 (experimental).",
     sites=FPS_PATCH_SITES,
     apply=apply_fps_patches,
     default_on=False,

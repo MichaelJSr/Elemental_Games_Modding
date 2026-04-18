@@ -1,6 +1,8 @@
 # Patch Pack Catalog
 
-Each pack is a module under [`azurik_mod/patches/`](../azurik_mod/patches/) that exports a list of `PatchSpec` entries and registers itself with the central registry.  The CLI (`azurik-mod verify-patches`) and the GUI ([`gui/pages/patches.py`](../gui/pages/patches.py)) discover packs automatically — there is no hard-coded list to update when a new pack ships.
+Each pack is a module under [`azurik_mod/patches/`](../azurik_mod/patches/) that exports a list of `PatchSpec` / `ParametricPatch` / `TrampolinePatch` sites and registers itself with the central registry.  The CLI (`azurik-mod verify-patches`) and the GUI ([`gui/pages/patches.py`](../gui/pages/patches.py)) discover packs automatically — there is no hard-coded list to update when a new pack ships.
+
+Packs tagged **c-shim** are backed by compiled C code from the [`shims/`](../shims/) tree rather than hand-assembled bytes.  See [docs/SHIMS.md](SHIMS.md) for the authoring workflow.
 
 | Pack                 | Sites | Default-on | Tags                | Module |
 |----------------------|-------|------------|---------------------|--------|
@@ -8,8 +10,8 @@ Each pack is a module under [`azurik_mod/patches/`](../azurik_mod/patches/) that
 | `qol_gem_popups`     | 0     | no         | qol                 | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
 | `qol_other_popups`   | 0     | no         | qol                 | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
 | `qol_pickup_anims`   | 1     | no         | qol                 | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
-| `qol_skip_logo`      | 1     | no         | qol                 | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
-| `player_physics`     | 3     | no         | player, physics     | [azurik_mod/patches/player_physics.py](../azurik_mod/patches/player_physics.py) |
+| `qol_skip_logo`      | 1     | no         | qol, c-shim         | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
+| `player_physics`     | 1     | no         | player, physics     | [azurik_mod/patches/player_physics.py](../azurik_mod/patches/player_physics.py) |
 
 ---
 
@@ -88,25 +90,55 @@ Hides the remaining non-gem first-time / milestone / tutorial popups — the swi
 
 Skips the short celebration animation that plays after picking up an item.  Implementation: replaces the first instruction of the non-gem pickup handler's animation block with a `JMP` to its epilog at VA 0x4146F (file offset 0x313EE, 5 bytes).  The "collected" flag and save-list update still run, so picked-up items remain collected and saves stay consistent.  Supersedes the earlier OBSIDIAN_ANIM + FIST_PUMP pair that could drop state.
 
-### `qol_skip_logo` (opt-in: `--skip-logo`)
+### `qol_skip_logo` (opt-in: `--skip-logo`)  *(C-shim)*
 
 Skips the unskippable Adrenium logo movie that plays when the game first boots, cutting launch time noticeably.  The intro prophecy cutscene that plays immediately after is deliberately left alone.
 
-Implementation: NOPs the 10-byte `PUSH &"AdreniumLogo.bik"; CALL play_movie_fn` instruction pair at VA 0x05F6E0 (file offset 0x04F6E0).
+**Why a naive NOP breaks this.**  The Adrenium-logo call lives inside a boot-time state machine (`FUN_0005f620`).  The instructions around it aren't just "play a movie" — they form a tightly-coupled sequence that reads `play_movie_fn`'s `AL` return value to decide whether to enter the movie-polling state or skip to the next movie:
 
 ```
-BEFORE (10 B):
-  0x05F6E0: 68 50 E1 19 00     PUSH 0x0019E150   ; &"AdreniumLogo.bik"
-  0x05F6E5: E8 96 92 FB FF     CALL play_movie_fn
-
-AFTER (10 B):
-  0x05F6E0: 90 90 90 90 90     NOP x5
-  0x05F6E5: 90 90 90 90 90     NOP x5
+0x05F6DF: 55                 PUSH EBP             ; EBP = 0 (scratch zero); char-flag arg
+0x05F6E0: 68 50 E1 19 00     PUSH 0x0019E150      ; &"AdreniumLogo.bik"
+0x05F6E5: E8 96 92 FB FF     CALL play_movie_fn   ; __stdcall — callee pops 8 B via `ret 8`
+0x05F6EA: F6 D8              NEG AL               ; CF = (AL != 0)
+0x05F6EC: 1B C0              SBB EAX, EAX         ; EAX = 0 (skip) or -1 (poll)
+0x05F6EE: 83 C0 03            ADD EAX, 3          ; state = 3 (skip) or 2 (poll)
+0x05F6F1: A3 1C F6 1B 00     MOV [0x001BF61C], EAX
 ```
 
-Control falls straight through to the `prophecy.bik` call at VA 0x05F73F, which is untouched.  Stack is balanced: both the `PUSH` and its matching `CALL` (the `CALL` pops its own return address via `RET`) are replaced, so stack state is identical to vanilla.  The `AdreniumLogo.bik` string at file offset 0x196DB0 is left intact, keeping the `.rdata` section pristine for the whitelist-diff check in `verify-patches --strict`.
+Replacing the 10-byte `PUSH imm32; CALL rel32` pair with 10 NOPs (as an earlier version of this patch tried) corrupts the game in two ways: `PUSH EBP` leaks 4 bytes of stack every iteration, and `NEG AL` operates on whatever garbage AL happens to hold from a prior function — so the state machine drifts into **case 2 (poll a movie that never started)** and spins forever.  That's the black-screen-on-boot symptom.
 
-The adjacent call to `prophecy.bik` uses the same pattern at VA 0x05F73F / file offset 0x04F73F.  Adding a parallel `qol_skip_prophecy` pack is a trivial follow-up if you want it — just another 10-byte `PatchSpec`.
+**Phase 1 implementation (C-shim).**  A `TrampolinePatch` replaces **only the 5-byte CALL** at VA 0x05F6E5 with `CALL rel32` into [`shims/src/skip_logo.c`](../shims/src/skip_logo.c).  The preceding two PUSHes are left intact, so the shim receives both `__stdcall` args on its stack and can clean them up the same way the real callee would.  The shim itself is a naked 5-byte stub:
+
+```c
+__attribute__((naked))
+void c_skip_logo(void) {
+    __asm__ volatile (
+        "xorb %al, %al\n\t"   /* AL = 0 → state machine chooses case 3 (skip) */
+        "ret  $8            "  /* __stdcall: pop the 2 caller-pushed args    */
+    );
+}
+```
+
+Compiled with `-Os` this is `30 C0 C2 08 00` (exactly 5 bytes).  It lands in the 16-byte VA-gap just past `.text` (file offset `0x0F01D0`, VA `0x001001D0`); the XBE's `.text` section header is grown by 5 bytes so the Xbox loader maps the new region executable.
+
+```
+BEFORE (5 B at VA 0x05F6E5):
+  E8 96 92 FB FF     CALL play_movie_fn
+
+AFTER (5 B at VA 0x05F6E5):
+  E8 .. .. .. ..     CALL rel32 → 0x1001D0   ; shim in grown .text
+
+INJECTED SHIM (5 B at VA 0x001001D0):
+  30 C0              XOR AL, AL               ; return 0 (movie didn't start)
+  C2 08 00           RET 8                    ; __stdcall pop of 2 args
+```
+
+The `NEG AL; SBB EAX, EAX; ADD EAX, 3; MOV [state], EAX` block at `0x05F6EA` is untouched and now always writes **state = 3**.  On the next main-loop tick, case 3 of the state machine runs and starts `prophecy.bik` normally.  The `AdreniumLogo.bik` string at file offset `0x196DB0` is left intact, keeping `.rdata` clean.  `verify-patches --strict` absorbs the trampoline, the shim landing pad, and the grown `.text` section-header fields into its whitelist.
+
+**Escape hatch.**  Set `AZURIK_SKIP_LOGO_LEGACY=1` before applying to use the byte-level `PatchSpec` form instead.  That fallback rewrites the 10 bytes at VA `0x05F6E0` as `ADD ESP, 4; XOR AL, AL; NOP×5` — same semantics as the shim (pop the PUSH EBP leftover, force AL=0) but with no injected code.  Useful if the i386 PE-COFF toolchain (clang + `-target i386-pc-win32`) isn't available on the build host.
+
+The adjacent call to `prophecy.bik` uses the same calling pattern at VA 0x05F73F.  Adding a parallel `qol_skip_prophecy` pack is a trivial follow-up — another 5-byte trampoline with the same shim reused, or its own byte-level `ADD ESP, 4 + XOR AL, AL` patch.
 
 ### Player character swap (`--player-character <name>`)
 
@@ -116,38 +148,41 @@ Replaces the `garret4` string at file offset 0x1976C8 with an arbitrary ≤11-ch
 
 ## `player_physics`
 
-Slider-driven player physics tweaks.  Every slider is declared as a `ParametricPatch`, so the same descriptor drives both the CLI flags and the GUI sliders.
+Slider-driven player physics.  Currently exposes one working slider (world gravity); walk / run speed sliders were removed pending Phase 2 investigation.
 
 ### Gravity (`--gravity M_PER_S2`)
 
 - VA `0x1980A8`, 4-byte float (file offset `0x190D08`).  Baseline bytes `CD CC 1C 41` = `9.8f`.
-- Range `0.98 … 29.4` m/s² (0.1× to 3.0× baseline).
-- Global — affects enemy falls and projectile arcs too.  Two other `9.8f` constants at `0x198704` and `0x198740` are unrelated (camera / animation scalars) and remain untouched.
-- `--gravity 9.8` produces a byte-identical XBE so the whitelist diff stays clean.
+- Range `0.0 … 100.0` m/s² (weightless through ~10× Earth).
+- Global — affects the player, enemies that fall, and projectile arcs.  Two other `9.8f` constants at `0x198704` and `0x198740` are unrelated (camera / animation scalars) and remain untouched.
+- `--gravity 9.8` produces a byte-identical XBE so the `verify-patches --strict` whitelist diff stays clean.
+- GUI: exact-value entry field next to the slider for precise tuning (e.g. `--gravity 12.34`).
 
-### Walk speed (`--player-walk-scale X`) and run speed (`--player-run-scale X`)
+### Walk speed / run speed (removed from GUI, CLI flags retained)
 
-- Both are multiplicative scales on garret4's baseline values in `config.xbr`'s `attacks_transitions` keyed-table section (column 25).
-  - `walkSpeed` cell at file offset `0x00CECC` (double payload at `0x00CED4`, baseline 5.0).
-  - `runSpeed` cell at file offset `0x00CEEC` (double payload at `0x00CEF4`, baseline 7.0).
-- Range `0.25 … 3.0`×, default `1.0×` (no-op, byte-identical).
-- Only garret4 is scaled — `walkAnimSpeed` / `runAnimSpeed` and every other entity are left alone.  Extending to other characters is a one-line addition to `apply_player_speed`.
+Earlier versions exposed `--player-walk-scale` / `--player-run-scale` sliders targeting garret4's `walkSpeed` / `runSpeed` cells in `config.xbr`'s `attacks_transitions` section.  Ghidra analysis showed those cells are **dead data at runtime**:
+
+- The engine's only code that looks up `walkSpeed` by name is `FUN_00049480` (the entity loader), which does the lookup against `critters_critter_data` (section offset `0x01A000`) — a table that does not have a `walkSpeed` row.  `FUN_000d1420` returns `-1`, `FUN_000d1520` returns the default `1.0`, and every entity's `piVar9[0xe]` slot is `1.0` regardless of what's in `attacks_transitions`.
+- `attacks_transitions` IS loaded elsewhere (`FUN_0007e7c0`), but only for attack-chain metadata (`last move`, `button`, `touch`, `damage type`, `next move`) — the speed cells are never read.
+- Conclusion: patching `attacks_transitions.garret4.walkSpeed` has no observable in-game effect.  The real player movement speed is encoded elsewhere (likely a hardcoded `.text`/`.rdata` float or animation-timing constant).
+
+The `apply_player_speed` helper and the CLI flags stay in the tree so that, once the real storage location is found, re-enabling them is a one-line registration change on `PLAYER_PHYSICS_SITES`.  Until then, the Patches page does NOT render sliders for these.
 
 ### CLI
 
 ```bash
-# Slider-only physics without touching any randomizer pool
+# Gravity only (works)
 azurik-mod apply-physics --iso iso/Azurik.iso --output iso/low_grav.iso \
-    --gravity 4.9 --walk-speed 1.5 --run-speed 1.5
+    --gravity 4.9
 
-# Roll into a full randomize-full build
+# Roll gravity into a full randomize-full build
 azurik-mod randomize-full --iso iso/Azurik.iso --output out.iso \
-    --seed 42 --gravity 7.0 --player-walk-scale 1.25
+    --seed 42 --gravity 7.0
 ```
 
 ### GUI
 
-The Patches page renders one `ParametricSlider` per parameter under the `player_physics` section.  Slider values live on `AppState.pack_params["player_physics"]` and are forwarded to `cmd_randomize_full` by `gui/backend.run_randomizer`.
+The Patches page renders the gravity `ParametricSlider` under the `player_physics` section.  Slider values live on `AppState.pack_params["player_physics"]` and are forwarded to `cmd_randomize_full` by `gui/backend.run_randomizer`.
 
 ---
 

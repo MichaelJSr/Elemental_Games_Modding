@@ -2,6 +2,80 @@
 
 ## Unreleased
 
+### Patches
+
+- `player_physics` walk/run speed sliders removed from the Patches
+  page.  Investigation (Ghidra on FUN_00049480 / FUN_0007e7c0) showed
+  the `walkSpeed` / `runSpeed` cells in `config.xbr`'s
+  `attacks_transitions` section are dead data: the engine's only
+  `walkSpeed` string xref is a lookup against `critters_critter_data`
+  (which doesn't carry that row), so the default 1.0 is always used
+  regardless of the cell value.  The `apply_player_speed` helper and
+  `--player-walk-scale` / `--player-run-scale` CLI flags stay in the
+  tree for a future Phase 2 fix once the real storage location is
+  found; the sliders no longer register on the GUI pack so users
+  don't think the feature works.
+- `player_physics` gravity slider: widened range to 0.0..100.0 m/s²
+  (previously 0.98..29.4) so you can go from weightless floating
+  through ~10x Earth.  The slider widget's numeric entry field
+  accepts any exact value inside that range, giving finer precision
+  than the step size alone.
+
+### GUI
+
+- Single build entry point: removed the "Build randomized ISO"
+  button from the Randomize page.  The page now mirrors its widget
+  state into `AppState.randomize_config` on every change, and the
+  "Start build" button on Build & Logs reads that snapshot directly.
+  One place to click, no double-click required.
+- Pack descriptions tightened across every pack (fps_unlock, qol_*,
+  player_physics) to 1–2 short sentences for faster scanning.
+- `ParametricSlider` widget now shows the current value alongside
+  the default in its header, prints the slider's min/max range on
+  the right, and widens the exact-value entry to 12 chars.
+
+### C-shim modding platform (Phase 1)
+
+- New `TrampolinePatch` site descriptor in `azurik_mod.patching.spec`
+  joins `PatchSpec` / `ParametricPatch`.  Instead of declaring raw
+  byte swaps, a trampoline patch names a C function whose compiled
+  PE-COFF `.o` gets injected into the XBE; a 5-byte `CALL` / `JMP`
+  rel32 at the declared VA diverts control flow into the shim.
+- New `shims/` tree: C sources (`src/`), shared freestanding headers
+  (`include/azurik.h`), and an Apple-clang wrapper
+  (`toolchain/compile.sh` emitting i386 PE-COFF via
+  `-target i386-pc-win32`).
+- New `azurik_mod.patching.coff` — minimal PE-COFF reader (sections
+  + symbols only, no relocations) — feeds shim bytes + entry-point
+  offsets into the apply pipeline.
+- `find_text_padding()` generalised: reports both in-section trailing
+  zero slack AND the adjacent VA-gap growth window.  `grow_text_section()`
+  commits the matching `virtual_size` / `raw_size` bump in the XBE
+  section header so the Xbox loader maps injected bytes as executable.
+- `apply_trampoline_patch()` / `verify_trampoline_patch()` do the
+  end-to-end work (COFF parse, landing carve, section grow, rel32
+  emit, NOP fill) and stay idempotent on a second apply.
+- `qol_skip_logo` now replaces only the 5-byte `CALL play_movie_fn`
+  at VA 0x05F6E5 with a C shim that returns `AL=0` and does `RET 8`,
+  matching `play_movie_fn`'s `__stdcall` contract.  The preceding
+  `PUSH EBP; PUSH 0x0019E150` instructions run as normal so the shim
+  sees both args on its stack.  This replaces the earlier 10-byte
+  NOP attempt, which left `AL` undefined and leaked 4 bytes of stack
+  per iteration — the state machine at `FUN_0005F620` would drift
+  into `case 2` (poll a movie that never started) and hang on a
+  black screen at boot.  The legacy `SKIP_LOGO_SPEC` escape hatch
+  (`AZURIK_SKIP_LOGO_LEGACY=1`) was simultaneously fixed to write
+  `ADD ESP, 4; XOR AL, AL; NOP×5` with the same semantics.
+- `verify-patches --strict` now absorbs trampoline sites, their
+  shim landing pads, and the grown `.text` section-header fields
+  into the whitelist diff so a legitimately-patched XBE reports
+  clean.
+- New docs: [docs/SHIMS.md](docs/SHIMS.md) (authoring workflow),
+  `shims/README.md` (toolchain + directory map).  New tests:
+  `tests/test_trampoline_patch.py` (18 tests — COFF, XBE surgery,
+  apply+verify end-to-end) and an expanded
+  `tests/test_qol_skip_logo.py`.
+
 ### GUI
 
 - Rebranded launcher scripts from `Launch Randomizer.*` to

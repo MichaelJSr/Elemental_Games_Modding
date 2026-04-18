@@ -20,9 +20,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Union
 
-from azurik_mod.patching.spec import ParametricPatch, PatchSpec
+from azurik_mod.patching.spec import (
+    ParametricPatch,
+    PatchSpec,
+    TrampolinePatch,
+)
 
-SiteType = Union[PatchSpec, ParametricPatch]
+SiteType = Union[PatchSpec, ParametricPatch, TrampolinePatch]
 
 
 @dataclass(frozen=True)
@@ -75,6 +79,10 @@ class PatchPack:
         """Return only the ParametricPatch entries in this pack."""
         return [s for s in self.sites if isinstance(s, ParametricPatch)]
 
+    def trampoline_sites(self) -> list[TrampolinePatch]:
+        """Return only the TrampolinePatch entries in this pack."""
+        return [s for s in self.sites if isinstance(s, TrampolinePatch)]
+
     @property
     def parameters(self) -> tuple[str, ...]:
         """Names of every slider exposed by this pack (in declaration order)."""
@@ -103,14 +111,14 @@ def all_packs() -> list[PatchPack]:
 
 
 def all_sites() -> list[SiteType]:
-    """Return every registered site (PatchSpec + non-virtual ParametricPatch),
-    deduped by VA.  Virtual parametric sites (va=0) are included once in
-    registration order."""
+    """Return every registered site (PatchSpec / ParametricPatch /
+    TrampolinePatch), deduped by VA.  Virtual parametric sites
+    (va=0) are included once in registration order."""
     seen: set[int] = set()
     out: list[SiteType] = []
     for pack in _REGISTRY.values():
         for site in pack.sites:
-            va = site.va
+            va = getattr(site, "va", 0)
             key = id(site) if va == 0 else va
             if key in seen:
                 continue
@@ -137,6 +145,15 @@ def all_parametric_sites() -> list[tuple[str, ParametricPatch]]:
     out: list[tuple[str, ParametricPatch]] = []
     for pack in _REGISTRY.values():
         for site in pack.parametric_sites():
+            out.append((pack.name, site))
+    return out
+
+
+def all_trampoline_sites() -> list[tuple[str, TrampolinePatch]]:
+    """Return (pack_name, TrampolinePatch) for every registered shim site."""
+    out: list[tuple[str, TrampolinePatch]] = []
+    for pack in _REGISTRY.values():
+        for site in pack.trampoline_sites():
             out.append((pack.name, site))
     return out
 

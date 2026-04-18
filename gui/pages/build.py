@@ -170,15 +170,18 @@ class BuildPage(Page):
     # --- Internals ------------------------------------------------------
 
     def _start(self) -> None:
-        # Plain "Start build" button: rely on the last stashed config
-        # (written by Randomize page via build_request).  If none, nudge.
-        if self._last_config is None:
-            messagebox.showinfo(
-                "Configure on Randomize",
-                "Open the Randomize page, set your options, then click Build.",
-            )
-            return
-        self.start_build(self._last_config)
+        """Start a build using the latest Randomize-page snapshot.
+
+        The Randomize page mirrors its fields into
+        ``AppState.randomize_config`` on every change, so the user
+        can head straight here after configuring and hit Start build
+        without any intermediate click.  Falls back to a fresh
+        default config if the Randomize page has never been visited."""
+        from ..models import RandomizerConfig
+        config = (getattr(self.app.state, "randomize_config", None)
+                  or self._last_config
+                  or RandomizerConfig())
+        self.start_build(config)
 
     def _clear_log(self) -> None:
         self._log.clear()

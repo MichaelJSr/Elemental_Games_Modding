@@ -86,6 +86,11 @@ class AppState:
     enabled_packs: dict[str, bool] = field(default_factory=dict)
     # pack_params[pack_name][param_name] = float (slider values).
     pack_params: dict[str, dict[str, float]] = field(default_factory=dict)
+    # Latest snapshot of the Randomize page's fields.  The Randomize
+    # page pushes into this every time a widget changes (trace_add +
+    # Entry commits); the Build page reads it when the user clicks
+    # "Start build" so that button is now the single build entry point.
+    randomize_config: "RandomizerConfig | None" = None
     theme: Theme = "dark"
 
     bus: EventBus = field(default_factory=EventBus)

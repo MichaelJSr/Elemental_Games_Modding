@@ -33,8 +33,20 @@ Plus a non-pack helper:
 
 from __future__ import annotations
 
-from azurik_mod.patching import PatchSpec, apply_patch_spec
+import os
+from pathlib import Path
+
+from azurik_mod.patching import (
+    PatchSpec,
+    TrampolinePatch,
+    apply_patch_spec,
+    apply_trampoline_patch,
+)
 from azurik_mod.patching.registry import PatchPack, register_pack
+
+# Resolve the shim directory relative to this file so apply-at-runtime
+# works regardless of where the user invoked the CLI from.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 # ---------------------------------------------------------------------------
@@ -183,20 +195,100 @@ def apply_pickup_anim_patch(xbe_data: bytearray) -> None:
 # We DO NOT touch prophecy.bik; that cutscene has plot content the
 # user may want.  A parallel qol_skip_prophecy pack would be trivial
 # to add later using the same mechanism.
+# The AdreniumLogo call lives inside a boot-time state machine at
+# FUN_0005f620.  The surrounding instructions matter — case 1 of the
+# switch reads the __stdcall return value (AL) to decide whether to
+# enter the movie-polling state (AL != 0) or skip straight to the
+# next movie (AL == 0):
+#
+#   0x05f6df: PUSH EBP          ; EBP = 0 (scratch zero)
+#   0x05f6e0: PUSH 0x0019e150   ; &"AdreniumLogo.bik"
+#   0x05f6e5: CALL play_movie_fn
+#   0x05f6ea: NEG AL            ; state = 2 (POLL) if AL != 0
+#             SBB EAX, EAX      ; state = 3 (skip) if AL == 0
+#             ADD EAX, 3
+#             MOV [state], EAX
+#
+# `play_movie_fn` is __stdcall — the callee pops its 8 bytes of args
+# via `ret 8`.  Any replacement has to preserve BOTH the AL contract
+# (0 = skip to next movie) AND the stack-cleanup contract (pop 8B).
+# Naively NOP-ing the PUSH+CALL pair breaks both: AL is left as
+# garbage from whatever function ran previously (so state drifts
+# into polling a movie that never started), and PUSH EBP leaks 4
+# bytes onto the stack every iteration.  That produces a black-
+# screen hang at boot.
+#
+# The correct replacement (both flavours below) sets AL = 0, pops
+# the pre-pushed args, and lets case 1 of the state machine cleanly
+# advance to case 3 (which starts prophecy.bik normally).
+
+# Legacy byte patch — rewrites the 10-byte `PUSH imm32; CALL rel32`
+# as `ADD ESP, 4; XOR AL, AL; NOP x5`.  ADD ESP, 4 pops the 4 bytes
+# pushed by `PUSH EBP` at 0x05f6df (which is NOT in our 10-byte
+# window and still runs); the original 4-byte `PUSH 0x0019e150`
+# that WAS in our window is replaced, so only EBP's push needs
+# cleanup.  XOR AL, AL drives the state machine to case 3.
 SKIP_LOGO_SPEC = PatchSpec(
-    label="Skip AdreniumLogo startup movie",
+    label="Skip AdreniumLogo startup movie (legacy byte patch)",
     va=0x05F6E0,
     original=bytes([
         0x68, 0x50, 0xE1, 0x19, 0x00,   # PUSH 0x0019E150 (&"AdreniumLogo.bik")
         0xE8, 0x96, 0x92, 0xFB, 0xFF,   # CALL play_movie_fn (rel32)
     ]),
-    patch=bytes([0x90] * 10),            # NOP x10
+    patch=bytes([
+        0x83, 0xC4, 0x04,               # ADD ESP, 4   ; pop PUSH EBP leftover
+        0x30, 0xC0,                     # XOR AL, AL   ; state = 3 (skip)
+        0x90, 0x90, 0x90, 0x90, 0x90,   # NOP x5
+    ]),
+)
+
+# Phase 1 C-shim implementation.  Replaces ONLY the 5-byte CALL at
+# 0x05f6e5 (the site of `CALL play_movie_fn`) with a CALL into
+# shims/src/skip_logo.c (which is a naked `XOR AL,AL; RET 8`).  The
+# original `PUSH EBP; PUSH 0x0019e150` instructions are left intact
+# so the shim receives the two __stdcall args on its stack and can
+# clean them up the same way the real callee would.
+SKIP_LOGO_TRAMPOLINE = TrampolinePatch(
+    name="skip_logo",
+    label="Skip AdreniumLogo startup movie (C shim)",
+    va=0x05F6E5,
+    replaced_bytes=bytes([
+        0xE8, 0x96, 0x92, 0xFB, 0xFF,   # CALL play_movie_fn (rel32)
+    ]),
+    shim_object=Path("shims/build/skip_logo.o"),
+    shim_symbol="_c_skip_logo",
+    mode="call",
 )
 
 
 def apply_skip_logo_patch(xbe_data: bytearray) -> None:
-    """Skip the unskippable AdreniumLogo boot cutscene."""
-    apply_patch_spec(xbe_data, SKIP_LOGO_SPEC)
+    """Skip the unskippable AdreniumLogo boot cutscene.
+
+    Default path is the C-shim trampoline; setting the environment
+    variable ``AZURIK_SKIP_LOGO_LEGACY=1`` falls back to the byte-level
+    NOP patch.  The legacy form is kept as an insurance policy — if a
+    shim compile fails on an unexpected toolchain or a PE-COFF parse
+    bug surfaces, users can still ship the original behaviour.
+    """
+    if os.environ.get("AZURIK_SKIP_LOGO_LEGACY", "").strip() in ("1", "true", "yes"):
+        apply_patch_spec(xbe_data, SKIP_LOGO_SPEC)
+        return
+
+    shim_path = _REPO_ROOT / SKIP_LOGO_TRAMPOLINE.shim_object
+    if not shim_path.exists():
+        # Shim isn't built yet.  Rather than silently fall back to the
+        # legacy byte-NOP patch (which would hide build-time issues in
+        # the GUI / CI), we print a clear error and leave the XBE
+        # untouched.  The caller can then either run
+        # `shims/toolchain/compile.sh shims/src/skip_logo.c` or set
+        # AZURIK_SKIP_LOGO_LEGACY=1 to keep the old behaviour.
+        print(f"  ERROR: Skip logo — shim object not found at {shim_path}")
+        print(f"         Run shims/toolchain/compile.sh shims/src/skip_logo.c")
+        print(f"         or set AZURIK_SKIP_LOGO_LEGACY=1 to use the "
+              f"byte-NOP implementation.")
+        return
+
+    apply_trampoline_patch(xbe_data, SKIP_LOGO_TRAMPOLINE, repo_root=_REPO_ROOT)
 
 
 # ---------------------------------------------------------------------------
@@ -236,18 +328,17 @@ def apply_player_character_patch(xbe_data: bytearray, player_char: str) -> None:
 # independently.  Keeping each scoped to a single behaviour means the
 # user can describe exactly what they want without sub-checkbox trees.
 # ---------------------------------------------------------------------------
-QOL_PATCH_SITES: list[PatchSpec] = [PICKUP_ANIM_SPEC, SKIP_LOGO_SPEC]
-"""All QoL PatchSpec sites (for verify-patches iteration).  The gem-popup
-and other-popup suppressors are imperative byte-nulls, not PatchSpec."""
+QOL_PATCH_SITES: list[PatchSpec] = [PICKUP_ANIM_SPEC]
+"""All QoL PatchSpec sites (for legacy iteration).  The gem-popup and
+other-popup suppressors are imperative byte-nulls, not PatchSpec; the
+skip-logo site is now a TrampolinePatch (SKIP_LOGO_TRAMPOLINE).  The
+legacy ``SKIP_LOGO_SPEC`` byte-NOP form is kept in this module for the
+``AZURIK_SKIP_LOGO_LEGACY=1`` escape hatch but is not enumerated here."""
 
 
 register_pack(PatchPack(
     name="qol_gem_popups",
-    description=(
-        "Hide the \u201cCollect 100 <gem>\u201d popup that appears the first "
-        "time you collect each gem type (diamonds, emeralds, rubies, "
-        "sapphires, obsidians)."
-    ),
+    description="Hides first-time gem-collect popups (all 5 gem types).",
     sites=[],
     apply=apply_gem_popups_patch,
     default_on=False,
@@ -260,10 +351,7 @@ register_pack(PatchPack(
 
 register_pack(PatchPack(
     name="qol_pickup_anims",
-    description=(
-        "Skip the short celebration animation that plays after picking "
-        "up an item.  Items still get collected normally."
-    ),
+    description="Skips the post-pickup celebration animation.",
     sites=[PICKUP_ANIM_SPEC],
     apply=apply_pickup_anim_patch,
     default_on=False,
@@ -274,9 +362,8 @@ register_pack(PatchPack(
 register_pack(PatchPack(
     name="qol_other_popups",
     description=(
-        "Hide the first-time tutorial, key, health, power-up, and "
-        "six-keys-collected popups.  The death-screen popup is "
-        "deliberately left alone."
+        "Hides first-time tutorial, key, health, and power-up popups "
+        "(death-screen popup is left alone)."
     ),
     sites=[],
     apply=apply_other_popups_patch,
@@ -290,15 +377,14 @@ register_pack(PatchPack(
 register_pack(PatchPack(
     name="qol_skip_logo",
     description=(
-        "Skip the unskippable Adrenium logo movie that plays when the "
-        "game first boots, cutting launch time noticeably.  The "
-        "prophecy intro cutscene is left alone."
+        "Skips the unskippable Adrenium logo at boot (prophecy intro "
+        "still plays).  Implemented via a C shim — see docs/SHIMS.md."
     ),
-    sites=[SKIP_LOGO_SPEC],
+    sites=[SKIP_LOGO_TRAMPOLINE],
     apply=apply_skip_logo_patch,
     default_on=False,
     included_in_randomizer_qol=False,
-    tags=("qol",),
+    tags=("qol", "c-shim"),
 ))
 
 

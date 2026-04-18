@@ -1,22 +1,28 @@
-"""Randomize page — collapsible sections + 'Build' handoff to BuildPage."""
+"""Randomize page — shuffle-pool toggles, seed, and advanced options.
+
+This page no longer carries its own "Build" button.  It mirrors its
+field state into ``AppState.randomize_config`` on every change, and
+the Build & Logs page reads that snapshot when the user clicks
+"Start build".  One build entry point, no re-click.
+"""
 
 from __future__ import annotations
 
 import json
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import ttk
 
 from ..models import RandomizerConfig
-from ..widgets import Page, PrimaryButton, SecondaryButton, Section, SeedEntry
+from ..widgets import Page, SecondaryButton, Section, SeedEntry
 
 
 class RandomizePage(Page):
     title = "Randomize"
-    description = ("Seed and shuffle-pool toggles for the randomizer. "
-                   "Patch packs (QoL, 60 FPS unlock, player physics sliders, …) "
-                   "live on the Patches page and are applied on top of whichever "
-                   "pools you enable here.  Hit 'Build' to run both through the "
-                   "Build & Logs page.")
+    description = (
+        "Configure the shuffle pools and seed.  Patch packs live on "
+        "the Patches page.  When you're ready, hop over to Build & "
+        "Logs and hit Start build."
+    )
 
     def _build(self) -> None:
         self._pool_vars: dict[str, tk.BooleanVar] = {}
@@ -27,12 +33,18 @@ class RandomizePage(Page):
         seed_row.pack(fill=tk.X, pady=(0, 8))
         self._seed = SeedEntry(seed_row)
         self._seed.pack(side=tk.LEFT)
+        # SeedEntry doesn't expose a trace API directly — wrap its
+        # internal var via its public `get_seed()` + periodic syncs
+        # on focus-out / Return.
+        try:
+            self._seed._var.trace_add("write", lambda *_a: self._sync_state())
+        except Exception:  # noqa: BLE001
+            pass
 
         # --- Pools --------------------------------------------------------
         pools = Section(self._body, title="Shuffle pools", initially_open=True)
         pools.pack(fill=tk.X, pady=(0, 6))
 
-        # All options default OFF — the user explicitly opts in.
         for key, label, default in [
             ("do_major", "Major items (fragments + powers + obsidians)", False),
             ("do_keys", "Keys (within elemental realm)", False),
@@ -42,6 +54,7 @@ class RandomizePage(Page):
         ]:
             var = tk.BooleanVar(value=default)
             self._pool_vars[key] = var
+            var.trace_add("write", lambda *_a: self._sync_state())
             ttk.Checkbutton(pools.body, text=label, variable=var).pack(
                 anchor=tk.W, pady=2)
 
@@ -51,6 +64,7 @@ class RandomizePage(Page):
 
         hard_var = tk.BooleanVar(value=False)
         self._adv_vars["hard_barriers"] = hard_var
+        hard_var.trace_add("write", lambda *_a: self._sync_state())
         ttk.Checkbutton(adv.body,
                         text="Include multi-element barrier fourccs (hard)",
                         variable=hard_var).pack(anchor=tk.W, pady=2)
@@ -59,40 +73,55 @@ class RandomizePage(Page):
         cost_row.pack(fill=tk.X, pady=4)
         ttk.Label(cost_row, text="Obsidian cost per lock:", width=22).pack(
             side=tk.LEFT)
-        self._adv_vars["obsidian_cost"] = tk.StringVar(value="")
-        ttk.Entry(cost_row, textvariable=self._adv_vars["obsidian_cost"],
-                  width=8).pack(side=tk.LEFT)
+        cost_var = tk.StringVar(value="")
+        self._adv_vars["obsidian_cost"] = cost_var
+        cost_var.trace_add("write", lambda *_a: self._sync_state())
+        ttk.Entry(cost_row, textvariable=cost_var, width=8).pack(side=tk.LEFT)
         ttk.Label(cost_row, text="(default: 10 -> 10,20,...100)",
                   foreground="gray").pack(side=tk.LEFT, padx=(6, 0))
 
         pool_row = ttk.Frame(adv.body)
         pool_row.pack(fill=tk.X, pady=4)
         ttk.Label(pool_row, text="Custom item pool JSON:").pack(anchor=tk.W)
-        self._adv_vars["item_pool"] = tk.StringVar(value="")
-        ttk.Entry(pool_row, textvariable=self._adv_vars["item_pool"],
-                  width=60).pack(fill=tk.X, pady=(2, 0))
+        pool_var = tk.StringVar(value="")
+        self._adv_vars["item_pool"] = pool_var
+        pool_var.trace_add("write", lambda *_a: self._sync_state())
+        ttk.Entry(pool_row, textvariable=pool_var, width=60).pack(
+            fill=tk.X, pady=(2, 0))
 
-        # --- Build button -------------------------------------------------
-        action = ttk.Frame(self._body)
-        action.pack(fill=tk.X, pady=(12, 4))
-        PrimaryButton(action, text="Build randomized ISO",
-                      command=self._build_click).pack(side=tk.LEFT, padx=(0, 8))
-        SecondaryButton(action, text="Open Build page",
-                        command=lambda: self.app.show_page("build")).pack(
-            side=tk.LEFT)
+        # --- Nav helper ---------------------------------------------------
+        nav = ttk.Frame(self._body)
+        nav.pack(fill=tk.X, pady=(12, 4))
+        SecondaryButton(
+            nav,
+            text="Go to Build & Logs →",
+            command=lambda: self.app.show_page("build"),
+        ).pack(side=tk.LEFT)
+        ttk.Label(
+            nav,
+            text="(the Start build button on that page now launches the build)",
+            foreground="gray",
+        ).pack(side=tk.LEFT, padx=(8, 0))
 
-    # --- internals ------------------------------------------------------
+        # Seed an initial snapshot so Build can fire immediately even
+        # if the user hasn't touched anything on this page.
+        self._sync_state()
 
-    def _build_click(self) -> None:
-        if self.app.state.iso_path is None:
-            messagebox.showerror("No ISO selected",
-                                 "Pick a base ISO on the Project page first.")
-            return
+    # --- state mirroring -----------------------------------------------
 
-        # Pack enablement (QoL, FPS unlock, player physics, …) lives on
-        # the Patches page.  BuildPage merges that state into the config
-        # right before kicking off the worker; see BuildPage._merge_packs.
-        config = RandomizerConfig(
+    def _sync_state(self) -> None:
+        """Push current widget state into AppState.randomize_config.
+
+        Runs on every widget change.  We deliberately swallow exceptions
+        for half-typed numeric fields (e.g. user is mid-edit on the
+        obsidian cost box) so the snapshot stays sane."""
+        try:
+            self.app.state.randomize_config = self._read_config()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _read_config(self) -> RandomizerConfig:
+        return RandomizerConfig(
             seed=self._seed.get_seed(),
             do_major=self._pool_vars["do_major"].get(),
             do_keys=self._pool_vars["do_keys"].get(),
@@ -102,9 +131,6 @@ class RandomizePage(Page):
             obsidian_cost=self._parse_obsidian_cost(),
             item_pool=self._parse_item_pool(),
         )
-
-        # Fire event — BuildPage picks this up, flips to itself, and runs.
-        self.app.state.bus.emit("build_request", config)
 
     def _parse_obsidian_cost(self) -> int | None:
         raw = self._adv_vars["obsidian_cost"].get().strip()
