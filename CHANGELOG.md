@@ -23,11 +23,17 @@
 - `apply_trampoline_patch()` / `verify_trampoline_patch()` do the
   end-to-end work (COFF parse, landing carve, section grow, rel32
   emit, NOP fill) and stay idempotent on a second apply.
-- `qol_skip_logo` migrated from a 10-NOP byte patch to a
-  TrampolinePatch backed by `shims/src/skip_logo.c`.  Observable
-  behaviour is unchanged — the Adrenium logo still never plays.
-  Escape hatch: setting `AZURIK_SKIP_LOGO_LEGACY=1` falls back to
-  the old byte-NOP form if the shim toolchain isn't available.
+- `qol_skip_logo` now replaces only the 5-byte `CALL play_movie_fn`
+  at VA 0x05F6E5 with a C shim that returns `AL=0` and does `RET 8`,
+  matching `play_movie_fn`'s `__stdcall` contract.  The preceding
+  `PUSH EBP; PUSH 0x0019E150` instructions run as normal so the shim
+  sees both args on its stack.  This replaces the earlier 10-byte
+  NOP attempt, which left `AL` undefined and leaked 4 bytes of stack
+  per iteration — the state machine at `FUN_0005F620` would drift
+  into `case 2` (poll a movie that never started) and hang on a
+  black screen at boot.  The legacy `SKIP_LOGO_SPEC` escape hatch
+  (`AZURIK_SKIP_LOGO_LEGACY=1`) was simultaneously fixed to write
+  `ADD ESP, 4; XOR AL, AL; NOP×5` with the same semantics.
 - `verify-patches --strict` now absorbs trampoline sites, their
   shim landing pads, and the grown `.text` section-header fields
   into the whitelist diff so a legitimately-patched XBE reports

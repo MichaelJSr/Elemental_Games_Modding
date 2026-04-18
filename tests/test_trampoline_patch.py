@@ -116,12 +116,15 @@ class CoffParser(unittest.TestCase):
     def test_extract_shim_bytes_returns_text_and_offset(self):
         text_bytes, sym_offset = extract_shim_bytes(
             self.coff, "_c_skip_logo")
-        self.assertTrue(
-            text_bytes.endswith(b"\xC3"),
-            msg="The skip_logo shim at -Os should end in a RET (0xC3); "
-                "if compile flags changed this test pins the expectation.")
+        # The skip_logo shim is a naked `xor %al, %al; ret $8` —
+        # compiled bytes should be 30 C0 C2 08 00.
+        self.assertEqual(text_bytes, bytes([0x30, 0xC0, 0xC2, 0x08, 0x00]),
+            msg="skip_logo shim must be exactly XOR AL,AL + RET 8 "
+                "(5 bytes).  A RET without the 8-byte pop would leak "
+                "caller args on every boot tick; a RET with a "
+                "different immediate would corrupt the stack.")
         self.assertEqual(sym_offset, 0,
-            msg="Empty shim starts at offset 0 of .text.")
+            msg="Shim symbol starts at offset 0 of its .text section.")
 
     def test_extract_unknown_symbol_raises(self):
         with self.assertRaises(KeyError):
@@ -201,31 +204,35 @@ class GrowTextSection(unittest.TestCase):
 class ApplyAndVerify(unittest.TestCase):
 
     def _patch(self) -> TrampolinePatch:
+        # Points at the 5-byte CALL at 0x05F6E5.  The preceding PUSHes
+        # at 0x05F6DF and 0x05F6E0 intentionally stay vanilla so the
+        # shim receives both __stdcall args on its stack.
         return TrampolinePatch(
             name="skip_logo",
             label="Skip AdreniumLogo (C shim)",
-            va=0x05F6E0,
-            replaced_bytes=bytes([
-                0x68, 0x50, 0xE1, 0x19, 0x00,
-                0xE8, 0x96, 0x92, 0xFB, 0xFF,
-            ]),
+            va=0x05F6E5,
+            replaced_bytes=bytes([0xE8, 0x96, 0x92, 0xFB, 0xFF]),
             shim_object=Path("shims/build/skip_logo.o"),
             shim_symbol="_c_skip_logo",
             mode="call",
         )
 
-    def test_apply_sets_call_and_nop_pad(self):
+    def test_apply_emits_call_rel32_with_no_tail_pad(self):
         xbe = bytearray(_VANILLA_XBE.read_bytes())
         patch = self._patch()
         ok = apply_trampoline_patch(xbe, patch, repo_root=_REPO_ROOT)
         self.assertTrue(ok)
         off = va_to_file(patch.va)
-        site = bytes(xbe[off:off + 10])
+        site = bytes(xbe[off:off + 5])
         self.assertEqual(site[0], 0xE8,
             msg="first byte of trampoline must be CALL rel32 (0xE8)")
-        for i in range(5, 10):
-            self.assertEqual(site[i], 0x90,
-                msg=f"byte at site+{i} must be NOP (0x90)")
+        # replaced_bytes is exactly 5 bytes so no NOP tail should be
+        # written — any NOPs would mean the pipeline miscounted.
+        # Verify the NEG AL instruction at 0x05F6EA is untouched.
+        neg_al_off = va_to_file(0x05F6EA)
+        self.assertEqual(xbe[neg_al_off], 0xF6,
+            msg="NEG AL at 0x05F6EA must survive the patch; the "
+                "state machine reads the shim's AL return value here.")
 
     def test_rel32_points_inside_new_text(self):
         """The CALL rel32 target must land inside .text after growth."""

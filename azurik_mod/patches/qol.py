@@ -195,31 +195,64 @@ def apply_pickup_anim_patch(xbe_data: bytearray) -> None:
 # We DO NOT touch prophecy.bik; that cutscene has plot content the
 # user may want.  A parallel qol_skip_prophecy pack would be trivial
 # to add later using the same mechanism.
-# The historical byte-level implementation: 10 NOPs over the
-# PUSH+CALL pair.  Preserved under AZURIK_SKIP_LOGO_LEGACY=1 as an
-# escape hatch in case something goes wrong with the trampoline path.
+# The AdreniumLogo call lives inside a boot-time state machine at
+# FUN_0005f620.  The surrounding instructions matter — case 1 of the
+# switch reads the __stdcall return value (AL) to decide whether to
+# enter the movie-polling state (AL != 0) or skip straight to the
+# next movie (AL == 0):
+#
+#   0x05f6df: PUSH EBP          ; EBP = 0 (scratch zero)
+#   0x05f6e0: PUSH 0x0019e150   ; &"AdreniumLogo.bik"
+#   0x05f6e5: CALL play_movie_fn
+#   0x05f6ea: NEG AL            ; state = 2 (POLL) if AL != 0
+#             SBB EAX, EAX      ; state = 3 (skip) if AL == 0
+#             ADD EAX, 3
+#             MOV [state], EAX
+#
+# `play_movie_fn` is __stdcall — the callee pops its 8 bytes of args
+# via `ret 8`.  Any replacement has to preserve BOTH the AL contract
+# (0 = skip to next movie) AND the stack-cleanup contract (pop 8B).
+# Naively NOP-ing the PUSH+CALL pair breaks both: AL is left as
+# garbage from whatever function ran previously (so state drifts
+# into polling a movie that never started), and PUSH EBP leaks 4
+# bytes onto the stack every iteration.  That produces a black-
+# screen hang at boot.
+#
+# The correct replacement (both flavours below) sets AL = 0, pops
+# the pre-pushed args, and lets case 1 of the state machine cleanly
+# advance to case 3 (which starts prophecy.bik normally).
+
+# Legacy byte patch — rewrites the 10-byte `PUSH imm32; CALL rel32`
+# as `ADD ESP, 4; XOR AL, AL; NOP x5`.  ADD ESP, 4 pops the 4 bytes
+# pushed by `PUSH EBP` at 0x05f6df (which is NOT in our 10-byte
+# window and still runs); the original 4-byte `PUSH 0x0019e150`
+# that WAS in our window is replaced, so only EBP's push needs
+# cleanup.  XOR AL, AL drives the state machine to case 3.
 SKIP_LOGO_SPEC = PatchSpec(
-    label="Skip AdreniumLogo startup movie (legacy NOP)",
+    label="Skip AdreniumLogo startup movie (legacy byte patch)",
     va=0x05F6E0,
     original=bytes([
         0x68, 0x50, 0xE1, 0x19, 0x00,   # PUSH 0x0019E150 (&"AdreniumLogo.bik")
         0xE8, 0x96, 0x92, 0xFB, 0xFF,   # CALL play_movie_fn (rel32)
     ]),
-    patch=bytes([0x90] * 10),            # NOP x10
+    patch=bytes([
+        0x83, 0xC4, 0x04,               # ADD ESP, 4   ; pop PUSH EBP leftover
+        0x30, 0xC0,                     # XOR AL, AL   ; state = 3 (skip)
+        0x90, 0x90, 0x90, 0x90, 0x90,   # NOP x5
+    ]),
 )
 
-# Phase 1 C-shim implementation — CALL rel32 to an empty C function
-# compiled from shims/src/skip_logo.c.  Observable behaviour matches
-# the legacy NOP form: the movie never plays.  Implementation is
-# functionally richer because it exercises the C-shim pipeline end
-# to end (PE-COFF parse, landing-pad carving, trampoline emission,
-# .text section-header growth).
+# Phase 1 C-shim implementation.  Replaces ONLY the 5-byte CALL at
+# 0x05f6e5 (the site of `CALL play_movie_fn`) with a CALL into
+# shims/src/skip_logo.c (which is a naked `XOR AL,AL; RET 8`).  The
+# original `PUSH EBP; PUSH 0x0019e150` instructions are left intact
+# so the shim receives the two __stdcall args on its stack and can
+# clean them up the same way the real callee would.
 SKIP_LOGO_TRAMPOLINE = TrampolinePatch(
     name="skip_logo",
     label="Skip AdreniumLogo startup movie (C shim)",
-    va=0x05F6E0,
+    va=0x05F6E5,
     replaced_bytes=bytes([
-        0x68, 0x50, 0xE1, 0x19, 0x00,   # PUSH 0x0019E150 (&"AdreniumLogo.bik")
         0xE8, 0x96, 0x92, 0xFB, 0xFF,   # CALL play_movie_fn (rel32)
     ]),
     shim_object=Path("shims/build/skip_logo.o"),

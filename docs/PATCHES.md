@@ -94,28 +94,51 @@ Skips the short celebration animation that plays after picking up an item.  Impl
 
 Skips the unskippable Adrenium logo movie that plays when the game first boots, cutting launch time noticeably.  The intro prophecy cutscene that plays immediately after is deliberately left alone.
 
-**Phase 1 implementation (C-shim).**  A `TrampolinePatch` replaces the 10-byte `PUSH &"AdreniumLogo.bik"; CALL play_movie_fn` pair at VA 0x05F6E0 with `CALL rel32` into a compiled C function ([`shims/src/skip_logo.c`](../shims/src/skip_logo.c) — a single `return;` that compiles to one `RET` byte).  The remaining 5 bytes at the site are NOP-padded.  The shim lands in 16 bytes of VA-gap headroom just past `.text` (file offset 0x0F01D0, VA 0x001001D0); the XBE's `.text` section header is grown by 1 byte so the Xbox loader maps the new byte executable.
+**Why a naive NOP breaks this.**  The Adrenium-logo call lives inside a boot-time state machine (`FUN_0005f620`).  The instructions around it aren't just "play a movie" — they form a tightly-coupled sequence that reads `play_movie_fn`'s `AL` return value to decide whether to enter the movie-polling state or skip to the next movie:
 
 ```
-BEFORE (10 B at VA 0x05F6E0):
-  68 50 E1 19 00     PUSH 0x0019E150   ; &"AdreniumLogo.bik"
+0x05F6DF: 55                 PUSH EBP             ; EBP = 0 (scratch zero); char-flag arg
+0x05F6E0: 68 50 E1 19 00     PUSH 0x0019E150      ; &"AdreniumLogo.bik"
+0x05F6E5: E8 96 92 FB FF     CALL play_movie_fn   ; __stdcall — callee pops 8 B via `ret 8`
+0x05F6EA: F6 D8              NEG AL               ; CF = (AL != 0)
+0x05F6EC: 1B C0              SBB EAX, EAX         ; EAX = 0 (skip) or -1 (poll)
+0x05F6EE: 83 C0 03            ADD EAX, 3          ; state = 3 (skip) or 2 (poll)
+0x05F6F1: A3 1C F6 1B 00     MOV [0x001BF61C], EAX
+```
+
+Replacing the 10-byte `PUSH imm32; CALL rel32` pair with 10 NOPs (as an earlier version of this patch tried) corrupts the game in two ways: `PUSH EBP` leaks 4 bytes of stack every iteration, and `NEG AL` operates on whatever garbage AL happens to hold from a prior function — so the state machine drifts into **case 2 (poll a movie that never started)** and spins forever.  That's the black-screen-on-boot symptom.
+
+**Phase 1 implementation (C-shim).**  A `TrampolinePatch` replaces **only the 5-byte CALL** at VA 0x05F6E5 with `CALL rel32` into [`shims/src/skip_logo.c`](../shims/src/skip_logo.c).  The preceding two PUSHes are left intact, so the shim receives both `__stdcall` args on its stack and can clean them up the same way the real callee would.  The shim itself is a naked 5-byte stub:
+
+```c
+__attribute__((naked))
+void c_skip_logo(void) {
+    __asm__ volatile (
+        "xorb %al, %al\n\t"   /* AL = 0 → state machine chooses case 3 (skip) */
+        "ret  $8            "  /* __stdcall: pop the 2 caller-pushed args    */
+    );
+}
+```
+
+Compiled with `-Os` this is `30 C0 C2 08 00` (exactly 5 bytes).  It lands in the 16-byte VA-gap just past `.text` (file offset `0x0F01D0`, VA `0x001001D0`); the XBE's `.text` section header is grown by 5 bytes so the Xbox loader maps the new region executable.
+
+```
+BEFORE (5 B at VA 0x05F6E5):
   E8 96 92 FB FF     CALL play_movie_fn
 
-AFTER (10 B at VA 0x05F6E0):
+AFTER (5 B at VA 0x05F6E5):
   E8 .. .. .. ..     CALL rel32 → 0x1001D0   ; shim in grown .text
-  90 90 90 90 90     NOP x5
 
-INJECTED SHIM (1 B at VA 0x001001D0):
-  C3                 RET
+INJECTED SHIM (5 B at VA 0x001001D0):
+  30 C0              XOR AL, AL               ; return 0 (movie didn't start)
+  C2 08 00           RET 8                    ; __stdcall pop of 2 args
 ```
 
-The CALL returns to `0x05F6E5`, control then falls through NOPs into the `prophecy.bik` call at VA 0x05F73F — same landing point as the legacy NOP form.  The `AdreniumLogo.bik` string at file offset 0x196DB0 is left intact, keeping the `.rdata` section clean.  `verify-patches --strict` absorbs the trampoline, the shim landing pad, and the grown `.text` section-header fields into its whitelist.
+The `NEG AL; SBB EAX, EAX; ADD EAX, 3; MOV [state], EAX` block at `0x05F6EA` is untouched and now always writes **state = 3**.  On the next main-loop tick, case 3 of the state machine runs and starts `prophecy.bik` normally.  The `AdreniumLogo.bik` string at file offset `0x196DB0` is left intact, keeping `.rdata` clean.  `verify-patches --strict` absorbs the trampoline, the shim landing pad, and the grown `.text` section-header fields into its whitelist.
 
-**Escape hatch.**  Set `AZURIK_SKIP_LOGO_LEGACY=1` before applying to use the original 10-NOP byte patch instead.  Useful if the i386 PE-COFF toolchain (clang + `-target i386-pc-win32`) isn't available on the build host.
+**Escape hatch.**  Set `AZURIK_SKIP_LOGO_LEGACY=1` before applying to use the byte-level `PatchSpec` form instead.  That fallback rewrites the 10 bytes at VA `0x05F6E0` as `ADD ESP, 4; XOR AL, AL; NOP×5` — same semantics as the shim (pop the PUSH EBP leftover, force AL=0) but with no injected code.  Useful if the i386 PE-COFF toolchain (clang + `-target i386-pc-win32`) isn't available on the build host.
 
-**Why a C shim for a one-byte `RET`?** Phase 1 deliberately picks the smallest possible migration to prove the pipeline end-to-end: COFF parse, landing-pad discovery, `.text` section growth, trampoline emission, verify round-trip.  See [docs/SHIMS.md](SHIMS.md) for the full authoring workflow and Phase 2 roadmap.
-
-The adjacent call to `prophecy.bik` uses the same pattern at VA 0x05F73F / file offset 0x04F73F.  Adding a parallel `qol_skip_prophecy` pack is a trivial follow-up — either another TrampolinePatch or the old PatchSpec form.
+The adjacent call to `prophecy.bik` uses the same calling pattern at VA 0x05F73F.  Adding a parallel `qol_skip_prophecy` pack is a trivial follow-up — another 5-byte trampoline with the same shim reused, or its own byte-level `ADD ESP, 4 + XOR AL, AL` patch.
 
 ### Player character swap (`--player-character <name>`)
 
