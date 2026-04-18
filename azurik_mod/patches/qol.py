@@ -33,8 +33,20 @@ Plus a non-pack helper:
 
 from __future__ import annotations
 
-from azurik_mod.patching import PatchSpec, apply_patch_spec
+import os
+from pathlib import Path
+
+from azurik_mod.patching import (
+    PatchSpec,
+    TrampolinePatch,
+    apply_patch_spec,
+    apply_trampoline_patch,
+)
 from azurik_mod.patching.registry import PatchPack, register_pack
+
+# Resolve the shim directory relative to this file so apply-at-runtime
+# works regardless of where the user invoked the CLI from.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 # ---------------------------------------------------------------------------
@@ -183,8 +195,11 @@ def apply_pickup_anim_patch(xbe_data: bytearray) -> None:
 # We DO NOT touch prophecy.bik; that cutscene has plot content the
 # user may want.  A parallel qol_skip_prophecy pack would be trivial
 # to add later using the same mechanism.
+# The historical byte-level implementation: 10 NOPs over the
+# PUSH+CALL pair.  Preserved under AZURIK_SKIP_LOGO_LEGACY=1 as an
+# escape hatch in case something goes wrong with the trampoline path.
 SKIP_LOGO_SPEC = PatchSpec(
-    label="Skip AdreniumLogo startup movie",
+    label="Skip AdreniumLogo startup movie (legacy NOP)",
     va=0x05F6E0,
     original=bytes([
         0x68, 0x50, 0xE1, 0x19, 0x00,   # PUSH 0x0019E150 (&"AdreniumLogo.bik")
@@ -193,10 +208,54 @@ SKIP_LOGO_SPEC = PatchSpec(
     patch=bytes([0x90] * 10),            # NOP x10
 )
 
+# Phase 1 C-shim implementation — CALL rel32 to an empty C function
+# compiled from shims/src/skip_logo.c.  Observable behaviour matches
+# the legacy NOP form: the movie never plays.  Implementation is
+# functionally richer because it exercises the C-shim pipeline end
+# to end (PE-COFF parse, landing-pad carving, trampoline emission,
+# .text section-header growth).
+SKIP_LOGO_TRAMPOLINE = TrampolinePatch(
+    name="skip_logo",
+    label="Skip AdreniumLogo startup movie (C shim)",
+    va=0x05F6E0,
+    replaced_bytes=bytes([
+        0x68, 0x50, 0xE1, 0x19, 0x00,   # PUSH 0x0019E150 (&"AdreniumLogo.bik")
+        0xE8, 0x96, 0x92, 0xFB, 0xFF,   # CALL play_movie_fn (rel32)
+    ]),
+    shim_object=Path("shims/build/skip_logo.o"),
+    shim_symbol="_c_skip_logo",
+    mode="call",
+)
+
 
 def apply_skip_logo_patch(xbe_data: bytearray) -> None:
-    """Skip the unskippable AdreniumLogo boot cutscene."""
-    apply_patch_spec(xbe_data, SKIP_LOGO_SPEC)
+    """Skip the unskippable AdreniumLogo boot cutscene.
+
+    Default path is the C-shim trampoline; setting the environment
+    variable ``AZURIK_SKIP_LOGO_LEGACY=1`` falls back to the byte-level
+    NOP patch.  The legacy form is kept as an insurance policy — if a
+    shim compile fails on an unexpected toolchain or a PE-COFF parse
+    bug surfaces, users can still ship the original behaviour.
+    """
+    if os.environ.get("AZURIK_SKIP_LOGO_LEGACY", "").strip() in ("1", "true", "yes"):
+        apply_patch_spec(xbe_data, SKIP_LOGO_SPEC)
+        return
+
+    shim_path = _REPO_ROOT / SKIP_LOGO_TRAMPOLINE.shim_object
+    if not shim_path.exists():
+        # Shim isn't built yet.  Rather than silently fall back to the
+        # legacy byte-NOP patch (which would hide build-time issues in
+        # the GUI / CI), we print a clear error and leave the XBE
+        # untouched.  The caller can then either run
+        # `shims/toolchain/compile.sh shims/src/skip_logo.c` or set
+        # AZURIK_SKIP_LOGO_LEGACY=1 to keep the old behaviour.
+        print(f"  ERROR: Skip logo — shim object not found at {shim_path}")
+        print(f"         Run shims/toolchain/compile.sh shims/src/skip_logo.c")
+        print(f"         or set AZURIK_SKIP_LOGO_LEGACY=1 to use the "
+              f"byte-NOP implementation.")
+        return
+
+    apply_trampoline_patch(xbe_data, SKIP_LOGO_TRAMPOLINE, repo_root=_REPO_ROOT)
 
 
 # ---------------------------------------------------------------------------
@@ -236,9 +295,12 @@ def apply_player_character_patch(xbe_data: bytearray, player_char: str) -> None:
 # independently.  Keeping each scoped to a single behaviour means the
 # user can describe exactly what they want without sub-checkbox trees.
 # ---------------------------------------------------------------------------
-QOL_PATCH_SITES: list[PatchSpec] = [PICKUP_ANIM_SPEC, SKIP_LOGO_SPEC]
-"""All QoL PatchSpec sites (for verify-patches iteration).  The gem-popup
-and other-popup suppressors are imperative byte-nulls, not PatchSpec."""
+QOL_PATCH_SITES: list[PatchSpec] = [PICKUP_ANIM_SPEC]
+"""All QoL PatchSpec sites (for legacy iteration).  The gem-popup and
+other-popup suppressors are imperative byte-nulls, not PatchSpec; the
+skip-logo site is now a TrampolinePatch (SKIP_LOGO_TRAMPOLINE).  The
+legacy ``SKIP_LOGO_SPEC`` byte-NOP form is kept in this module for the
+``AZURIK_SKIP_LOGO_LEGACY=1`` escape hatch but is not enumerated here."""
 
 
 register_pack(PatchPack(
@@ -292,13 +354,17 @@ register_pack(PatchPack(
     description=(
         "Skip the unskippable Adrenium logo movie that plays when the "
         "game first boots, cutting launch time noticeably.  The "
-        "prophecy intro cutscene is left alone."
+        "prophecy intro cutscene is left alone.  Implemented as a C "
+        "shim at ``shims/src/skip_logo.c`` — the XBE gets a CALL into "
+        "an empty function in injected code.  Set "
+        "``AZURIK_SKIP_LOGO_LEGACY=1`` to revert to the pure-NOP "
+        "implementation."
     ),
-    sites=[SKIP_LOGO_SPEC],
+    sites=[SKIP_LOGO_TRAMPOLINE],
     apply=apply_skip_logo_patch,
     default_on=False,
     included_in_randomizer_qol=False,
-    tags=("qol",),
+    tags=("qol", "c-shim"),
 ))
 
 

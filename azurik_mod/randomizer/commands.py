@@ -1270,11 +1270,13 @@ def cmd_verify_patches(args):
     from azurik_mod.patching import (
         verify_parametric_patch,
         verify_patch_spec,
+        verify_trampoline_patch,
     )
     from azurik_mod.patching.registry import (
         all_packs,
         all_parametric_sites,
         all_patch_specs,
+        all_trampoline_sites,
     )
     # Importing patches package ensures every pack has registered.
     import azurik_mod.patches  # noqa: F401
@@ -1290,6 +1292,7 @@ def cmd_verify_patches(args):
 
     specs = all_patch_specs()
     param_sites = all_parametric_sites()  # [(pack_name, ParametricPatch)]
+    trampoline_sites = all_trampoline_sites()  # [(pack_name, TrampolinePatch)]
 
     # --- PatchSpec verification ---------------------------------------
     counts = {"applied": 0, "original": 0, "mismatch": 0, "out-of-range": 0}
@@ -1353,6 +1356,23 @@ def cmd_verify_patches(args):
                       f"bytes decode to out-of-range value")
                 mismatches.append((pp, status))
 
+    # --- TrampolinePatch verification --------------------------------
+    if trampoline_sites:
+        print()
+        print(f"Trampoline sites ({len(trampoline_sites)} sites):")
+        for pack_name, tp in trampoline_sites:
+            status = verify_trampoline_patch(patched, tp)
+            marker = {
+                "applied":      "[applied ]",
+                "original":     "[original]",
+                "mismatch":     "[mismatch]",
+                "out-of-range": "[out-of-range]",
+            }.get(status, f"[{status}]")
+            print(f"  {marker}  {pack_name}.{tp.name}  VA=0x{tp.va:X}  "
+                  f"shim={tp.shim_symbol}")
+            if status in ("mismatch", "out-of-range"):
+                mismatches.append((tp, status))
+
     # --- Safety-critical guard ---------------------------------------
     safety_sites = [s for s in specs if s.safety_critical]
     print()
@@ -1378,12 +1398,19 @@ def cmd_verify_patches(args):
             print(f"  WARNING: size mismatch — original {len(original)} vs "
                   f"patched {len(patched)}; diff may be unreliable")
 
-        # Allow ranges.  Three sources contribute:
+        # Allow ranges.  Five sources contribute:
         #   1. every fixed PatchSpec site (VA -> file offset + length);
         #   2. every non-virtual ParametricPatch site;
         #   3. each pack's `extra_whitelist_ranges`, which covers
         #      imperative byte-level patches like the popup-key nulls
-        #      that aren't PatchSpecs but are still intentional writes.
+        #      that aren't PatchSpecs but are still intentional writes;
+        #   4. every TrampolinePatch site's 5-byte CALL/JMP + any
+        #      NOP-fill bytes beyond that (site footprint);
+        #   5. the shim-landing region carved out of .text padding /
+        #      section growth, recovered by following each
+        #      trampoline's rel32 target back to the shim;
+        #   6. the .text section-header fields that grow_text_section
+        #      may have rewritten (vsize + raw_size).
         allow_ranges: list[tuple[int, int]] = [
             (s.file_offset, s.file_offset + len(s.patch)) for s in specs
         ]
@@ -1394,6 +1421,66 @@ def cmd_verify_patches(args):
         for pack in all_packs():
             for lo, hi in pack.extra_whitelist_ranges:
                 allow_ranges.append((lo, hi))
+
+        # Trampoline-specific whitelist contributions --------------------
+        if trampoline_sites:
+            from azurik_mod.patching import (
+                file_to_va,
+                parse_xbe_sections,
+                va_to_file,
+            )
+            import struct as _struct
+
+            for _pack, tp in trampoline_sites:
+                site_off = tp.file_offset
+                replaced_len = len(tp.replaced_bytes)
+                # (4) the trampoline itself
+                allow_ranges.append((site_off, site_off + replaced_len))
+
+                # (5) the shim landing pad — follow the rel32 to find it.
+                if site_off + 5 <= len(patched):
+                    opcode = patched[site_off]
+                    if opcode in (0xE8, 0xE9):
+                        rel32 = _struct.unpack_from(
+                            "<i", patched, site_off + 1)[0]
+                        end_of_jump_va = tp.va + 5
+                        target_va = end_of_jump_va + rel32
+                        try:
+                            target_off = va_to_file(target_va)
+                            # Whitelist the shim's .text bytes.  We don't
+                            # know the exact length here, but capping at
+                            # the .text growth delta is a safe upper bound.
+                            _, _secs = parse_xbe_sections(bytes(patched))
+                            _text = next(
+                                s for s in _secs if s["name"] == ".text")
+                            _text_raw_end = (
+                                _text["raw_addr"] + _text["raw_size"])
+                            shim_end = min(target_off + 64, _text_raw_end)
+                            allow_ranges.append((target_off, shim_end))
+                        except ValueError:
+                            pass  # shim target outside any section — will
+                                  # surface as a mismatch elsewhere
+
+            # (6) .text section-header fields (vsize at +8, raw_size at +16)
+            if patched[:4] == b"XBEH":
+                base_addr = _struct.unpack_from("<I", patched, 0x104)[0]
+                section_count = _struct.unpack_from("<I", patched, 0x11C)[0]
+                section_headers_addr = _struct.unpack_from(
+                    "<I", patched, 0x120)[0]
+                section_headers_offset = section_headers_addr - base_addr
+                for _i in range(section_count):
+                    off = section_headers_offset + _i * 56
+                    name_addr = _struct.unpack_from("<I", patched, off + 20)[0]
+                    name_offset = name_addr - base_addr
+                    name_end = bytes(patched).index(b"\x00", name_offset)
+                    name = patched[name_offset:name_end].decode(
+                        "ascii", errors="replace")
+                    if name == ".text":
+                        # vsize at +8 (4B) and raw_size at +16 (4B).
+                        allow_ranges.append((off + 8, off + 12))
+                        allow_ranges.append((off + 16, off + 20))
+                        break
+
         allow_ranges.sort()
 
         def _in_allow(off: int) -> bool:

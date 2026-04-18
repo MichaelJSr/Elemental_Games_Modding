@@ -17,6 +17,7 @@ from azurik_mod.patches.player_physics import (
 from azurik_mod.patches.qol import (
     QOL_PATCH_SITES,
     SKIP_LOGO_SPEC,
+    SKIP_LOGO_TRAMPOLINE,
     apply_gem_popups_patch,
     apply_other_popups_patch,
     apply_pickup_anim_patch,
@@ -34,6 +35,7 @@ __all__ = [
     "QOL_PATCH_SITES",
     "RUN_SPEED_SCALE",
     "SKIP_LOGO_SPEC",
+    "SKIP_LOGO_TRAMPOLINE",
     "WALK_SPEED_SCALE",
     "apply_fps_patches",
     "apply_gem_popups_patch",

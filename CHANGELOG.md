@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+### C-shim modding platform (Phase 1)
+
+- New `TrampolinePatch` site descriptor in `azurik_mod.patching.spec`
+  joins `PatchSpec` / `ParametricPatch`.  Instead of declaring raw
+  byte swaps, a trampoline patch names a C function whose compiled
+  PE-COFF `.o` gets injected into the XBE; a 5-byte `CALL` / `JMP`
+  rel32 at the declared VA diverts control flow into the shim.
+- New `shims/` tree: C sources (`src/`), shared freestanding headers
+  (`include/azurik.h`), and an Apple-clang wrapper
+  (`toolchain/compile.sh` emitting i386 PE-COFF via
+  `-target i386-pc-win32`).
+- New `azurik_mod.patching.coff` — minimal PE-COFF reader (sections
+  + symbols only, no relocations) — feeds shim bytes + entry-point
+  offsets into the apply pipeline.
+- `find_text_padding()` generalised: reports both in-section trailing
+  zero slack AND the adjacent VA-gap growth window.  `grow_text_section()`
+  commits the matching `virtual_size` / `raw_size` bump in the XBE
+  section header so the Xbox loader maps injected bytes as executable.
+- `apply_trampoline_patch()` / `verify_trampoline_patch()` do the
+  end-to-end work (COFF parse, landing carve, section grow, rel32
+  emit, NOP fill) and stay idempotent on a second apply.
+- `qol_skip_logo` migrated from a 10-NOP byte patch to a
+  TrampolinePatch backed by `shims/src/skip_logo.c`.  Observable
+  behaviour is unchanged — the Adrenium logo still never plays.
+  Escape hatch: setting `AZURIK_SKIP_LOGO_LEGACY=1` falls back to
+  the old byte-NOP form if the shim toolchain isn't available.
+- `verify-patches --strict` now absorbs trampoline sites, their
+  shim landing pads, and the grown `.text` section-header fields
+  into the whitelist diff so a legitimately-patched XBE reports
+  clean.
+- New docs: [docs/SHIMS.md](docs/SHIMS.md) (authoring workflow),
+  `shims/README.md` (toolchain + directory map).  New tests:
+  `tests/test_trampoline_patch.py` (18 tests — COFF, XBE surgery,
+  apply+verify end-to-end) and an expanded
+  `tests/test_qol_skip_logo.py`.
+
 ### GUI
 
 - Rebranded launcher scripts from `Launch Randomizer.*` to

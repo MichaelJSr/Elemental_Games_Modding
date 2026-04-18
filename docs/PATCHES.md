@@ -1,6 +1,8 @@
 # Patch Pack Catalog
 
-Each pack is a module under [`azurik_mod/patches/`](../azurik_mod/patches/) that exports a list of `PatchSpec` entries and registers itself with the central registry.  The CLI (`azurik-mod verify-patches`) and the GUI ([`gui/pages/patches.py`](../gui/pages/patches.py)) discover packs automatically — there is no hard-coded list to update when a new pack ships.
+Each pack is a module under [`azurik_mod/patches/`](../azurik_mod/patches/) that exports a list of `PatchSpec` / `ParametricPatch` / `TrampolinePatch` sites and registers itself with the central registry.  The CLI (`azurik-mod verify-patches`) and the GUI ([`gui/pages/patches.py`](../gui/pages/patches.py)) discover packs automatically — there is no hard-coded list to update when a new pack ships.
+
+Packs tagged **c-shim** are backed by compiled C code from the [`shims/`](../shims/) tree rather than hand-assembled bytes.  See [docs/SHIMS.md](SHIMS.md) for the authoring workflow.
 
 | Pack                 | Sites | Default-on | Tags                | Module |
 |----------------------|-------|------------|---------------------|--------|
@@ -8,7 +10,7 @@ Each pack is a module under [`azurik_mod/patches/`](../azurik_mod/patches/) that
 | `qol_gem_popups`     | 0     | no         | qol                 | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
 | `qol_other_popups`   | 0     | no         | qol                 | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
 | `qol_pickup_anims`   | 1     | no         | qol                 | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
-| `qol_skip_logo`      | 1     | no         | qol                 | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
+| `qol_skip_logo`      | 1     | no         | qol, c-shim         | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
 | `player_physics`     | 3     | no         | player, physics     | [azurik_mod/patches/player_physics.py](../azurik_mod/patches/player_physics.py) |
 
 ---
@@ -88,25 +90,32 @@ Hides the remaining non-gem first-time / milestone / tutorial popups — the swi
 
 Skips the short celebration animation that plays after picking up an item.  Implementation: replaces the first instruction of the non-gem pickup handler's animation block with a `JMP` to its epilog at VA 0x4146F (file offset 0x313EE, 5 bytes).  The "collected" flag and save-list update still run, so picked-up items remain collected and saves stay consistent.  Supersedes the earlier OBSIDIAN_ANIM + FIST_PUMP pair that could drop state.
 
-### `qol_skip_logo` (opt-in: `--skip-logo`)
+### `qol_skip_logo` (opt-in: `--skip-logo`)  *(C-shim)*
 
 Skips the unskippable Adrenium logo movie that plays when the game first boots, cutting launch time noticeably.  The intro prophecy cutscene that plays immediately after is deliberately left alone.
 
-Implementation: NOPs the 10-byte `PUSH &"AdreniumLogo.bik"; CALL play_movie_fn` instruction pair at VA 0x05F6E0 (file offset 0x04F6E0).
+**Phase 1 implementation (C-shim).**  A `TrampolinePatch` replaces the 10-byte `PUSH &"AdreniumLogo.bik"; CALL play_movie_fn` pair at VA 0x05F6E0 with `CALL rel32` into a compiled C function ([`shims/src/skip_logo.c`](../shims/src/skip_logo.c) — a single `return;` that compiles to one `RET` byte).  The remaining 5 bytes at the site are NOP-padded.  The shim lands in 16 bytes of VA-gap headroom just past `.text` (file offset 0x0F01D0, VA 0x001001D0); the XBE's `.text` section header is grown by 1 byte so the Xbox loader maps the new byte executable.
 
 ```
-BEFORE (10 B):
-  0x05F6E0: 68 50 E1 19 00     PUSH 0x0019E150   ; &"AdreniumLogo.bik"
-  0x05F6E5: E8 96 92 FB FF     CALL play_movie_fn
+BEFORE (10 B at VA 0x05F6E0):
+  68 50 E1 19 00     PUSH 0x0019E150   ; &"AdreniumLogo.bik"
+  E8 96 92 FB FF     CALL play_movie_fn
 
-AFTER (10 B):
-  0x05F6E0: 90 90 90 90 90     NOP x5
-  0x05F6E5: 90 90 90 90 90     NOP x5
+AFTER (10 B at VA 0x05F6E0):
+  E8 .. .. .. ..     CALL rel32 → 0x1001D0   ; shim in grown .text
+  90 90 90 90 90     NOP x5
+
+INJECTED SHIM (1 B at VA 0x001001D0):
+  C3                 RET
 ```
 
-Control falls straight through to the `prophecy.bik` call at VA 0x05F73F, which is untouched.  Stack is balanced: both the `PUSH` and its matching `CALL` (the `CALL` pops its own return address via `RET`) are replaced, so stack state is identical to vanilla.  The `AdreniumLogo.bik` string at file offset 0x196DB0 is left intact, keeping the `.rdata` section pristine for the whitelist-diff check in `verify-patches --strict`.
+The CALL returns to `0x05F6E5`, control then falls through NOPs into the `prophecy.bik` call at VA 0x05F73F — same landing point as the legacy NOP form.  The `AdreniumLogo.bik` string at file offset 0x196DB0 is left intact, keeping the `.rdata` section clean.  `verify-patches --strict` absorbs the trampoline, the shim landing pad, and the grown `.text` section-header fields into its whitelist.
 
-The adjacent call to `prophecy.bik` uses the same pattern at VA 0x05F73F / file offset 0x04F73F.  Adding a parallel `qol_skip_prophecy` pack is a trivial follow-up if you want it — just another 10-byte `PatchSpec`.
+**Escape hatch.**  Set `AZURIK_SKIP_LOGO_LEGACY=1` before applying to use the original 10-NOP byte patch instead.  Useful if the i386 PE-COFF toolchain (clang + `-target i386-pc-win32`) isn't available on the build host.
+
+**Why a C shim for a one-byte `RET`?** Phase 1 deliberately picks the smallest possible migration to prove the pipeline end-to-end: COFF parse, landing-pad discovery, `.text` section growth, trampoline emission, verify round-trip.  See [docs/SHIMS.md](SHIMS.md) for the full authoring workflow and Phase 2 roadmap.
+
+The adjacent call to `prophecy.bik` uses the same pattern at VA 0x05F73F / file offset 0x04F73F.  Adding a parallel `qol_skip_prophecy` pack is a trivial follow-up — either another TrampolinePatch or the old PatchSpec form.
 
 ### Player character swap (`--player-character <name>`)
 

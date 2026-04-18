@@ -1,0 +1,3 @@
+# Compiled shim outputs — not tracked.
+build/
+*.o
