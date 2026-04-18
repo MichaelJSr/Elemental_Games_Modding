@@ -148,7 +148,7 @@ Replaces the `garret4` string at file offset 0x1976C8 with an arbitrary ≤11-ch
 
 ## `player_physics`
 
-Slider-driven player physics.  Currently exposes one working slider (world gravity); walk / run speed sliders were removed pending Phase 2 investigation.
+Three sliders, all patching `default.xbe` directly: **world gravity**, **player walk speed**, **player run speed**.  Phase 2 C1 brought walk and run speed back after discovering that the earlier `config.xbr`-based approach was writing to dead data; the new implementation patches the actual player-movement code path and is verified end-to-end.
 
 ### Gravity (`--gravity M_PER_S2`)
 
@@ -156,33 +156,55 @@ Slider-driven player physics.  Currently exposes one working slider (world gravi
 - Range `0.0 … 100.0` m/s² (weightless through ~10× Earth).
 - Global — affects the player, enemies that fall, and projectile arcs.  Two other `9.8f` constants at `0x198704` and `0x198740` are unrelated (camera / animation scalars) and remain untouched.
 - `--gravity 9.8` produces a byte-identical XBE so the `verify-patches --strict` whitelist diff stays clean.
-- GUI: exact-value entry field next to the slider for precise tuning (e.g. `--gravity 12.34`).
+- GUI: exact-value entry field next to the slider for precise tuning.
 
-### Walk speed / run speed (removed from GUI, CLI flags retained)
+### Walk speed / run speed (`--walk-speed X`, `--run-speed X`)
 
-Earlier versions exposed `--player-walk-scale` / `--player-run-scale` sliders targeting garret4's `walkSpeed` / `runSpeed` cells in `config.xbr`'s `attacks_transitions` section.  Ghidra analysis showed those cells are **dead data at runtime**:
+The player-movement formula in `FUN_00085f50` (called per-frame from the player tick `FUN_0008c230`) computes:
 
-- The engine's only code that looks up `walkSpeed` by name is `FUN_00049480` (the entity loader), which does the lookup against `critters_critter_data` (section offset `0x01A000`) — a table that does not have a `walkSpeed` row.  `FUN_000d1420` returns `-1`, `FUN_000d1520` returns the default `1.0`, and every entity's `piVar9[0xe]` slot is `1.0` regardless of what's in `attacks_transitions`.
-- `attacks_transitions` IS loaded elsewhere (`FUN_0007e7c0`), but only for attack-chain metadata (`last move`, `button`, `touch`, `damage type`, `next move`) — the speed cells are never read.
-- Conclusion: patching `attacks_transitions.garret4.walkSpeed` has no observable in-game effect.  The real player movement speed is encoded elsewhere (likely a hardcoded `.text`/`.rdata` float or animation-timing constant).
+```
+velocity = base_speed × magnitude × direction_vec
+  base_speed        = [entity->runSpeed at +0x40]   (= 1.0; "dead data" default)
+  magnitude         = stick_magnitude × (3.0 when running, else 1.0)
+  3.0 multiplier    = float at VA 0x001A25BC (SHARED — 45 other read sites!)
+```
 
-The `apply_player_speed` helper and the CLI flags stay in the tree so that, once the real storage location is found, re-enabling them is a one-line registration change on `PLAYER_PHYSICS_SITES`.  Until then, the Patches page does NOT render sliders for these.
+Naively patching `0x001A25BC` would change collision, AI, audio, and many other systems.  Instead we inject **per-player** float constants and rewrite the two player-site instructions to reference them:
+
+- VA `0x85F62` (6 bytes): `MOV EAX,[EBP+0x34]; FLD [EAX+0x40]` → `FLD [<our walk-speed VA>]`.
+  - The new float defaults to `1.0 × walk_scale`.  Player walking velocity becomes `walk_scale × stick × direction` — leaving the always-1.0 entity-struct field unused.
+- VA `0x849E4` (6 bytes): `FMUL [0x001A25BC]` → `FMUL [<our run-multiplier VA>]`.
+  - The new float defaults to `3.0 × run_scale`.  Only the **player movement** FMUL is redirected; the shared 3.0 constant at `0x001A25BC` stays untouched so all 45 other systems keep their vanilla behaviour.
+
+The two injected floats land via the Phase 2 A1 shim-landing infrastructure: preferably the 16-byte trailing `.text` VA-gap, falling back to an appended `SHIMS` section when the gap is full.  `verify-patches --strict` knows how to resolve the VAs in the rewritten `FLD`/`FMUL` instructions back to file offsets (via `PatchPack.dynamic_whitelist_from_xbe`) so the diff stays clean.
+
+Semantics of the sliders:
+
+- `walk_scale = 2.0, run_scale = 1.0` → walking and running both 2× faster, same run/walk ratio.
+- `walk_scale = 1.0, run_scale = 2.0` → walking unchanged, running 2× faster.
+- `walk_scale = 2.0, run_scale = 2.0` → walking 2×, running 4× (both multipliers compound).
+
+Both default to `1.0 ⇒` byte-identical behaviour to vanilla.  Range `0.1 … 10.0`.
 
 ### CLI
 
 ```bash
-# Gravity only (works)
-azurik-mod apply-physics --iso iso/Azurik.iso --output iso/low_grav.iso \
+# Just gravity
+azurik-mod apply-physics --iso iso/Azurik.iso --output iso/lowgrav.iso \
     --gravity 4.9
 
-# Roll gravity into a full randomize-full build
+# Turbo mode
+azurik-mod apply-physics --xbe default.xbe \
+    --walk-speed 1.5 --run-speed 3.0
+
+# Roll everything into a full randomize-full build
 azurik-mod randomize-full --iso iso/Azurik.iso --output out.iso \
-    --seed 42 --gravity 7.0
+    --seed 42 --gravity 7.0 --player-walk-scale 1.2 --player-run-scale 1.5
 ```
 
 ### GUI
 
-The Patches page renders the gravity `ParametricSlider` under the `player_physics` section.  Slider values live on `AppState.pack_params["player_physics"]` and are forwarded to `cmd_randomize_full` by `gui/backend.run_randomizer`.
+The Patches page renders all three `ParametricSlider` widgets under the `player_physics` section.  Slider values live on `AppState.pack_params["player_physics"]` and are forwarded to `cmd_randomize_full` / `cmd_apply_physics` by `gui/backend.run_randomizer`.
 
 ---
 

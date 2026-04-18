@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+### C-shim modding platform (Phase 2 C1 — player-speed shim, first real deliverable)
+
+- **Walk-speed and run-speed sliders are back** on the Patches page.
+  The earlier attempt wrote to `config.xbr`'s `attacks_transitions`
+  cells, which Ghidra later showed were dead data at runtime.  C1
+  replaces that with a direct `default.xbe` patch at the real
+  per-frame player-movement call site (`FUN_00085f50`):
+  * VA `0x85F62` (`MOV EAX,[EBP+0x34]; FLD [EAX+0x40]`, 6 B) rewritten
+    to `FLD [<injected walk-speed VA>]` — the base speed loaded each
+    frame now comes from a per-game float instead of the dead
+    `entity->runSpeed` field.
+  * VA `0x849E4` (`FMUL [0x001A25BC]`, 6 B) rewritten to
+    `FMUL [<injected run-multiplier VA>]` — the 3.0 constant at
+    `0x001A25BC` has **45** other read sites (collision, AI, audio,
+    etc.), so the patch injects a per-player copy rather than
+    mutating the shared one.
+  * Both floats land via the Phase 2 A1 shim-landing infrastructure
+    (`.text` trailing-padding gap preferred, `SHIMS` appended section
+    fallback).  Defaults `walk_scale = run_scale = 1.0` are
+    byte-identical to vanilla.
+- **`PatchPack.dynamic_whitelist_from_xbe`** — new optional
+  callback on `PatchPack` that computes extra whitelist ranges from
+  the patched XBE bytes at verify time.  Powers
+  `verify-patches --strict` for packs whose apply function emits
+  patches at apply-time-chosen addresses (the injected float VAs).
+  `cmd_verify_patches` invokes the callback and merges its ranges
+  into the whitelist diff alongside the static contributions.
+- **`apply_player_speed(xbe_data, walk_scale, run_scale)`** now
+  operates on the XBE directly (was config.xbr).  The CLI flags
+  `--walk-speed` / `--run-speed` on `apply-physics` and
+  `--player-walk-scale` / `--player-run-scale` on `randomize-full`
+  route through the new path.
+- **Tests (+11)** — `tests/test_player_speed.py` is rewritten end
+  to end: vanilla-site invariants, apply shape on a real XBE,
+  defaults-are-no-op, reapply rejection, gravity/speed cross-
+  independence, and the dynamic whitelist callback behaviour on
+  both vanilla and patched XBEs.  Full suite: 129 passing.
+- **Docs** — `docs/PATCHES.md` `player_physics` section fully
+  rewritten with the Ghidra walkthrough, instruction layouts, and
+  slider semantics.
+
 ### C-shim modding platform (Phase 2 A3 — vanilla-function calls)
 
 - **Shims can now call any registered vanilla Azurik function.**

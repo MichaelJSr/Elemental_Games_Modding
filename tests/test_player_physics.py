@@ -138,12 +138,17 @@ class ApplyPlayerPhysicsKwargs(unittest.TestCase):
         self.assertAlmostEqual(
             read_parametric_value(buf, GRAVITY_PATCH), 4.9, places=3)
 
-    def test_speed_kwargs_do_not_touch_xbe(self):
+    def test_speed_kwargs_do_not_touch_gravity_cell(self):
+        """Phase 2 C1 made walk/run scales XBE-targeting too, so
+        apply_player_physics now mutates default.xbe for all three
+        sliders.  What it must NOT do is mutate the gravity site as a
+        side effect of a speed-only call."""
         buf = self._make_xbe()
         apply_player_physics(buf, walk_scale=2.0, run_scale=2.0)
-        # XBE untouched — speed handled via apply_player_speed on characters.xbr
         self.assertEqual(verify_parametric_patch(buf, GRAVITY_PATCH),
-                         "default")
+                         "default",
+            msg="speed-only apply must not rewrite the gravity "
+                "ParametricPatch's bytes.")
 
 
 if __name__ == "__main__":

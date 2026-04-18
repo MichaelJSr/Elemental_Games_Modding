@@ -1132,25 +1132,27 @@ def cmd_randomize_full(args):
         else:
             print(f"\n[7/7] XBE patches — skipped (no patches opted in)")
 
-        # Step 7b: config.xbr edits for player speed sliders.  Unlike
-        # the plan's initial assumption, walkSpeed/runSpeed for garret4
-        # live in config.xbr's `attacks_transitions` keyed section, not
-        # characters.xbr.  We reuse the existing KeyedTable infra via
-        # apply_player_speed().
+        # Step 7b: Player walk / run speed.  Phase 2 C1 moved these
+        # from config.xbr (dead data) to direct XBE code-site patches.
+        # apply_player_speed injects two per-player float constants and
+        # rewrites the FLD at VA 0x85F65 + FMUL at VA 0x849E4 to
+        # reference them — see azurik_mod/patches/player_physics.py for
+        # the full rationale.  Because these patches target default.xbe
+        # they have to load the XBE we may have already written above,
+        # then re-save.  Small price for avoiding a dead-data slider.
         walk_scale = float(getattr(args, 'player_walk_scale', None) or 1.0)
         run_scale = float(getattr(args, 'player_run_scale', None) or 1.0)
         if walk_scale != 1.0 or run_scale != 1.0:
-            cfg_path = extract_dir / CONFIG_XBR_REL
-            if cfg_path.exists():
+            if xbe_path.exists():
                 print(f"\n  Modifying player speed "
                       f"(walk x{walk_scale}, run x{run_scale})...")
-                cdata = bytearray(cfg_path.read_bytes())
-                if apply_player_speed(cdata,
+                xbe_buf = bytearray(xbe_path.read_bytes())
+                if apply_player_speed(xbe_buf,
                                        walk_scale=walk_scale,
                                        run_scale=run_scale):
-                    cfg_path.write_bytes(cdata)
+                    xbe_path.write_bytes(xbe_buf)
             else:
-                print(f"\n  WARNING: {cfg_path} missing — "
+                print(f"\n  WARNING: {xbe_path} missing — "
                       f"skipping player speed patches")
 
         # Config.xbr patches (from --config-mod)
@@ -1421,6 +1423,17 @@ def cmd_verify_patches(args):
         for pack in all_packs():
             for lo, hi in pack.extra_whitelist_ranges:
                 allow_ranges.append((lo, hi))
+            # Dynamic ranges — packs whose apply function emits patches
+            # at addresses chosen at apply time (e.g. player_physics
+            # injects floats and rewrites FLD/FMUL refs to them).
+            if pack.dynamic_whitelist_from_xbe is not None:
+                try:
+                    for lo, hi in pack.dynamic_whitelist_from_xbe(
+                            bytes(patched)):
+                        allow_ranges.append((lo, hi))
+                except Exception as exc:  # noqa: BLE001
+                    print(f"  WARNING: dynamic_whitelist_from_xbe for "
+                          f"{pack.name!r} raised: {exc}")
 
         # Trampoline-specific whitelist contributions --------------------
         if trampoline_sites:
@@ -1523,10 +1536,11 @@ def cmd_apply_physics(args):
     """Apply the player_physics pack to an XBE / ISO in-place.
 
     Supports any combination of --gravity, --walk-speed, --run-speed.
-    Gravity rewrites a single float in default.xbe; walk/run speeds
-    edit characters.xbr.  When --iso is given, the ISO is unpacked,
-    patched, and repacked.  When --xbe / --characters are given, the
-    raw files are mutated in place (no ISO plumbing).
+    All three target ``default.xbe`` directly (Phase 2 C1 moved speed
+    sliders from config.xbr — dead data — to direct XBE code-site
+    patches; see azurik_mod/patches/player_physics.py).  When --iso is
+    given, the ISO is unpacked, patched, and repacked.  --xbe accepts
+    a raw XBE and applies everything in-place.
     """
     gravity = getattr(args, "gravity", None)
     walk_scale = float(getattr(args, "walk_speed", None) or 1.0)
@@ -1536,6 +1550,16 @@ def cmd_apply_physics(args):
         print("No physics changes requested.  "
               "Pass --gravity, --walk-speed, and/or --run-speed.")
         return
+
+    def _patch_xbe_in_place(xbe_path: Path) -> None:
+        data = bytearray(xbe_path.read_bytes())
+        apply_player_physics(
+            data,
+            gravity=float(gravity) if gravity is not None else None,
+            walk_scale=walk_scale if walk_scale != 1.0 else None,
+            run_scale=run_scale if run_scale != 1.0 else None,
+        )
+        xbe_path.write_bytes(data)
 
     iso_arg = getattr(args, "iso", None)
     if iso_arg:
@@ -1552,21 +1576,11 @@ def cmd_apply_physics(args):
             print(f"Unpacking {iso_path.name}...")
             run_xdvdfs(xdvdfs, ["unpack", str(iso_path), str(extract)])
 
-            if gravity is not None:
-                xbe = extract / "default.xbe"
-                if xbe.exists():
-                    data = bytearray(xbe.read_bytes())
-                    apply_player_physics(data, gravity=float(gravity))
-                    xbe.write_bytes(data)
-
-            if walk_scale != 1.0 or run_scale != 1.0:
-                cfg = extract / CONFIG_XBR_REL
-                if cfg.exists():
-                    cdata = bytearray(cfg.read_bytes())
-                    if apply_player_speed(cdata,
-                                           walk_scale=walk_scale,
-                                           run_scale=run_scale):
-                        cfg.write_bytes(cdata)
+            xbe = extract / "default.xbe"
+            if not xbe.exists():
+                print(f"ERROR: default.xbe missing from unpacked ISO")
+                sys.exit(1)
+            _patch_xbe_in_place(xbe)
 
             out_path.parent.mkdir(parents=True, exist_ok=True)
             print(f"Packing {out_path.name}...")
@@ -1579,37 +1593,17 @@ def cmd_apply_physics(args):
                 sys.exit(1)
         return
 
-    # Raw file mode (no ISO).
+    # Raw XBE mode (no ISO).
     xbe_arg = getattr(args, "xbe", None)
-    if gravity is not None:
-        if not xbe_arg:
-            print("ERROR: --gravity requires --xbe or --iso")
-            sys.exit(1)
-        xbe_path = Path(xbe_arg)
-        if not xbe_path.exists():
-            print(f"ERROR: XBE not found: {xbe_path}")
-            sys.exit(1)
-        data = bytearray(xbe_path.read_bytes())
-        apply_player_physics(data, gravity=float(gravity))
-        xbe_path.write_bytes(data)
-        print(f"  Wrote patched XBE: {xbe_path}")
-
-    cfg_arg = getattr(args, "config", None) or getattr(args, "characters", None)
-    if walk_scale != 1.0 or run_scale != 1.0:
-        if not cfg_arg:
-            print("ERROR: --walk-speed / --run-speed requires "
-                  "--config or --iso")
-            sys.exit(1)
-        cfg_path = Path(cfg_arg)
-        if not cfg_path.exists():
-            print(f"ERROR: config.xbr not found: {cfg_path}")
-            sys.exit(1)
-        cdata = bytearray(cfg_path.read_bytes())
-        if apply_player_speed(cdata,
-                               walk_scale=walk_scale,
-                               run_scale=run_scale):
-            cfg_path.write_bytes(cdata)
-            print(f"  Wrote patched config.xbr: {cfg_path}")
+    if not xbe_arg:
+        print("ERROR: apply-physics requires either --iso or --xbe")
+        sys.exit(1)
+    xbe_path = Path(xbe_arg)
+    if not xbe_path.exists():
+        print(f"ERROR: XBE not found: {xbe_path}")
+        sys.exit(1)
+    _patch_xbe_in_place(xbe_path)
+    print(f"  Wrote patched XBE: {xbe_path}")
 
 
 __all__ = [

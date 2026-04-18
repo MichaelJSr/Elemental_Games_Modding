@@ -71,6 +71,26 @@ class PatchPack:
     ``tuple((off, off + 1) for off in OFFSETS)`` for single-byte nulls.
     """
 
+    dynamic_whitelist_from_xbe: Callable[[bytes], list[tuple[int, int]]] | None = None
+    """Optional callback that computes extra whitelist ranges from the
+    patched XBE bytes themselves.
+
+    Used by packs whose apply function emits patches at addresses it
+    chose at apply time (e.g. the player-speed patch injects per-game
+    floats into dynamically-allocated locations, then rewrites two
+    instructions to reference them).  The callback is invoked by
+    ``verify-patches --strict`` with the patched XBE as input and
+    must return a list of ``(lo, hi)`` file-offset ranges covering
+    every byte the apply function could have touched beyond the
+    static ``extra_whitelist_ranges``.
+
+    Keep the callback pure (no side effects, reads only) and robust
+    against vanilla XBEs — it's called on EVERY pack for EVERY
+    verify-patches invocation, regardless of whether the user opted
+    into the pack or not.  If the pack's "has been applied?" check
+    fails, return an empty list.
+    """
+
     def patch_specs(self) -> list[PatchSpec]:
         """Return only the PatchSpec entries in this pack."""
         return [s for s in self.sites if isinstance(s, PatchSpec)]
