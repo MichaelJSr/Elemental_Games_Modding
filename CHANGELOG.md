@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+### C-shim modding platform (Phase 2 A1+A2 — headroom + relocations)
+
+- **Unbounded shim sizes** — `append_xbe_section` now implements
+  real XBE surgery: grows the section-header array in place (shifts
+  every post-array byte, rewrites the 7 image-header pointer fields
+  and 3 per-section pointers whose targets moved), places section
+  data at EOF with `FILE_ALIGN` / `VA_ALIGN` alignment, bumps
+  `num_sections`, `size_of_headers`, and `size_of_image`.  Phase 1's
+  16-byte `.text` VA-gap ceiling is gone — shims of any practical
+  size spill into a per-apply `SHIMS` section instead.
+- **Automatic landing strategy** — `apply._carve_shim_landing`
+  picks the least-invasive home for each shim: existing `.text`
+  slack first, then `.text` growth into the adjacent VA gap, then
+  a newly-appended `SHIMS` section.  Subsequent applies extend the
+  same `SHIMS` section in place rather than spawning new ones.
+- **Relocation-aware COFF loader** — `coff.layout_coff` parses
+  per-section relocation tables and applies `IMAGE_REL_I386_DIR32`
+  and `IMAGE_REL_I386_REL32` fixups after section placement, using
+  the resolved XBE VAs for each symbol's owning section.  Metadata
+  sections (`.debug$S`, `.llvm_addrsig`, `.drectve`, `.xdata`,
+  `.pdata`) are filtered out so they don't consume SHIMS space or
+  force bogus relocations.  Supports arbitrary shim section layouts
+  (`.text` + `.rdata` + `.data` + `.bss`), with cross-section
+  references resolved correctly.
+- **Auxiliary-record preservation** — the COFF symbol-table walker
+  now keeps aux records as placeholder entries so relocation
+  `symbol_index` values stay aligned with the raw on-disk table.
+- **Section-name long-form support** — `/NN` encoding used by clang
+  for section names >= 8 chars is now resolved (previously left as
+  a literal `"/29"`-style placeholder).
+- **Trampoline apply pipeline** picks the right loader path
+  automatically: zero-relocation shims stay on the minimal
+  `extract_shim_bytes` fast path; anything with relocations goes
+  through `layout_coff` + in-place overwrite of placeholder bytes.
+- **Tests (+19)** — `tests/test_append_xbe_section.py` (11) covers
+  the header-shift round-trip, pointer-fixup regression guards, and
+  the `_carve_shim_landing` fallback.  `tests/test_coff_relocations.py`
+  (8) compiles a real reloc-bearing shim (`shims/src/_reloc_test.c`)
+  on demand and verifies every DIR32 / REL32 field is written with
+  the resolved VA.  113 total tests passing.
+
 ### Patches
 
 - `player_physics` walk/run speed sliders removed from the Patches

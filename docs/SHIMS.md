@@ -125,27 +125,44 @@ Idempotence: if the pipeline sees an already-installed trampoline at
 the site (same opcode shape, trailing NOPs) it leaves everything
 alone instead of stacking a second trampoline.
 
-## Limitations (Phase 1)
+## Capabilities (Phase 2 A1+A2)
 
-The Phase 1 implementation is deliberately narrow:
+Once Phase 2 lands:
 
-- **Landing space is capped at Azurik's trailing VA gap** — 16 bytes
-  in vanilla.  Shims larger than that fail cleanly at apply time
-  with a "shrink the shim or split it" error.  Phase 2 will add
-  `append_xbe_section()` to grow the XBE when 16 bytes isn't enough.
-- **Relocations are rejected**.  A shim's `.text` section must carry
-  zero relocation entries.  The parser refuses anything else so we
-  can't silently corrupt jump / data references.  Phase 2 will add
-  `IMAGE_REL_I386_*` rewriting.
-- **No cross-shim calls**.  Each shim is independent; Phase 2 will
-  introduce an `azurik.h` surface for calling into vanilla game
-  functions by VA.
+- **Unbounded shim size.**  Shims that outgrow the 16-byte `.text`
+  VA gap automatically spill into a freshly-appended executable
+  section (`SHIMS`).  `append_xbe_section` grows the section-header
+  array in place, shifts the post-array header content, and rewrites
+  every VA pointer in the image header that now references a shifted
+  byte.  Azurik's ~880-byte header-to-.text VA headroom gives us
+  comfortable room for the 56-byte header-entry growth.
+- **Relocations.**  Shims can reference globals (`DIR32`) and call
+  each other (`REL32`) — `layout_coff` walks each landable section's
+  relocation table after placement and rewrites the fields to the
+  final XBE VAs chosen for each symbol's owning section.  Unsupported
+  relocation types raise cleanly.
+- **Sidecar sections.**  Shims with `.rdata` / `.data` / `.bss` get
+  each section landed independently into the SHIMS region, with
+  cross-section relocations resolved correctly.  Metadata sections
+  (`.debug$S`, `.llvm_addrsig`, `.drectve`, ...) are filtered out.
+
+## Limitations (still)
+
+- **No cross-shim calls between different `TrampolinePatch` sites**.
+  Each `apply_trampoline_patch` invocation gets its own placement
+  pass; two sites that want to share a helper function would each
+  install a private copy.  A shared-library layout pass is Phase 3.
+- **No calls into vanilla game functions**.  `layout_coff` raises on
+  undefined externals.  Phase 2 A3 (not yet landed) will add a thunk
+  mechanism: vanilla function VAs declared in `shims/include/azurik.h`
+  get per-function `JMP rel32 -> vanilla_va` stubs injected into the
+  SHIMS section, and shim relocations are resolved against them.
 - **No kernel / D3D imports**.  Shims can't call `XKernel*` or
-  `D3D*` routines yet — Phase 2 work.
-- **Escape hatch preserved**.  The legacy 10-NOP form of every
-  migrated patch stays in the source tree behind an env var
-  (`AZURIK_SKIP_LOGO_LEGACY=1`).  If the shim path ever misbehaves,
-  users can ship the byte-level version without a code change.
+  `D3D*` routines — the XBE import-table rewrite is Phase 2 D work.
+- **Escape hatch preserved**.  The legacy byte-patch form of every
+  migrated pack stays behind an env var (`AZURIK_SKIP_LOGO_LEGACY=1`
+  etc.) so users on a host without the i386 clang toolchain can
+  still ship a patched XBE.
 
 ## Troubleshooting
 
