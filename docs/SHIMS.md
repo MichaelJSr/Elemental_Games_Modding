@@ -287,3 +287,115 @@ docs/
   SHIMS.md                      this file
   PATCHES.md                    catalog with shim-backed entries called out
 ```
+
+
+## Platform status / roadmap
+
+Snapshot of what's done, deferred, and up-for-grabs.  Update this
+table whenever a tier lands or a new candidate becomes concrete.
+
+| ID  | Tier                                                   | Status            |
+|-----|--------------------------------------------------------|-------------------|
+| A1  | `append_xbe_section` (unbounded shim size)             | **done**          |
+| A2  | Relocation-aware COFF loader                           | **done**          |
+| A3  | Vanilla-function calls (registry + layout resolution)  | **done**          |
+| B1  | `azurik.h` populated with named structs + drift asserts| **done** (this pass re-verified every offset against Ghidra) |
+| B3  | `new_shim.sh` scaffolding                              | **done**          |
+| C1  | Player-speed shim (motivating deliverable)             | **done**          |
+| B2  | Unicorn-backed runtime test harness for shims          | **deferred**      |
+| C-jump | Player jump-velocity patch (requested separately)   | **not started**   |
+| D1  | XKernel / D3D import-table rewriting                   | **not started**   |
+| D2  | NXDK integration (real Xbox SDK headers)               | **not started**   |
+| E   | Shared-library shim layout across multiple sites       | **not started**   |
+
+### Near-term candidates
+
+1. **Jump-velocity patch (Phase 3, feature shim).**  Already
+   requested.  Ghidra investigation: find the jump-button handler,
+   locate the write to the player's velocity-Z that starts a jump,
+   check whether the impulse is a `.rdata` constant (direct patch)
+   or a hardcoded immediate (needs code-byte patching or a shim).
+   The `PlayerInputState` / `CritterData` struct definitions are
+   now ready; all that's missing is the specific call site.
+
+2. **Skip `prophecy.bik` (Phase 3, feature shim).**  Same shape as
+   `skip_logo` but targeting the second movie in the boot state
+   machine.  Declare a new `qol_skip_prophecy` pack that hooks at
+   `BOOT_STATE_PLAY_PROPHECY` (see `AZURIK_BOOT_STATE_VA` in
+   `azurik.h`) — fastest shim to write as a second real C-shim
+   example.
+
+3. **Camera distance / FOV patch (Phase 3, feature shim).**
+   Requires a short Ghidra pass to find the camera-projection
+   setup.  Likely a `.rdata` float analogous to gravity — so most
+   likely a simple `ParametricPatch`, not a shim.  Quick win.
+
+### Mid-term / infrastructural
+
+1. **Unicorn-backed test harness (B2).**  Landed as "deferred" so
+   far because no shim has nontrivial logic that justifies the
+   dependency (capstone + unicorn is ~15 MB).  Revisit when a shim
+   with real state (e.g. a cheat system that tracks toggles across
+   frames) wants unit tests of its runtime behaviour.
+
+2. **Expand `azurik_vanilla.h` as demand arises.**  Currently
+   exposes `play_movie_fn` + `poll_movie` (both `__stdcall`).
+   Functions we've touched in Ghidra but haven't exposed:
+   - `FUN_00085700` — gravity integration (`__fastcall`, trivial).
+   - `FUN_0004b510` — entity registry lookup (`__fastcall`).
+   - `FUN_000d1420` / `FUN_000d1520` — config-table row / cell
+     lookup (`__thiscall`; needs naked-asm wrappers, so deferred).
+   Add entries as concrete shims need them, not speculatively.
+
+3. **`ControllerState` struct in `azurik.h`.**  The per-player input
+   state at `DAT_0037BE98 + player_idx * 0x54` holds stick X/Y,
+   button flags, and trigger pressures.  Would unlock shims that
+   rebind controls, add combo moves, etc.  Deferred until the
+   first such shim is requested.
+
+### Long-term (Phase 2D / NXDK)
+
+1. **Kernel / D3D import-table rewriting (D1).**  Shims can't
+   currently call `XKernel*` / `D3D*` routines directly — every
+   such API access has to go through a vanilla Azurik function
+   that wraps it (via A3's vanilla-symbol registry).  Phase 2D
+   extends the XBE import-table at apply time so shims can declare
+   `extern __stdcall int XGetDeviceEnumerationStatus(void);` and
+   have it resolve at load time.
+
+2. **NXDK integration (D2).**  Real Xbox Development Kit headers
+   (`<xkernel.h>`, `<d3d8.h>`, etc.) for shims that want to do
+   anything substantial on their own.  Pairs with D1.  Big
+   toolchain change — only worth it once several shims want Xbox
+   APIs.
+
+3. **Shared-library shim layout (E).**  Today each
+   `TrampolinePatch` apply places its own copy of every section
+   from the shim's `.o`.  If two sites call the same helper
+   function they each install a private copy.  Phase E introduces
+   a shared-library landing pass so common shim code is laid out
+   once and all apply-time call sites link against the same
+   placement.
+
+### Ground rules for adding new fields / structs to `azurik.h`
+
+- **Verify every offset against Ghidra** before naming it.  The
+  pass that shipped B1 had five wrongly-named `CritterData` fields
+  (the `ouch*_threshold` / `ouch*_knockback` row) because they were
+  named from memory instead of cross-checked against the decomp.
+  Always grep the decomp for the `FUN_000d1420("<name>")` lookup
+  that precedes the `piVar9[N] = ...` write; if the config-key
+  string doesn't appear, mark the field `_reservedNN` or
+  `(speculative)` in a comment.
+
+- **Add a matching `_Static_assert`** at the bottom of
+  `azurik.h` for every new named field that sits past an
+  unnamed gap.  A probe that checks the offset at test time is
+  not enough — drift should fail AT COMPILE TIME so shims don't
+  silently miscompile when someone reorders the struct.
+
+- **Prefer byte-typed fields for booleans** that the engine
+  writes as `*(bool *)(base + N)` (see `use_center_basis`,
+  `hits_through_walls`).  Stuffing them inside `u32 flags`
+  surfaces the same offset but loses single-byte load/store
+  semantics.

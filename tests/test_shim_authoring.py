@@ -60,7 +60,7 @@ class AzurikHeaderStructOffsets(unittest.TestCase):
         "stick_magnitude":   0x1C,
         "flags":             0x20,
         "dead":              0x21,
-        "position_x":        0x24,
+        "ref_x":             0x24,
         "critter_data":      0x34,
         "direction_angle":   0x120,
         "magnitude":         0x124,
@@ -69,10 +69,24 @@ class AzurikHeaderStructOffsets(unittest.TestCase):
         "direction_z":       0x130,
     }
     EXPECTED_CRITTER_OFFSETS = {
-        "walk_speed": 0x38,
-        "run_speed":  0x40,
-        "scale":      0x24,
-        "collision_radius": 0x18,
+        "collision_radius":  0x18,
+        "scale":             0x24,
+        "walk_speed":        0x38,
+        "run_speed":         0x40,
+        # Correctness regression guard: these four were misnamed in
+        # the first Tier-B cut (as damage_multiplier / hitpoints /
+        # damage_vuln_*).  Pin the correct names at their correct
+        # offsets so any future rename drift fails the test.
+        "ouch2_threshold":   0x48,
+        "ouch3_threshold":   0x4C,
+        "ouch1_knockback":   0x50,
+        "ouch2_knockback":   0x54,
+        "ouch3_knockback":   0x58,
+        # Byte-typed fields previously buried in _reserved slots.
+        "hits_through_walls": 0x7C,
+        # Gameplay fields with correct Ghidra-verified offsets.
+        "drown_time":        0x80,
+        "shadow_size":       0x94,
     }
 
     def _compile_probe(self, source: str) -> bytes:
