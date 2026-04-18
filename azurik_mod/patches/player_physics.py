@@ -1,19 +1,18 @@
-"""Player physics patch pack — gravity and player-speed sliders.
+"""Player physics patch pack — gravity slider.
 
-Phase 1: gravity slider.  The game integrates gravity in `FUN_00085700`
-via `v_z' = v_z - g * dt`, and every call site passes the .rdata float
-at VA 0x1980A8 (baseline 9.8 m/s^2).  Overwriting that single float
-scales world gravity.  It affects enemies and projectiles too since it
-is one global constant — documented in docs and the GUI tooltip.
+Gravity: `.rdata` float at VA 0x1980A8 (baseline 9.8 m/s^2).  The
+engine integrates gravity in `FUN_00085700` via `v_z' = v_z - g*dt`,
+reading this one global — so overwriting it scales world gravity for
+everything that falls (player, enemies, projectiles).
 
-Phase 2: walk / run speed sliders.  The player's `walkSpeed` and
-`runSpeed` live in the `attacks_transitions` keyed-table section of
-config.xbr (section offset 0x8000), with garret4 as column 25.  The
-initial plan assumed characters.xbr; direct byte inspection showed
-`walkSpeed`/`runSpeed` strings only occur in config.xbr, so Phase 2
-edits those cells in config.xbr before repack without touching the
-XBE.  Both sliders are modelled as virtual ParametricPatch entries so
-the GUI renders the same slider widget.
+Player walk/run speed (disabled):  The `walkSpeed` / `runSpeed` cells
+in `config.xbr`'s `attacks_transitions` section are **dead data** —
+the engine's only `walkSpeed` string xref is `FUN_00049480`, which
+does the lookup against `critters_critter_data` (a table that lacks
+that row), so `FUN_000d1520` always returns the default `1.0`.
+Patching `attacks_transitions` has no in-game effect.  The
+`apply_player_speed` helper is kept for a future Phase 2 fix, but
+the sliders are no longer registered on the Patches page.
 """
 
 from __future__ import annotations
@@ -40,8 +39,12 @@ GRAVITY_PATCH = ParametricPatch(
     size=4,
     original=struct.pack("<f", GRAVITY_BASELINE),
     default=GRAVITY_BASELINE,
-    slider_min=0.98,    # 0.1x — moon
-    slider_max=29.4,    # 3.0x — heavy
+    # Full expressive range: 0.0 (no gravity, float-through-air) up
+    # to 100.0 m/s^2 (~10x Earth — enemies slam the floor instantly).
+    # The slider widget is paired with an exact-value entry for
+    # precise tuning anywhere in this range.
+    slider_min=0.0,
+    slider_max=100.0,
     slider_step=0.1,
     unit="m/s^2",
     encode=lambda g: struct.pack("<f", float(g)),
@@ -50,18 +53,28 @@ GRAVITY_PATCH = ParametricPatch(
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 — player speed (virtual sliders; consumed by apply_player_speed)
+# Player-speed sliders (DISABLED pending Phase 2)
 # ---------------------------------------------------------------------------
 #
-# These two patches are "virtual" — they have va=0 / size=0 so the generic
-# apply/verify helpers no-op.  The real mutation happens in
-# `apply_player_speed(config_xbr_bytes, walk_scale, run_scale)` from
-# the randomize-full pipeline.  Exposing them as ParametricPatch keeps
-# the GUI slider code uniform (one widget class, one registry surface).
+# These patches target `walkSpeed` / `runSpeed` cells in config.xbr's
+# `attacks_transitions` section.  Ghidra analysis (FUN_00049480 +
+# FUN_0007e7c0) shows the engine never reads those cells as movement
+# speeds — the `walkSpeed` string has a single xref, and the
+# containing lookup runs against `critters_critter_data` which does
+# not carry a `walkSpeed` row.  So patching these cells has NO
+# observable in-game effect.  The sliders therefore do not register
+# on the Patches page.  The `apply_player_speed` helper below stays
+# in place because:
+#   - It is still exposed via the CLI (`--player-walk-scale`,
+#     `--player-run-scale`) for tooling / experimentation.
+#   - The byte-level cell writer is correct; a Phase 2 rewrite only
+#     needs to find the REAL player-speed storage (likely a hardcoded
+#     .rdata float or an animation-timing constant) and point the
+#     apply function at it.
 
 WALK_SPEED_SCALE = ParametricPatch(
     name="walk_speed_scale",
-    label="Player walk speed",
+    label="Player walk speed (disabled)",
     va=0,
     size=0,
     original=b"",
@@ -76,7 +89,7 @@ WALK_SPEED_SCALE = ParametricPatch(
 
 RUN_SPEED_SCALE = ParametricPatch(
     name="run_speed_scale",
-    label="Player run speed",
+    label="Player run speed (disabled)",
     va=0,
     size=0,
     original=b"",
@@ -195,26 +208,22 @@ def apply_player_speed(
 # Registry
 # ---------------------------------------------------------------------------
 
-PLAYER_PHYSICS_SITES = [
-    GRAVITY_PATCH,
-    WALK_SPEED_SCALE,
-    RUN_SPEED_SCALE,
-]
+PLAYER_PHYSICS_SITES = [GRAVITY_PATCH]
+"""Registered Patches-page sites.  Walk/run speed are intentionally
+excluded until a working storage location is found (see module docstring).
+The WALK_SPEED_SCALE / RUN_SPEED_SCALE descriptors remain exported so
+CLI flags and future machinery can still reference them."""
 
 
 def _apply_defaults(xbe_data: bytearray) -> None:
     """Default pack apply — noop at baseline.  The real work happens via
-    apply_player_physics(..., gravity=...) / apply_player_speed(...)
-    from the randomize-full pipeline."""
+    apply_player_physics(..., gravity=...) from the randomize-full
+    pipeline."""
 
 
 register_pack(PatchPack(
     name="player_physics",
-    description=(
-        "Adjust player movement and world gravity with the sliders "
-        "below.  Gravity is world-wide — it also affects enemies and "
-        "projectiles.  Walk and run speed affect only the player."
-    ),
+    description="Scales world gravity (affects everything that falls).",
     sites=PLAYER_PHYSICS_SITES,
     apply=_apply_defaults,
     default_on=False,

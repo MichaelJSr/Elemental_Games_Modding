@@ -42,9 +42,10 @@ class GravityPatchShape(unittest.TestCase):
             decoded = GRAVITY_PATCH.decode(encoded)
             self.assertAlmostEqual(decoded, g, places=3)
 
-    def test_slider_range_covers_tenth_to_3x(self):
-        self.assertAlmostEqual(GRAVITY_PATCH.slider_min, 9.8 * 0.1, places=3)
-        self.assertAlmostEqual(GRAVITY_PATCH.slider_max, 9.8 * 3.0, places=3)
+    def test_slider_range_spans_weightless_to_extreme(self):
+        """Wide enough for weightless (0.0) through crushing 10x Earth."""
+        self.assertAlmostEqual(GRAVITY_PATCH.slider_min, 0.0, places=3)
+        self.assertAlmostEqual(GRAVITY_PATCH.slider_max, 100.0, places=3)
 
 
 class ApplyVerifyRoundtrip(unittest.TestCase):
@@ -86,13 +87,13 @@ class ApplyRejectsOutOfRange(unittest.TestCase):
         self.buf[off:off + 4] = GRAVITY_PATCH.original
 
     def test_below_minimum_refused(self):
-        self.assertFalse(apply_parametric_patch(self.buf, GRAVITY_PATCH, 0.1))
-        # Bytes unchanged
+        # Range now starts at 0.0, so anything negative must still be rejected.
+        self.assertFalse(apply_parametric_patch(self.buf, GRAVITY_PATCH, -1.0))
         off = GRAVITY_PATCH.file_offset
         self.assertEqual(bytes(self.buf[off:off + 4]), GRAVITY_PATCH.original)
 
     def test_above_maximum_refused(self):
-        self.assertFalse(apply_parametric_patch(self.buf, GRAVITY_PATCH, 100.0))
+        self.assertFalse(apply_parametric_patch(self.buf, GRAVITY_PATCH, 200.0))
         off = GRAVITY_PATCH.file_offset
         self.assertEqual(bytes(self.buf[off:off + 4]), GRAVITY_PATCH.original)
 

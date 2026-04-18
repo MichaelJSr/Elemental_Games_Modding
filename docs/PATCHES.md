@@ -11,7 +11,7 @@ Packs tagged **c-shim** are backed by compiled C code from the [`shims/`](../shi
 | `qol_other_popups`   | 0     | no         | qol                 | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
 | `qol_pickup_anims`   | 1     | no         | qol                 | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
 | `qol_skip_logo`      | 1     | no         | qol, c-shim         | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
-| `player_physics`     | 3     | no         | player, physics     | [azurik_mod/patches/player_physics.py](../azurik_mod/patches/player_physics.py) |
+| `player_physics`     | 1     | no         | player, physics     | [azurik_mod/patches/player_physics.py](../azurik_mod/patches/player_physics.py) |
 
 ---
 
@@ -148,38 +148,41 @@ Replaces the `garret4` string at file offset 0x1976C8 with an arbitrary ≤11-ch
 
 ## `player_physics`
 
-Slider-driven player physics tweaks.  Every slider is declared as a `ParametricPatch`, so the same descriptor drives both the CLI flags and the GUI sliders.
+Slider-driven player physics.  Currently exposes one working slider (world gravity); walk / run speed sliders were removed pending Phase 2 investigation.
 
 ### Gravity (`--gravity M_PER_S2`)
 
 - VA `0x1980A8`, 4-byte float (file offset `0x190D08`).  Baseline bytes `CD CC 1C 41` = `9.8f`.
-- Range `0.98 … 29.4` m/s² (0.1× to 3.0× baseline).
-- Global — affects enemy falls and projectile arcs too.  Two other `9.8f` constants at `0x198704` and `0x198740` are unrelated (camera / animation scalars) and remain untouched.
-- `--gravity 9.8` produces a byte-identical XBE so the whitelist diff stays clean.
+- Range `0.0 … 100.0` m/s² (weightless through ~10× Earth).
+- Global — affects the player, enemies that fall, and projectile arcs.  Two other `9.8f` constants at `0x198704` and `0x198740` are unrelated (camera / animation scalars) and remain untouched.
+- `--gravity 9.8` produces a byte-identical XBE so the `verify-patches --strict` whitelist diff stays clean.
+- GUI: exact-value entry field next to the slider for precise tuning (e.g. `--gravity 12.34`).
 
-### Walk speed (`--player-walk-scale X`) and run speed (`--player-run-scale X`)
+### Walk speed / run speed (removed from GUI, CLI flags retained)
 
-- Both are multiplicative scales on garret4's baseline values in `config.xbr`'s `attacks_transitions` keyed-table section (column 25).
-  - `walkSpeed` cell at file offset `0x00CECC` (double payload at `0x00CED4`, baseline 5.0).
-  - `runSpeed` cell at file offset `0x00CEEC` (double payload at `0x00CEF4`, baseline 7.0).
-- Range `0.25 … 3.0`×, default `1.0×` (no-op, byte-identical).
-- Only garret4 is scaled — `walkAnimSpeed` / `runAnimSpeed` and every other entity are left alone.  Extending to other characters is a one-line addition to `apply_player_speed`.
+Earlier versions exposed `--player-walk-scale` / `--player-run-scale` sliders targeting garret4's `walkSpeed` / `runSpeed` cells in `config.xbr`'s `attacks_transitions` section.  Ghidra analysis showed those cells are **dead data at runtime**:
+
+- The engine's only code that looks up `walkSpeed` by name is `FUN_00049480` (the entity loader), which does the lookup against `critters_critter_data` (section offset `0x01A000`) — a table that does not have a `walkSpeed` row.  `FUN_000d1420` returns `-1`, `FUN_000d1520` returns the default `1.0`, and every entity's `piVar9[0xe]` slot is `1.0` regardless of what's in `attacks_transitions`.
+- `attacks_transitions` IS loaded elsewhere (`FUN_0007e7c0`), but only for attack-chain metadata (`last move`, `button`, `touch`, `damage type`, `next move`) — the speed cells are never read.
+- Conclusion: patching `attacks_transitions.garret4.walkSpeed` has no observable in-game effect.  The real player movement speed is encoded elsewhere (likely a hardcoded `.text`/`.rdata` float or animation-timing constant).
+
+The `apply_player_speed` helper and the CLI flags stay in the tree so that, once the real storage location is found, re-enabling them is a one-line registration change on `PLAYER_PHYSICS_SITES`.  Until then, the Patches page does NOT render sliders for these.
 
 ### CLI
 
 ```bash
-# Slider-only physics without touching any randomizer pool
+# Gravity only (works)
 azurik-mod apply-physics --iso iso/Azurik.iso --output iso/low_grav.iso \
-    --gravity 4.9 --walk-speed 1.5 --run-speed 1.5
+    --gravity 4.9
 
-# Roll into a full randomize-full build
+# Roll gravity into a full randomize-full build
 azurik-mod randomize-full --iso iso/Azurik.iso --output out.iso \
-    --seed 42 --gravity 7.0 --player-walk-scale 1.25
+    --seed 42 --gravity 7.0
 ```
 
 ### GUI
 
-The Patches page renders one `ParametricSlider` per parameter under the `player_physics` section.  Slider values live on `AppState.pack_params["player_physics"]` and are forwarded to `cmd_randomize_full` by `gui/backend.run_randomizer`.
+The Patches page renders the gravity `ParametricSlider` under the `player_physics` section.  Slider values live on `AppState.pack_params["player_physics"]` and are forwarded to `cmd_randomize_full` by `gui/backend.run_randomizer`.
 
 ---
 

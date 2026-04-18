@@ -338,11 +338,7 @@ legacy ``SKIP_LOGO_SPEC`` byte-NOP form is kept in this module for the
 
 register_pack(PatchPack(
     name="qol_gem_popups",
-    description=(
-        "Hide the \u201cCollect 100 <gem>\u201d popup that appears the first "
-        "time you collect each gem type (diamonds, emeralds, rubies, "
-        "sapphires, obsidians)."
-    ),
+    description="Hides first-time gem-collect popups (all 5 gem types).",
     sites=[],
     apply=apply_gem_popups_patch,
     default_on=False,
@@ -355,10 +351,7 @@ register_pack(PatchPack(
 
 register_pack(PatchPack(
     name="qol_pickup_anims",
-    description=(
-        "Skip the short celebration animation that plays after picking "
-        "up an item.  Items still get collected normally."
-    ),
+    description="Skips the post-pickup celebration animation.",
     sites=[PICKUP_ANIM_SPEC],
     apply=apply_pickup_anim_patch,
     default_on=False,
@@ -369,9 +362,8 @@ register_pack(PatchPack(
 register_pack(PatchPack(
     name="qol_other_popups",
     description=(
-        "Hide the first-time tutorial, key, health, power-up, and "
-        "six-keys-collected popups.  The death-screen popup is "
-        "deliberately left alone."
+        "Hides first-time tutorial, key, health, and power-up popups "
+        "(death-screen popup is left alone)."
     ),
     sites=[],
     apply=apply_other_popups_patch,
@@ -385,13 +377,8 @@ register_pack(PatchPack(
 register_pack(PatchPack(
     name="qol_skip_logo",
     description=(
-        "Skip the unskippable Adrenium logo movie that plays when the "
-        "game first boots, cutting launch time noticeably.  The "
-        "prophecy intro cutscene is left alone.  Implemented as a C "
-        "shim at ``shims/src/skip_logo.c`` — the XBE gets a CALL into "
-        "an empty function in injected code.  Set "
-        "``AZURIK_SKIP_LOGO_LEGACY=1`` to revert to the pure-NOP "
-        "implementation."
+        "Skips the unskippable Adrenium logo at boot (prophecy intro "
+        "still plays).  Implemented via a C shim — see docs/SHIMS.md."
     ),
     sites=[SKIP_LOGO_TRAMPOLINE],
     apply=apply_skip_logo_patch,

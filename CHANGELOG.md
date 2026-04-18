@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+### Patches
+
+- `player_physics` walk/run speed sliders removed from the Patches
+  page.  Investigation (Ghidra on FUN_00049480 / FUN_0007e7c0) showed
+  the `walkSpeed` / `runSpeed` cells in `config.xbr`'s
+  `attacks_transitions` section are dead data: the engine's only
+  `walkSpeed` string xref is a lookup against `critters_critter_data`
+  (which doesn't carry that row), so the default 1.0 is always used
+  regardless of the cell value.  The `apply_player_speed` helper and
+  `--player-walk-scale` / `--player-run-scale` CLI flags stay in the
+  tree for a future Phase 2 fix once the real storage location is
+  found; the sliders no longer register on the GUI pack so users
+  don't think the feature works.
+- `player_physics` gravity slider: widened range to 0.0..100.0 m/s²
+  (previously 0.98..29.4) so you can go from weightless floating
+  through ~10x Earth.  The slider widget's numeric entry field
+  accepts any exact value inside that range, giving finer precision
+  than the step size alone.
+
+### GUI
+
+- Single build entry point: removed the "Build randomized ISO"
+  button from the Randomize page.  The page now mirrors its widget
+  state into `AppState.randomize_config` on every change, and the
+  "Start build" button on Build & Logs reads that snapshot directly.
+  One place to click, no double-click required.
+- Pack descriptions tightened across every pack (fps_unlock, qol_*,
+  player_physics) to 1–2 short sentences for faster scanning.
+- `ParametricSlider` widget now shows the current value alongside
+  the default in its header, prints the slider's min/max range on
+  the right, and widens the exact-value entry to 12 chars.
+
 ### C-shim modding platform (Phase 1)
 
 - New `TrampolinePatch` site descriptor in `azurik_mod.patching.spec`
