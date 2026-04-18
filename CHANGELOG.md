@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+### C-shim modding platform (Phase 2 A3 — vanilla-function calls)
+
+- **Shims can now call any registered vanilla Azurik function.**
+  Phase 1 shims had to be fully self-contained; Phase 2 A3 lets a
+  shim do e.g. `play_movie_fn(name, 0)` and have the resulting
+  `CALL rel32` land directly at Azurik's real VA.  No runtime
+  thunks — just a name → VA registry consulted by `layout_coff`
+  when it encounters undefined-external COFF symbols.
+- **`azurik_mod/patching/vanilla_symbols.py`** — new `VanillaSymbol`
+  dataclass + registry of exposed Azurik functions.  Each entry
+  declares its C name, VA, calling convention (cdecl / stdcall /
+  fastcall), and argument-byte count; the mangled COFF name is
+  computed from those.  Seeded with `play_movie_fn@8` (0x18980)
+  and `poll_movie@4` (0x18D30).
+- **`shims/include/azurik_vanilla.h`** — matching C prototypes for
+  shim authors.  `#include "azurik_vanilla.h"` and call any
+  declared function as you would in a normal C program; the layout
+  pass handles the VA resolution.
+- **`layout_coff(..., vanilla_symbols=...)`** — new optional
+  parameter.  `_resolve_symbol_va` consults the dict when a symbol's
+  `section_number <= 0` (undefined external); truly unresolved
+  symbols still raise with an actionable error pointing shim authors
+  at the registry + header.
+- **Tests (+12)** — `tests/test_vanilla_thunks.py` covers mangling
+  rules (cdecl / stdcall / fastcall), registry accessors, synthetic
+  COFF resolution, a real compiled shim (`shims/src/_vanilla_call_test.c`)
+  that calls `play_movie_fn` and has its REL32 verified to land at
+  0x18980, and a drift guard that refuses to let the Python
+  registry and the C header disagree.
+- **Docs** — `docs/SHIMS.md` "Calling a vanilla function from a
+  shim" walkthrough added.
+
 ### C-shim modding platform (Phase 2 A1+A2 — headroom + relocations)
 
 - **Unbounded shim sizes** — `append_xbe_section` now implements

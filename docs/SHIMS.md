@@ -125,9 +125,7 @@ Idempotence: if the pipeline sees an already-installed trampoline at
 the site (same opcode shape, trailing NOPs) it leaves everything
 alone instead of stacking a second trampoline.
 
-## Capabilities (Phase 2 A1+A2)
-
-Once Phase 2 lands:
+## Capabilities (Phase 2 A1+A2+A3)
 
 - **Unbounded shim size.**  Shims that outgrow the 16-byte `.text`
   VA gap automatically spill into a freshly-appended executable
@@ -145,6 +143,56 @@ Once Phase 2 lands:
   each section landed independently into the SHIMS region, with
   cross-section relocations resolved correctly.  Metadata sections
   (`.debug$S`, `.llvm_addrsig`, `.drectve`, ...) are filtered out.
+- **Vanilla-function calls.**  Shims can invoke any Azurik function
+  that's been registered in
+  [`azurik_mod/patching/vanilla_symbols.py`](../azurik_mod/patching/vanilla_symbols.py)
+  and declared in [`shims/include/azurik_vanilla.h`](../shims/include/azurik_vanilla.h).
+  `layout_coff` resolves undefined-external COFF symbols against the
+  registry — REL32 / DIR32 relocation math then lands the call
+  directly at the vanilla VA.  No runtime thunks needed; the
+  pipeline is just a name → VA lookup plus the existing relocation
+  math.
+
+### Calling a vanilla function from a shim
+
+1. **Confirm the vanilla function in Ghidra.**  Note its VA, its
+   calling convention (`__stdcall` → callee pops via `RET N`,
+   `__cdecl` → caller cleans via `ADD ESP, N`), and the total stack
+   bytes used by its arguments.
+2. **Register it in Python.**  Add a `VanillaSymbol` entry in
+   [`vanilla_symbols.py`](../azurik_mod/patching/vanilla_symbols.py):
+
+   ```python
+   register(VanillaSymbol(
+       name="my_vanilla_fn",
+       va=0x000ABCDE,
+       calling_convention="stdcall",
+       arg_bytes=8,
+       doc="What it does; return-value meaning; gotchas."))
+   ```
+
+3. **Declare it in C.**  Add an `extern` to
+   [`azurik_vanilla.h`](../shims/include/azurik_vanilla.h):
+
+   ```c
+   /* Vanilla VA: 0x000ABCDE  (mangled: _my_vanilla_fn@8) */
+   __attribute__((stdcall))
+   int my_vanilla_fn(int a, int b);
+   ```
+
+4. **Include the header** in your shim and call the function normally:
+
+   ```c
+   #include "azurik_vanilla.h"
+
+   void c_my_shim(void) {
+       my_vanilla_fn(1, 2);  /* resolves to 0x000ABCDE at apply time */
+   }
+   ```
+
+5. **Run the tests.**  `tests/test_vanilla_thunks.py` contains a
+   drift guard that refuses to merge if the Python registry and the
+   C header disagree.
 
 ## Limitations (still)
 
@@ -152,13 +200,11 @@ Once Phase 2 lands:
   Each `apply_trampoline_patch` invocation gets its own placement
   pass; two sites that want to share a helper function would each
   install a private copy.  A shared-library layout pass is Phase 3.
-- **No calls into vanilla game functions**.  `layout_coff` raises on
-  undefined externals.  Phase 2 A3 (not yet landed) will add a thunk
-  mechanism: vanilla function VAs declared in `shims/include/azurik.h`
-  get per-function `JMP rel32 -> vanilla_va` stubs injected into the
-  SHIMS section, and shim relocations are resolved against them.
 - **No kernel / D3D imports**.  Shims can't call `XKernel*` or
   `D3D*` routines — the XBE import-table rewrite is Phase 2 D work.
+  Vanilla Azurik functions that wrap those APIs ARE callable via
+  the A3 vanilla-symbol registry (the shim calls Azurik, Azurik
+  calls the kernel).
 - **Escape hatch preserved**.  The legacy byte-patch form of every
   migrated pack stays behind an env var (`AZURIK_SKIP_LOGO_LEGACY=1`
   etc.) so users on a host without the i386 clang toolchain can

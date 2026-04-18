@@ -450,8 +450,14 @@ def apply_trampoline_patch(
         ) -> tuple[int, int]:
             return _carve_shim_landing(xbe_data, placeholder)
 
+        # Vanilla-function externs the shim may call.  Imported lazily
+        # so the main `apply` module stays importable in environments
+        # that haven't loaded the vanilla-symbol registry yet.
+        from azurik_mod.patching.vanilla_symbols import all_symbols
         try:
-            landed = layout_coff(coff, patch.shim_symbol, _allocate)
+            landed = layout_coff(
+                coff, patch.shim_symbol, _allocate,
+                vanilla_symbols=all_symbols())
         except (KeyError, ValueError, RuntimeError) as exc:
             print(f"  ERROR: {patch.label} — {exc}")
             return False

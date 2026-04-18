@@ -370,30 +370,50 @@ def _resolve_symbol_va(
     symbol: CoffSymbol,
     coff: CoffFile,
     section_vas: dict[str, int],
+    vanilla_symbols: dict[str, int] | None = None,
 ) -> int:
     """Compute the final XBE VA for a COFF symbol.
 
-    The symbol must live in a landable section; ``section_vas`` maps
-    section name -> final VA in the XBE.  Undefined / absolute / debug
-    symbols (``section_number`` <= 0) are rejected — Phase 2 shims are
-    still self-contained; calling into vanilla game functions is Phase
-    2 A3 work that will plumb through a separate thunk mechanism.
+    Resolution order:
+
+    1. **Defined symbols.**  If the symbol lives in a COFF section
+       that was landed (``section_number`` > 0 and the owning section
+       is in ``section_vas``), the VA is the section's final VA plus
+       the symbol's intra-section value.
+    2. **Vanilla externals.**  If the symbol is undefined
+       (``section_number <= 0``) and ``vanilla_symbols`` is provided,
+       look up the mangled COFF name in it — returning the mapped VA
+       when found.  This is the Phase-2 A3 path: it lets shims call
+       into any vanilla Azurik function whose address is registered
+       in :mod:`azurik_mod.patching.vanilla_symbols`.
+    3. **Unresolved.**  Raise :class:`ValueError` with an actionable
+       message pointing the shim author at the next step (add a
+       vanilla-symbols entry, or make the reference resolvable in
+       the shim itself).
     """
-    if symbol.section_number <= 0:
-        raise ValueError(
-            f"symbol {symbol.name!r} has section_number "
-            f"{symbol.section_number}; only defined symbols can be "
-            f"relocated.  Undefined externals need Phase 2 A3 (vanilla "
-            f"function thunks) — rewrite the shim to avoid the "
-            f"reference or wait for A3.")
-    owning = coff.sections[symbol.section_number - 1]
-    if owning.name not in section_vas:
-        raise ValueError(
-            f"symbol {symbol.name!r} lives in section "
-            f"{owning.name!r} which was not landed; Phase 2 layout "
-            f"expects every section that carries a referenced symbol "
-            f"to be landable (non-empty, not in the skip-list).")
-    return section_vas[owning.name] + symbol.value
+    if symbol.section_number > 0:
+        owning = coff.sections[symbol.section_number - 1]
+        if owning.name not in section_vas:
+            raise ValueError(
+                f"symbol {symbol.name!r} lives in section "
+                f"{owning.name!r} which was not landed; Phase 2 "
+                f"layout expects every section that carries a "
+                f"referenced symbol to be landable (non-empty, not "
+                f"in the skip-list).")
+        return section_vas[owning.name] + symbol.value
+
+    # Undefined external — try the vanilla-symbol registry.
+    if vanilla_symbols is not None and symbol.name in vanilla_symbols:
+        return vanilla_symbols[symbol.name]
+
+    raise ValueError(
+        f"symbol {symbol.name!r} is undefined (section_number="
+        f"{symbol.section_number}) and not registered as a vanilla "
+        f"Azurik function.  To resolve: add a matching "
+        f"VanillaSymbol entry in "
+        f"`azurik_mod/patching/vanilla_symbols.py` and declare the "
+        f"C prototype in `shims/include/azurik_vanilla.h`, then "
+        f"rebuild the shim.")
 
 
 def _apply_relocation(
@@ -448,6 +468,7 @@ def layout_coff(
     coff: CoffFile,
     entry_symbol: str,
     allocate: Callable[[str, bytes], tuple[int, int]],
+    vanilla_symbols: dict[str, int] | None = None,
 ) -> LandedShim:
     """Place every landable section via ``allocate``, apply relocations,
     and return the final byte blobs + entry-point VA.
@@ -461,6 +482,12 @@ def layout_coff(
     section.  The placeholder bytes are zeros at allocation time —
     the relocated final bytes are written over them in a second pass.
 
+    ``vanilla_symbols`` is an optional ``{mangled_name -> VA}`` map
+    used to resolve undefined-external COFF symbols.  It's how shim
+    authors call into vanilla Azurik functions — registered VAs take
+    the place of the usual "defined symbol section + value" math
+    (see Phase 2 A3 in :mod:`azurik_mod.patching.vanilla_symbols`).
+
     Order of operations:
 
     1. Collect every landable section (skipping metadata) in COFF
@@ -468,7 +495,8 @@ def layout_coff(
     2. Call ``allocate`` for each in turn; record the returned VA.
     3. Build the symbol VA map from the section VAs.
     4. For each section, copy its raw bytes into a mutable buffer and
-       apply every relocation using the resolved target VAs.
+       apply every relocation using the resolved target VAs (defined
+       symbol or vanilla extern).
     5. Write the finalised buffer over the placeholder bytes.
 
     Returns a :class:`LandedShim` populated with the placed sections
@@ -476,7 +504,7 @@ def layout_coff(
     resolved VA of ``entry_symbol``.
 
     Raises ``ValueError`` for unsupported relocation types, missing
-    symbols, or undefined externals.
+    symbols, or undefined externals that aren't in ``vanilla_symbols``.
     """
     placements: dict[str, tuple[int, int, bytearray]] = {}
 
@@ -506,7 +534,8 @@ def layout_coff(
         file_off, vaddr, buf = placements[section.name]
         for reloc in section.relocations:
             symbol = coff.symbols[reloc.symbol_index]
-            target_va = _resolve_symbol_va(symbol, coff, section_vas)
+            target_va = _resolve_symbol_va(
+                symbol, coff, section_vas, vanilla_symbols)
             _apply_relocation(buf, vaddr, reloc, target_va)
         landed.append(LandedSection(
             name=section.name,
@@ -517,6 +546,6 @@ def layout_coff(
 
     # --- 5. Resolve entry-point VA ---------------------------------------
     entry = coff.symbol(entry_symbol)
-    entry_va = _resolve_symbol_va(entry, coff, section_vas)
+    entry_va = _resolve_symbol_va(entry, coff, section_vas, vanilla_symbols)
 
     return LandedShim(sections=landed, entry_va=entry_va)
