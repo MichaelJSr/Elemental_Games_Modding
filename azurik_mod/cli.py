@@ -1059,7 +1059,12 @@ def main() -> None:
         help="Byte alignment for the scan (default 4; use 1 "
              "for paranoid unaligned scans)")
     p_save_key.add_argument("--max-hits", type=int, default=0,
-        help="Stop after this many matches; 0 = exhaustive")
+        help="Stop after this many matches; 0 = exhaustive "
+             "(single-process mode only)")
+    p_save_key.add_argument("--workers", type=int, default=1,
+        help="Parallel worker processes (1 = single-process "
+             "with progress callbacks; >1 forks and splits the "
+             "dump, ~linear speedup)")
     p_save_key.add_argument("--quiet", action="store_true",
         help="Suppress progress output")
     p_save_key.add_argument("--json", action="store_true")

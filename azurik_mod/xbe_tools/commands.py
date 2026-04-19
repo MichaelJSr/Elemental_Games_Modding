@@ -992,11 +992,14 @@ def cmd_save_key_recover(args) -> None:
             print(f"  {pct:3d}%  ({done:,} / {total:,}, "
                   f"{elapsed:.1f}s elapsed)", file=sys.stderr)
 
+    workers = max(1, getattr(args, "workers", 1))
     hits = list(recover_keys(
         dump, samples,
         alignment=args.alignment,
         early_exit_after=args.max_hits or None,
-        progress_cb=progress if not args.quiet else None,
+        progress_cb=(progress if not args.quiet and workers == 1
+                     else None),
+        workers=workers,
     ))
     elapsed = time.perf_counter() - t0
 

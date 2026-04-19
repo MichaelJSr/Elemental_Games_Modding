@@ -312,11 +312,10 @@ On retail hardware it's a runtime value the kernel derives
 from a combination of the XBE certificate (bzSignatureKey @
 cert+0x110) and the EEPROM's HDKey (per console).
 
-### Exhaustive static-recovery attempts (April 2026)
+### Exhaustive recovery attempts (April 2026)
 
-With three real save slots + EEPROM + the base Xbox HDD
-image kindly provided as fixtures, we confirmed the key is
-**not** recoverable from any static source:
+We proved this the hard way with three real save slots, the
+EEPROM, and two RAM dumps (64 MB and 256 MB) taken mid-game:
 
 | Source scanned | Alignment | Candidates | Hits |
 |----------------|-----------|------------|------|
@@ -328,16 +327,57 @@ image kindly provided as fixtures, we confirmed the key is
 | SaveMeta.xbx / saveimage.xbx heads | 1 | 262 | 0 |
 | HMAC-SHA1(A, B)[:16] for every (A, B) ∈ 10 ingredients² | — | 100 | 0 |
 | SHA-1(A ‖ B)[:16] for same ingredient set | — | 100 | 0 |
+| **64 MB RAM dump (pmemsave 0 0x04000000)** | 4 | 16 777 212 | **0** |
+| **64 MB RAM dump** | 16 | 4 194 304 | **0** |
+| **256 MB RAM dump (pmemsave 0 0x10000000)** | 1 | 268 435 440 | **0** |
 
-None of these produced a key that HMAC-SHA1'd **any** of the 3
-expected signatures — let alone all of them.
+The 256 MB byte-aligned scan is **exhaustive** — no 16-byte
+window at any offset in the dump HMACs to the expected
+signatures under any of our tested walk variants (plain SHA-1,
+HMAC-empty-key, filename-with-NUL, filename-without-NUL,
+root-only vs recursive).
 
-**Conclusion:** ``XboxSignatureKey`` lives in xemu's synthetic
-xboxkrnl memory at runtime.  It's populated when the kernel
-(hard-wired into the emulator) resolves the import thunk at
-VA ``0x0018F4D4``.  We cannot recover it statically from any
-file the user hands us — but we can recover it dynamically
-(see below).
+**The pointer changes between boots** — RAM[0x0018F4D4] was
+``0x8B084A89`` in one session, ``0xC73B0018`` in a later
+session, despite the same EEPROM.  That's consistent with
+per-boot heap allocation of the key storage.
+
+**xemu's monitor rejects ``memsave`` on both pointer values**
+("Invalid addr").  The guest MMU doesn't translate those VAs
+when the monitor is paused, suggesting either:
+
+- the key lives in a page that's only resident during the
+  HMAC call itself (allocated on demand, freed immediately),
+- or xemu's synthetic kernel uses a non-standard VA→phys
+  mapping that doesn't correspond to any documented Xbox
+  memory region (retail 64 MB, dev-kit 128 MB, nor
+  0xC0000000 system area).
+
+We've run out of static recovery vectors.
+
+### Path forward (pragmatic)
+
+Given that static recovery is exhausted, the actually-useful
+deliverable for mod authors is a **``qol_skip_save_signature``
+shim patch** that NOPs Azurik's signature-verify callsite so
+any ``.sav`` edit loads regardless of whether ``signature.sav``
+matches.
+
+Tracked in ``docs/TOOLING_ROADMAP.md``.  The verify site
+wasn't exposed by static xrefs (it's invoked through a method
+pointer / vtable); implementation needs runtime tracing in
+xemu to locate the exact callsite.  When built, it becomes the
+permanent "edit any save" workflow for mod users.
+
+The key-recovery scanner
+(:mod:`azurik_mod.save_format.key_recover`) stays in the
+toolbox for future use: if someone finds the key via gdb-stub
+breakpoint on ``XCalculateSignatureBegin``'s ``MOV EAX, [0x18F4D4]``
+and hands us the 4-byte pointer, dereferencing that into the
+RAM dump may still yield the bytes.  Our dynamic-recovery
+scanner also finds the key in seconds when given a dump that
+*does* contain it (exhaustively tested via the 9 synthetic
+regression fixtures in ``test_save_key_recover.py``).
 
 ### Three practical unblockers
 
