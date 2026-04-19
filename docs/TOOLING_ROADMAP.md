@@ -252,19 +252,37 @@ compile time but the rebuild cycle is still 30+ seconds.
 
 ### 6. Shim scaffolder with ABI picker
 
-Extend `shims/toolchain/new_shim.sh` to:
+Status: **shipped** (see
+`azurik_mod/xbe_tools/shim_scaffolder.py`).
 
-- Ask the user for the hook-site VA
-- Fetch that function's signature / calling convention from the
-  open Ghidra instance via MCP
-- Generate a correctly-annotated C template (`__attribute__((stdcall))`,
-  proper register-clobber list, matching return type)
-- Pre-fill the feature folder with a working `__init__.py`
-  referencing a plausible `TrampolinePatch` site
+CLI command: ``azurik-mod new-shim NAME``.  Replaces the
+shell-based ``shims/toolchain/new_shim.sh`` with a Python-
+testable scaffolder that can:
+
+- Pull the hook site's calling convention from a live Ghidra
+  instance via :class:`GhidraClient` — classifies
+  ``__stdcall`` / ``__fastcall`` / ``__thiscall`` from the
+  function's parameter-storage metadata.
+- Pre-fill ``replaced_bytes`` from the vanilla XBE + run
+  :func:`plan_trampoline` to verify the hook lands on a clean
+  instruction boundary.
+- Emit a complete feature folder (``__init__.py``, ``shim.c``,
+  ``README.md``) with the correct ``__attribute__(())`` on the
+  generated C prototype + the full parameter list translated
+  from Ghidra types.
+- Fall back gracefully when Ghidra / XBE aren't supplied —
+  behaviour matches the legacy shell scaffolder with TODOs
+  everywhere for manual fill-in.
+
+Typical full-pickup invocation:
 
 ```bash
-shims/toolchain/new_shim.sh qol_speedy_boot --hook 0x5F6E5
+azurik-mod new-shim my_shim \
+    --hook 0x5F6E5 --iso Azurik.iso --ghidra
 ```
+
+Produces a feature folder ready to compile + test.  Run
+``--dry-run`` first to preview the rendered files.
 
 ### 7. XBR record-layout inspector
 
@@ -405,7 +423,7 @@ against.
 | 3 | `shim-inspect`              | 6     | 2    | 8   | shipped  |
 | 4 | Ghidra knowledge-sync       | 9     | 3    | 10  | **shipped** |
 | 5 | Trampoline planner          | 7     | 2    | 9   | **shipped** |
-| 6 | Shim scaffolder w/ ABI      | 6     | 2    | 8   | planned  |
+| 6 | Shim scaffolder w/ ABI      | 6     | 2    | 8   | **shipped** |
 | 7 | XBR layout inspector        | 5     | 3    | 7   | **shipped** |
 | 8 | Entity diff                 | 4     | 1    | 7   | **shipped** |
 | 9 | Test selector               | 4     | 1    | 7   | **shipped** |
@@ -420,3 +438,117 @@ against.
 The top three shipped today deliver ≥25 minutes of saved time
 per RE session, based on real measurement against the
 conversation transcript.
+
+---
+
+## Next wave — catalogued candidates (2026-04 pass)
+
+After the Tier 1-3 build-out, below is the updated catalogue
+of tools worth making next.  Ranked by observed friction in
+the April 2026 sessions.  Entries without a ROI score haven't
+accumulated enough usage data yet; they're worth revisiting
+when a concrete use-case surfaces.
+
+### Authoring workflow
+
+**#17 Save-file editor** (high ROI)
+GUI + CLI for editing Azurik's ``.sav`` / ``SaveMeta.xbx``
+files.  Backends already in ``azurik_mod.save_format``; needs
+a writer path + a TUI/GUI.  Unlocks "patch a specific save
+slot's inventory" workflows for testing + cheaters.  Build
+on top of existing read support.
+
+**#18 XBR write-back support** (high ROI)
+``xbr_parser.py`` already handles ``--patch`` for single-cell
+writes.  Extend to support structural edits (add records,
+rename entries, patch strings) so level / config mods are
+composable without hand-rolling every byte write.
+
+**#19 Shim test generator** (medium ROI)
+Given a newly-scaffolded feature, synthesise a matching
+``tests/test_<name>.py`` with:
+- A drift-guard pinning the vanilla ``replaced_bytes`` at
+  the hook VA
+- A round-trip ``apply → verify`` test
+- A CLI smoke test invoking ``azurik-mod patch`` end-to-end
+
+Extends ``new-shim`` with an ``--emit-test`` flag.  Removes
+~80% of the boilerplate per new feature.
+
+### RE workflow
+
+**#20 Call-graph explorer** (medium ROI)
+Build on :class:`GhidraClient`: given a VA, render the call
+graph N hops deep as a Graphviz DOT or a markdown summary.
+Useful when chasing "what does this function actually do and
+what does it depend on?".  Ghidra has the data; we just need
+a friendlier CLI on top.
+
+**#21 Xref aggregator** (medium ROI)
+``azurik-mod xrefs 0xVA`` — collect every reference (callers +
+callees + data-refs) and render as a tree.  Exists in Ghidra's
+UI but not on the CLI; baking it into our toolchain means
+agent-driven flows don't have to screen-grab the Ghidra
+window.
+
+**#22 Decompile cache** (low ROI)
+Persist Ghidra decomp output to ``.cache/ghidra-decomp/`` so
+repeat queries over the same VA don't pay the HTTP / decomp
+roundtrip.  Invalidates on project version bump.  Only
+valuable when investigation volume increases past 10-20
+decomps per session.
+
+**#23 Struct type diff** (low ROI, high later-value)
+As we pin more ``CritterData`` / ``PlayerInputState`` struct
+fields in ``azurik.h``, a tool that diffs against Ghidra's
+current structure layout would catch missed fields + drift.
+Builds on the existing ``ghidra-sync`` infrastructure.
+
+### Asset workflow
+
+**#24 Level previewer** (speculative, high payoff)
+Parse the ``surf`` + ``node`` sections of a level XBR into a
+crude 3D viewer (WebGL / matplotlib).  Not a full renderer —
+just "where is the player spawn, where are the portals, what's
+the level bounds?".  Would reduce "build + boot + walk to
+verify" loops from minutes to seconds.
+
+**#25 Asset fingerprint registry** (low ROI, big win when
+drift hunting)
+md5-index every asset in an unpacked ISO.  ``azurik-mod iso-
+verify`` already does this for manifest checking; a persistent
+registry would let us diff against prior builds ("did the
+rebuild of fx.xbr change?").
+
+**#26 Bink frame extractor** (speculative)
+Follow-up to ``movies info``: pull individual frames from a
+``.bik`` file as PNG.  Wants a Bink decoder (use existing
+libbink/FFmpeg?).  Only useful if someone wants to re-skin
+cutscenes.
+
+### Deferred from prior passes
+
+**#4** ghidra-sync extensions — struct application + variable
+renaming via ``PATCH /variables/...`` endpoints.
+
+**#14** Audio asset dump — still blocked on wave header RE.
+
+**#16** Plugin pack distribution — still blocked on
+external-pack ABI design.
+
+---
+
+## Scoring methodology v2
+
+We now track "how many minutes did this tool save on a real
+session?" per commit so ROI estimates stay calibrated.  The
+post-Tier-3 pass measured ≈45 min saved vs the same RE work
+done with pre-toolkit methods — dominated by ``xbe find-refs``
+(20 min), ``plan-trampoline`` (10 min), and ``ghidra-sync``'s
+batch-rename flow (15 min, amortised across ~20 VAs per
+session).
+
+When picking the next item to build, compare the candidate's
+expected minutes saved against the ~3-10 hours of build+test
+cost.  Anything under 30 min saved per session + used less
+than monthly stays deferred.

@@ -55,7 +55,7 @@ import socket
 import threading
 import uuid
 from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
@@ -156,8 +156,17 @@ class MockGhidraServer:
             return
         handler = _make_handler(self)
         # Bind to the caller-requested port; port=0 → OS picks free.
-        self._server = HTTPServer((self.host, self._requested_port),
-                                  handler)
+        #
+        # ThreadingHTTPServer spawns a handler thread per request so
+        # a slow / hung handler can't block the next incoming call.
+        # This matters under pytest load — single-threaded HTTPServer
+        # was timing out when other tests left sockets in TIME_WAIT
+        # or the interpreter was under GIL pressure.
+        self._server = ThreadingHTTPServer(
+            (self.host, self._requested_port), handler)
+        # Daemon threads so Python exit doesn't hang on pending
+        # requests.
+        self._server.daemon_threads = True
         self.port = self._server.server_address[1]
         self._thread = threading.Thread(
             target=self._server.serve_forever,

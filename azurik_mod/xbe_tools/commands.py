@@ -113,8 +113,22 @@ def cmd_xbe_find_refs(args) -> None:
 
     xbe = _load_xbe(args)
 
-    if args.string is not None:
-        # Locate the string first, then scan for refs to its start VA.
+    # --va takes precedence over --string when both are given,
+    # so users can't accidentally get the wrong lookup on a stale
+    # shell-history command.  The default-value interaction is
+    # made explicit in --help: "exactly one of --va or --string".
+    if args.va is not None and args.string is not None:
+        print("find-refs: both --va and --string passed; "
+              "preferring --va.  Drop one to silence this warning.",
+              file=sys.stderr)
+    if args.va is not None:
+        try:
+            target_va = int(args.va, 0)
+        except ValueError:
+            print(f"ERROR: bad --va {args.va!r} (want hex or decimal)",
+                  file=sys.stderr)
+            sys.exit(2)
+    elif args.string is not None:
         hits = find_strings(xbe, args.string, min_len=len(args.string))
         if not hits:
             print(f"ERROR: no string matching {args.string!r} found",
@@ -124,10 +138,8 @@ def cmd_xbe_find_refs(args) -> None:
         if not args.json:
             print(f"# target string {args.string!r} at VA 0x{target_va:X}")
     else:
-        if args.va is None:
-            print("ERROR: pass --va HEX or --string TEXT", file=sys.stderr)
-            sys.exit(2)
-        target_va = int(args.va, 0)
+        print("ERROR: pass --va HEX or --string TEXT", file=sys.stderr)
+        sys.exit(2)
 
     refs = find_imm32_references(xbe, target_va)
 
@@ -490,6 +502,92 @@ def cmd_entity_diff(args) -> None:
 # xbr inspect — record-layout classifier
 # ---------------------------------------------------------------------------
 
+def cmd_new_shim(args) -> None:
+    """``azurik-mod new-shim NAME`` — scaffold a feature folder.
+
+    See :mod:`azurik_mod.xbe_tools.shim_scaffolder` for the
+    planning + rendering logic."""
+    from .shim_scaffolder import plan_scaffold, write_scaffold
+
+    repo_root = Path(__file__).resolve().parents[2]
+
+    hook_va: int | None = None
+    if args.hook:
+        try:
+            hook_va = int(args.hook, 0)
+        except ValueError:
+            print(f"new-shim: bad --hook value {args.hook!r} "
+                  "(want hex like 0x5F6E5)", file=sys.stderr)
+            sys.exit(2)
+
+    xbe_bytes: bytes | None = None
+    if args.xbe or args.iso:
+        try:
+            xbe_bytes = bytes(_load_xbe(args))
+        except SystemExit:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            print(f"new-shim: failed to load XBE: {exc}",
+                  file=sys.stderr)
+            sys.exit(2)
+
+    ghidra_client = None
+    if args.port is not None or args.ghidra:
+        from .ghidra_client import GhidraClient
+        ghidra_client = GhidraClient(
+            host=args.host or "localhost",
+            port=args.port or 8193)
+        if not ghidra_client.ping():
+            print("new-shim: --ghidra / --port passed but no live "
+                  f"Ghidra on {ghidra_client.base_url}; continuing "
+                  f"without ABI pickup", file=sys.stderr)
+            ghidra_client = None
+
+    try:
+        plan = plan_scaffold(
+            args.name, repo_root=repo_root,
+            hook_va=hook_va, xbe_bytes=xbe_bytes,
+            ghidra_client=ghidra_client,
+            category=args.category)
+    except ValueError as exc:
+        print(f"new-shim: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    print(plan.summary())
+    print()
+
+    if args.dry_run:
+        print("--dry-run: files that WOULD be written:")
+        for f in plan.files:
+            print(f"  {f}")
+        return
+
+    try:
+        write_scaffold(plan)
+    except ValueError as exc:
+        print(f"new-shim: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Created feature folder: {plan.feature_dir}")
+    for f in plan.files:
+        print(f"  - {f.name}")
+    print()
+    print("Next steps:")
+    print(f"  1. Edit {plan.shim_c_path} — replace the TODO body "
+          f"with real logic.")
+    print(f"  2. Edit {plan.init_py_path} — fill in the "
+          f"description + trampoline label.")
+    print(f"  3. Compile:   "
+          f"bash shims/toolchain/compile.sh {plan.shim_c_path} "
+          f"shims/build/{plan.name}.o")
+    print(f"  4. Inspect:   "
+          f"azurik-mod shim-inspect azurik_mod/patches/{plan.name}")
+    if plan.hook_va is not None:
+        print(f"  5. Verify:   "
+              f"azurik-mod plan-trampoline 0x{plan.hook_va:X} "
+              "--xbe default.xbe")
+
+
 def cmd_ghidra_snapshot(args) -> None:
     """``azurik-mod ghidra-snapshot PATH`` — write a snapshot JSON."""
     from .ghidra_client import GhidraClient
@@ -599,6 +697,7 @@ __all__ = [
     "cmd_ghidra_snapshot",
     "cmd_ghidra_sync",
     "cmd_movies_info",
+    "cmd_new_shim",
     "cmd_plan_trampoline",
     "cmd_shim_inspect",
     "cmd_test_for_va",

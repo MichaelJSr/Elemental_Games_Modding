@@ -695,6 +695,53 @@ def main() -> None:
         help="Skip the labels section (functions-only snapshot)")
 
     # ------------------------------------------------------------------
+    # new-shim (tier 2 #6 — scaffolder with ABI pickup)
+    # ------------------------------------------------------------------
+    p_ns = sub.add_parser(
+        "new-shim",
+        help="Scaffold a new trampoline-backed feature folder",
+        description=(
+            "Replaces the legacy shell scaffolder "
+            "(shims/toolchain/new_shim.sh) with a Python-testable\n"
+            "version that can pull ABI info from a live Ghidra\n"
+            "and pre-fill replaced_bytes from the vanilla XBE.\n\n"
+            "With just a name: identical behaviour to new_shim.sh.\n"
+            "With --hook + --xbe: runs plan-trampoline and fills\n"
+            "  the replaced_bytes field in the generated __init__.py.\n"
+            "With --hook + --xbe + --ghidra: also pulls the function's\n"
+            "  calling convention from Ghidra and picks the correct\n"
+            "  __attribute__(()) for the shim.c prototype.\n\n"
+            "Examples:\n"
+            "  azurik-mod new-shim skip_prophecy\n"
+            "  azurik-mod new-shim skip_prophecy --hook 0x5F6E5 \\\n"
+            "      --xbe /path/to/default.xbe\n"
+            "  azurik-mod new-shim skip_prophecy --hook 0x5F6E5 \\\n"
+            "      --iso Azurik.iso --ghidra --dry-run"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_ns.add_argument("name",
+        help="Feature name (lowercase identifier: [a-z][a-z0-9_]*)")
+    p_ns.add_argument("--hook",
+        help="Hook-site VA (hex like 0x5F6E5 or decimal)")
+    p_ns.add_argument("--xbe",
+        help="Path to vanilla default.xbe for replaced_bytes pickup")
+    p_ns.add_argument("--iso",
+        help="Path to an ISO (extracted XBE used for replaced_bytes)")
+    p_ns.add_argument("--ghidra", action="store_true",
+        help="Fetch calling convention from the live Ghidra "
+             "instance (implies --port 8193 when --port isn't set)")
+    p_ns.add_argument("--host", default=None,
+        help="Ghidra host (default localhost)")
+    p_ns.add_argument("--port", type=int, default=None,
+        help="Ghidra port (default 8193)")
+    p_ns.add_argument("--category", default="experimental",
+        help="Category the feature registers under "
+             "(default 'experimental')")
+    p_ns.add_argument("--dry-run", action="store_true",
+        help="Print the rendered files without writing them")
+
+    # ------------------------------------------------------------------
     # movies info (tier 3 #13)
     # ------------------------------------------------------------------
     p_movies = sub.add_parser(
@@ -740,6 +787,7 @@ def main() -> None:
         "entity": _dispatch_entity,
         "xbr": _dispatch_xbr,
         "movies": _dispatch_movies,
+        "new-shim": _dispatch_new_shim,
     }
     dispatch[args.command](args)
 
@@ -794,6 +842,11 @@ def _dispatch_movies(args) -> None:
         raise SystemExit(
             f"unknown movies verb: {args.movies_command!r}")
     verb(args)
+
+
+def _dispatch_new_shim(args) -> None:
+    from azurik_mod.xbe_tools.commands import cmd_new_shim
+    cmd_new_shim(args)
 
 
 def _dispatch_iso_verify(args) -> None:
