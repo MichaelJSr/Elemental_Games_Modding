@@ -243,29 +243,51 @@ class AzurikHeaderStructOffsets(unittest.TestCase):
         # where expected_value_pred(bytes) returns either
         #   - True/False for a simple predicate, or
         #   - a diagnostic message string for context.
+        # BSS-initialised VAs sit past the section's raw_size, so a
+        # disk read returns empty bytes.  The Xbox loader zero-fills
+        # them at runtime.  Accept either empty (past raw) or four
+        # literal zeros.
+        _bss = lambda b: b == b"" or b[:4] == b"\x00\x00\x00\x00"
+
         anchors = [
+            # --- Initialised constants in .rdata ---
             ("AZURIK_GRAVITY_VA", 0x001980A8, ".rdata",
              lambda b: abs(_struct.unpack('<f', b[:4])[0] - 9.8) < 1e-5),
             ("AZURIK_SHARED_RUN_MULT_VA", 0x001A25BC, ".rdata",
+             lambda b: _struct.unpack('<f', b[:4])[0] == 3.0),
+            # Alias of SHARED_RUN_MULT — pin separately to catch
+            # accidental drift between the two names.
+            ("AZURIK_FLOAT_RUN_MULT_VA", 0x001A25BC, ".rdata",
              lambda b: _struct.unpack('<f', b[:4])[0] == 3.0),
             ("AZURIK_PLAYER_CHAR_NAME_VA", 0x0019EA68, ".rdata",
              lambda b: b.startswith(b"garret4\x00")),
             ("AZURIK_FLOAT_ZERO_VA", 0x001A2508, ".rdata",
              lambda b: _struct.unpack('<f', b[:4])[0] == 0.0),
+
+            # --- Initialised constants in .data ---
             ("AZURIK_FLOAT_HALF_VA", 0x001A9C84, ".data",
              lambda b: _struct.unpack('<f', b[:4])[0] == 0.5),
             ("AZURIK_FLOAT_ONE_VA", 0x001A9C88, ".data",
              lambda b: _struct.unpack('<f', b[:4])[0] == 1.0),
-            ("AZURIK_BOOT_STATE_VA", 0x001BF61C, ".data",
-             # BSS-initialised DWORD — sits in the VA portion of
-             # .data that's past raw_size, so on-disk reads return
-             # empty bytes.  Xbox loader zero-fills at load time.
-             # Accept either empty (past raw) or literal zeros.
-             lambda b: b == b"" or b[:4] == b"\x00\x00\x00\x00"),
+            # Initialised to 4 in the vanilla XBE — the engine's
+            # "no controller active yet" sentinel (valid indices
+            # are 0..3 for the four XInput ports).
+            ("AZURIK_ACTIVE_PLAYER_INDEX_VA", 0x001A7AE4, ".data",
+             lambda b: _struct.unpack('<I', b[:4])[0] == 4),
+
+            # --- BSS anchors (past raw_size, zero-filled at load) ---
+            ("AZURIK_BOOT_STATE_VA", 0x001BF61C, ".data", _bss),
+            ("AZURIK_MOVIE_CONTEXT_PTR_VA", 0x001BCDC8, ".data", _bss),
+            ("AZURIK_MOVIE_IDLE_FLAG_VA", 0x001BCDB4, ".data",
+             lambda b: b == b"" or b[:1] == b"\x00"),
+            ("AZURIK_CONTROLLER_STATE_VA", 0x0037BE98, ".data", _bss),
+            ("AZURIK_PLAYER_STATE_PTR_ARRAY_VA", 0x001BE314, ".data", _bss),
+            ("AZURIK_WALKING_STATE_FLAG_VA", 0x0037ADEC, ".data", _bss),
             # Entity-registry begin/end/cap sit deep in BSS —
             # zero-filled on disk, runtime-populated.
-            ("AZURIK_ENTITY_REGISTRY_BEGIN_VA", 0x0038C1E4, ".data",
-             lambda b: b == b"" or b[:4] == b"\x00\x00\x00\x00"),
+            ("AZURIK_ENTITY_REGISTRY_BEGIN_VA", 0x0038C1E4, ".data", _bss),
+            ("AZURIK_ENTITY_REGISTRY_END_VA",   0x0038C1E8, ".data", _bss),
+            ("AZURIK_ENTITY_REGISTRY_CAP_VA",   0x0038C1EC, ".data", _bss),
         ]
 
         for name, va, want_section, pred in anchors:

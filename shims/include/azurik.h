@@ -256,6 +256,15 @@ typedef struct CritterData {
 /* Base VA of the 4-player ControllerState array (player 0). */
 #define AZURIK_CONTROLLER_STATE_VA    0x0037BE98u
 
+/* Per-player state-object pointer array.  4 × 4-byte slots at
+ * VA 0x001BE314; slot ``i`` holds a pointer to player ``i``'s
+ * live state struct (or NULL before that player joins).  Used
+ * by the XInput polling path ``FUN_000A2880`` as
+ * ``[player_idx * 4 + 0x001BE314]`` before writing into the
+ * controller-state block.  BSS — zero-filled at load, populated
+ * by the engine at runtime as each controller connects. */
+#define AZURIK_PLAYER_STATE_PTR_ARRAY_VA  0x001BE314u
+
 /* Active-player index (0..3, or 4 for "no controller connected"). */
 #define AZURIK_ACTIVE_PLAYER_INDEX_VA 0x001A7AE4u
 

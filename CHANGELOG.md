@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### VA audit + new `AZURIK_PLAYER_STATE_PTR_ARRAY_VA` anchor
+
+Comprehensive VA-correctness sweep via Ghidra MCP + real XBE bytes.
+All 16 existing VA anchors + 5 vanilla-function entries verified;
+no drift.  New regression suite `tests/test_va_audit.py` (5 tests,
+26 subtests) pins every anchor with:
+
+- Section membership (`.rdata` vs `.data` vs BSS) — catches
+  accidental VA drift that lands in the wrong section silently.
+- Byte-content predicates for initialised constants (gravity == 9.8,
+  run multiplier == 3.0, `garret4\0`, float constants 0.0/0.5/1.0,
+  active-player index == 4).
+- BSS verification (empty-past-raw-size OR zero-filled on disk) for
+  runtime-init anchors.
+- First-byte prologue check on every vanilla function VA.
+- **Drift guard**: regex-scans `azurik.h` for every `AZURIK_*_VA`
+  macro and fails if one isn't covered by `ANCHOR_EXPECTATIONS`,
+  so new anchors can't land without a matching audit entry.
+
+One new anchor added during the gap analysis:
+- **`AZURIK_PLAYER_STATE_PTR_ARRAY_VA` = `0x001BE314`** — 4 × 4-byte
+  per-player state-object pointer slots, indexed by the XInput
+  polling path (`FUN_000A2880`).  BSS; pairs naturally with the
+  controller-state block at `0x0037BE98`.
+
+Also verified against Ghidra:
+- `AZURIK_CONTROLLER_STRIDE = 0x54` confirmed by
+  `FUN_000A2880`'s ``IMUL ESI, ESI, 0x54`` at VA `0x000A288D`.
+- All 151 static kernel ordinals in `AZURIK_KERNEL_ORDINALS`
+  match the XBE thunk table at `0x18F3A0` exactly (zero drift).
+- `EXTENDED_KERNEL_ORDINALS` has no ordinal collisions with the
+  static set.
+- Spot-checks pass for 10 canonical ordinals across static +
+  extended (DbgPrint, NtClose, NtCreateFile, NtOpenFile,
+  KeQueryPerformanceCounter, HalReturnToFirmware, RtlInitAnsiString,
+  DbgBreakPoint, RtlZeroMemory, XboxKrnlVersion).
+
 ### FUN_00085700 gravity-integration wrapper + save-file format scaffold
 
 Two substantial additions in one pass.  Both landed with full test
