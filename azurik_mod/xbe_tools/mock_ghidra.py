@@ -19,6 +19,9 @@ Implements the same subset :mod:`ghidra_client` consumes:
 - ``GET  /xrefs?to_addr|from_addr&offset&limit``
 - ``GET  /structs?offset&limit``
 - ``GET  /structs/{name}``
+- ``POST /structs``                      (create struct)
+- ``DELETE /structs/{name}``             (delete struct)
+- ``POST /structs/{name}/fields``        (append field)
 
 Everything else returns the same ``ENDPOINT_NOT_FOUND`` envelope
 the real plugin emits, so tests catch regressions in the sync
@@ -346,6 +349,9 @@ def _make_handler(server: MockGhidraServer) -> type:
         def do_PATCH(self) -> None:  # noqa: N802
             self._route("PATCH")
 
+        def do_DELETE(self) -> None:  # noqa: N802
+            self._route("DELETE")
+
         # ---- handlers (indirected through _dispatch_table) ------
 
         def handle_program(self, path: str, query: dict) -> None:
@@ -538,6 +544,90 @@ def _make_handler(server: MockGhidraServer) -> type:
                 instance=self._instance_url(),
                 result=dict(s)))
 
+        def handle_struct_create(self, path, query) -> None:
+            body = self._read_json()
+            name = str(body.get("name", ""))
+            if not name:
+                self._respond(400, _envelope(
+                    instance=self._instance_url(),
+                    success=False,
+                    error={"message": "Missing required parameter: name",
+                           "code": "MISSING_PARAMETERS"}))
+                return
+            if name in outer.structs:
+                self._respond(400, _envelope(
+                    instance=self._instance_url(),
+                    success=False,
+                    error={"message": f"Struct already exists: {name}",
+                           "code": "TRANSACTION_ERROR"}))
+                return
+            size = int(body.get("size", 1))
+            outer.structs[name] = {
+                "name": name,
+                "size": max(1, size),
+                "category": body.get("category", ""),
+                "description": body.get("description", ""),
+                "fields": [],
+                "numFields": 0,
+                "path": f"/{name}",
+            }
+            self._respond(201, _envelope(
+                instance=self._instance_url(),
+                result=dict(outer.structs[name])))
+
+        def handle_struct_delete(self, path, query) -> None:
+            name = path.strip("/").split("/", 1)[1]
+            if name not in outer.structs:
+                self._respond(404, _envelope(
+                    instance=self._instance_url(),
+                    success=False,
+                    error={"message": f"Struct not found: {name}",
+                           "code": "STRUCT_NOT_FOUND"}))
+                return
+            removed = outer.structs.pop(name)
+            self._respond(200, _envelope(
+                instance=self._instance_url(),
+                result=removed))
+
+        def handle_struct_add_field(self, path, query) -> None:
+            # /structs/{name}/fields
+            parts = path.strip("/").split("/")
+            name = parts[1]
+            s = outer.structs.get(name)
+            if s is None:
+                self._respond(404, _envelope(
+                    instance=self._instance_url(),
+                    success=False,
+                    error={"message": f"Struct not found: {name}",
+                           "code": "STRUCT_NOT_FOUND"}))
+                return
+            body = self._read_json()
+            if not body.get("fieldType"):
+                self._respond(400, _envelope(
+                    instance=self._instance_url(),
+                    success=False,
+                    error={"message": "Missing required parameter: fieldType",
+                           "code": "MISSING_PARAMETERS"}))
+                return
+            field = {
+                "name": body.get("name", ""),
+                "type": body.get("fieldType", ""),
+                "dataType": body.get("fieldType", ""),
+                "typePath": f"/{body.get('fieldType', '')}",
+                "offset": int(body.get("offset", s["size"])),
+                "length": int(body.get("length", 4)),
+                "comment": body.get("comment", ""),
+            }
+            s["fields"].append(field)
+            s["numFields"] = len(s["fields"])
+            # Grow size to fit the new field's end.
+            field_end = field["offset"] + field["length"]
+            if field_end > s["size"]:
+                s["size"] = field_end
+            self._respond(200, _envelope(
+                instance=self._instance_url(),
+                result=dict(field)))
+
     # ---- dispatch table: (method, path pattern) → handler-method ---
 
     global _dispatch_table  # reused on handler reinstantiation
@@ -554,6 +644,10 @@ def _make_handler(server: MockGhidraServer) -> type:
         ("GET", "/xrefs"): Handler.handle_xrefs,
         ("GET", "/structs"): Handler.handle_structs_list,
         ("GET", "/structs/{name}"): Handler.handle_struct_get,
+        ("POST", "/structs"): Handler.handle_struct_create,
+        ("DELETE", "/structs/{name}"): Handler.handle_struct_delete,
+        ("POST", "/structs/{name}/fields"):
+            Handler.handle_struct_add_field,
     }
     return Handler
 
@@ -588,6 +682,10 @@ def _pattern_of(path: str) -> str:
     # /structs/{name}
     if len(parts) == 2 and parts[0] == "structs":
         return "/structs/{name}"
+    # /structs/{name}/fields
+    if (len(parts) == 3 and parts[0] == "structs"
+            and parts[2] == "fields"):
+        return "/structs/{name}/fields"
     return "/" + "/".join(parts)
 
 

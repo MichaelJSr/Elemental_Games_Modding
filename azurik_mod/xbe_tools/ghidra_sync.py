@@ -59,6 +59,7 @@ from .ghidra_coverage import (
     harvest_patch_sites,
     harvest_vanilla_symbols,
 )
+from .struct_diff import HeaderStruct, parse_header_structs
 
 
 @dataclass
@@ -100,7 +101,21 @@ class SyncReport:
     renamed: int = 0
     commented: int = 0
     skipped: int = 0
+    structs_created: int = 0
+    struct_fields_added: int = 0
+    structs_skipped: int = 0
     errors: list[str] = field(default_factory=list)
+
+
+@dataclass
+class StructAction:
+    """Planned Data-Type-Manager action for one struct."""
+
+    name: str
+    size: int | None           # inferred from declared_size / fields
+    field_count: int
+    kind: str                   # "create" | "keep" | "recreate"
+    rationale: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +318,188 @@ def apply_sync(client: GhidraClient, actions: Iterable[SyncAction],
     return report
 
 
+# ---------------------------------------------------------------------------
+# Struct push (Data Type Manager sync)
+# ---------------------------------------------------------------------------
+
+# Mapping from header-side C types to Ghidra's DTM type names.
+# Ghidra uses lowercased builtins for primitive widths; pointers
+# collapse to the ``void *`` typedef.  Anything unknown falls back
+# to a typed ``undefined`` of the field's intrinsic width.
+_C_TYPE_TO_GHIDRA = {
+    "u8":       "uchar",    "s8":       "char",
+    "u16":      "ushort",   "s16":      "short",
+    "u32":      "uint",     "s32":      "int",
+    "u64":      "ulonglong", "s64":      "longlong",
+    "f32":      "float",    "f64":      "double",
+    "float":    "float",    "double":   "double",
+    "char":     "char",     "uchar":    "uchar",
+    "byte":     "byte",     "bool":     "bool",
+    "int":      "int",      "uint":     "uint",
+    "long":     "long",     "ulong":    "ulong",
+    "short":    "short",    "ushort":   "ushort",
+    "void":     "void",
+}
+
+
+def _ghidra_type_for(c_type: str) -> str:
+    """Map a header C type to Ghidra's DTM spelling."""
+    t = c_type.strip().replace("const ", "").replace(
+        "volatile ", "")
+    if "*" in t or "[" in t:
+        return "void *"
+    bare = t.split()[-1]
+    return _C_TYPE_TO_GHIDRA.get(bare, "undefined4")
+
+
+def plan_struct_sync(client: GhidraClient, *,
+                     azurik_h: Path | None = None,
+                     recreate_existing: bool = False,
+                     ) -> list[StructAction]:
+    """Plan struct pushes from ``azurik.h`` into Ghidra's DTM.
+
+    For each ``typedef struct`` block in the header:
+
+    - If Ghidra doesn't have a struct with that name, plan
+      ``kind="create"`` with all fields.
+    - If Ghidra already has one AND ``recreate_existing`` is
+      ``False`` (default), plan ``kind="keep"`` — leaves whatever
+      Ghidra has alone.
+    - If ``recreate_existing=True``, plan ``kind="recreate"``;
+      apply_struct_sync will DELETE + re-create.
+
+    Skips fields with offset -1 (our header parser's "no comment
+    giving the offset" sentinel) since Ghidra needs a concrete
+    offset for each member.
+    """
+    header = azurik_h or (_find_repo_root() / "shims" / "include"
+                           / "azurik.h")
+    structs = parse_header_structs(header)
+    actions: list[StructAction] = []
+    for hs in structs:
+        has_fields = sum(1 for f in hs.fields if f.offset >= 0)
+        size = hs.declared_size or hs.inferred_size() or 0
+        try:
+            existing = client.get_struct(hs.name)
+        except GhidraClientError:
+            existing = None
+
+        if existing is None:
+            actions.append(StructAction(
+                name=hs.name, size=size, field_count=has_fields,
+                kind="create",
+                rationale=(f"new: {has_fields} fields, size={size}")))
+        elif recreate_existing:
+            actions.append(StructAction(
+                name=hs.name, size=size, field_count=has_fields,
+                kind="recreate",
+                rationale=(f"recreating: Ghidra has "
+                           f"{len(existing.fields)} fields, "
+                           f"header has {has_fields}")))
+        else:
+            actions.append(StructAction(
+                name=hs.name, size=size, field_count=has_fields,
+                kind="keep",
+                rationale=(f"Ghidra already has {hs.name!r}; pass "
+                           f"--recreate-structs to overwrite")))
+    return actions
+
+
+def apply_struct_sync(client: GhidraClient,
+                      actions: Iterable[StructAction],
+                      *,
+                      azurik_h: Path | None = None,
+                      report: SyncReport | None = None,
+                      ) -> SyncReport:
+    """Execute a struct-sync plan against ``client``.
+
+    For each ``create`` / ``recreate`` action: creates the struct
+    then adds every field from the header (skipping offset=-1
+    fields, which have no committed layout in the header).
+
+    ``recreate`` actions DELETE the existing struct first — this
+    wipes any Ghidra variables typed with the old layout.  Use
+    cautiously.
+    """
+    header = azurik_h or (_find_repo_root() / "shims" / "include"
+                           / "azurik.h")
+    header_structs = {s.name: s for s in parse_header_structs(header)}
+    report = report or SyncReport()
+
+    for act in actions:
+        if act.kind == "keep":
+            report.structs_skipped += 1
+            continue
+
+        hs = header_structs.get(act.name)
+        if hs is None:
+            report.errors.append(
+                f"struct {act.name}: no matching definition in "
+                f"header — skipping")
+            continue
+
+        try:
+            if act.kind == "recreate":
+                try:
+                    client.delete_struct(act.name)
+                except GhidraClientError as exc:
+                    # Not-found on delete means someone removed it
+                    # between plan + apply; keep going.
+                    if "not found" not in str(exc).lower():
+                        raise
+            client.create_struct(
+                act.name,
+                size=act.size or 1,
+                description=f"Mirror of {hs.name} from azurik.h")
+            report.structs_created += 1
+
+            fields_with_offsets = [
+                f for f in hs.fields if f.offset >= 0]
+            # Sort by offset so fields land in the right order
+            fields_with_offsets.sort(key=lambda f: f.offset)
+            for hf in fields_with_offsets:
+                try:
+                    client.add_struct_field(
+                        act.name,
+                        field_name=hf.name,
+                        field_type=_ghidra_type_for(hf.c_type),
+                        offset=hf.offset,
+                        comment=(hf.comment or "")[:200])
+                    report.struct_fields_added += 1
+                except GhidraClientError as exc:
+                    report.errors.append(
+                        f"struct {act.name}.{hf.name}: {exc}")
+
+        except GhidraClientError as exc:
+            report.errors.append(f"struct {act.name}: {exc}")
+
+    return report
+
+
+def format_struct_plan(actions: list[StructAction]) -> str:
+    """Pretty-print a struct-sync plan (for dry-run output)."""
+    if not actions:
+        return "(no struct actions planned)"
+    out: list[str] = []
+    buckets: dict[str, list[StructAction]] = {
+        "create": [], "recreate": [], "keep": []}
+    for a in actions:
+        buckets.setdefault(a.kind, []).append(a)
+    for kind in ("create", "recreate", "keep"):
+        grp = buckets.get(kind, [])
+        out.append(f"=== struct {kind}  ({len(grp)}) ===")
+        if not grp:
+            out.append("  (none)")
+            continue
+        for a in grp:
+            size_str = f"size={a.size}" if a.size else "size=?"
+            out.append(
+                f"  {a.name:30} {size_str:12} "
+                f"fields={a.field_count:3d}  ({a.rationale})")
+        out.append("")
+    return "\n".join(out)
+
+
 def format_plan(actions: list[SyncAction]) -> str:
     """Human-readable dry-run report."""
     if not actions:
@@ -347,9 +544,13 @@ def _find_repo_root() -> Path:
 
 
 __all__ = [
+    "StructAction",
     "SyncAction",
     "SyncReport",
+    "apply_struct_sync",
     "apply_sync",
     "format_plan",
+    "format_struct_plan",
+    "plan_struct_sync",
     "plan_sync",
 ]

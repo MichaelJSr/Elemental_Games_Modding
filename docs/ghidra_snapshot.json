@@ -31524,5 +31524,2345 @@
       "namespace": "Global",
       "type": "Label"
     }
+  ],
+  "structs": [
+    {
+      "name": "ControllerState",
+      "size": 73,
+      "category": "/",
+      "description": "Mirror of ControllerState from azurik.h",
+      "fields": [
+        {
+          "name": "left_stick_x",
+          "type": "float",
+          "offset": 0,
+          "length": 4,
+          "comment": "+0x00 \u2014 sThumbLX normalised"
+        },
+        {
+          "name": "left_stick_y",
+          "type": "float",
+          "offset": 4,
+          "length": 4,
+          "comment": "+0x04 \u2014 sThumbLY normalised"
+        },
+        {
+          "name": "right_stick_x",
+          "type": "float",
+          "offset": 8,
+          "length": 4,
+          "comment": "+0x08 \u2014 sThumbRX normalised"
+        },
+        {
+          "name": "right_stick_y",
+          "type": "float",
+          "offset": 12,
+          "length": 4,
+          "comment": "+0x0C \u2014 sThumbRY normalised"
+        },
+        {
+          "name": "dpad_y",
+          "type": "float",
+          "offset": 16,
+          "length": 4,
+          "comment": "+0x10 \u2014 +1 up, -1 down, 0 neutral"
+        },
+        {
+          "name": "dpad_x",
+          "type": "float",
+          "offset": 20,
+          "length": 4,
+          "comment": "+0x14 \u2014 +1 right, -1 left"
+        },
+        {
+          "name": "button_a",
+          "type": "float",
+          "offset": 24,
+          "length": 4,
+          "comment": "+0x18 \u2014 A analog pressure"
+        },
+        {
+          "name": "button_b",
+          "type": "float",
+          "offset": 28,
+          "length": 4,
+          "comment": "+0x1C \u2014 B analog pressure"
+        },
+        {
+          "name": "button_x",
+          "type": "float",
+          "offset": 32,
+          "length": 4,
+          "comment": "+0x20 \u2014 X analog pressure"
+        },
+        {
+          "name": "button_y",
+          "type": "float",
+          "offset": 36,
+          "length": 4,
+          "comment": "+0x24 \u2014 Y analog pressure"
+        },
+        {
+          "name": "button_black",
+          "type": "float",
+          "offset": 40,
+          "length": 4,
+          "comment": "+0x28 \u2014 BLACK analog pressure"
+        },
+        {
+          "name": "button_white",
+          "type": "float",
+          "offset": 44,
+          "length": 4,
+          "comment": "+0x2C \u2014 WHITE analog pressure"
+        },
+        {
+          "name": "trigger_left",
+          "type": "float",
+          "offset": 48,
+          "length": 4,
+          "comment": "+0x30 \u2014 LT analog pressure"
+        },
+        {
+          "name": "trigger_right",
+          "type": "float",
+          "offset": 52,
+          "length": 4,
+          "comment": "+0x34 \u2014 RT analog pressure"
+        },
+        {
+          "name": "stick_left_click",
+          "type": "float",
+          "offset": 56,
+          "length": 4,
+          "comment": "+0x38 \u2014 L-stick press"
+        },
+        {
+          "name": "stick_right_click",
+          "type": "float",
+          "offset": 60,
+          "length": 4,
+          "comment": "+0x3C \u2014 R-stick press"
+        },
+        {
+          "name": "start_button",
+          "type": "float",
+          "offset": 64,
+          "length": 4,
+          "comment": "+0x40 \u2014 START"
+        },
+        {
+          "name": "back_button",
+          "type": "float",
+          "offset": 68,
+          "length": 4,
+          "comment": "+0x44 \u2014 BACK"
+        },
+        {
+          "name": "edge_state",
+          "type": "uchar",
+          "offset": 72,
+          "length": 1,
+          "comment": "+0x48..+0x53"
+        }
+      ]
+    },
+    {
+      "name": "CritterData",
+      "size": 272,
+      "category": "/",
+      "description": "Mirror of CritterData from azurik.h",
+      "fields": [
+        {
+          "name": "_reserved_00",
+          "type": "uint",
+          "offset": 0,
+          "length": 4,
+          "comment": "+0x00 piVar9[0] \u2014 parent / vtable ptr"
+        },
+        {
+          "name": "_reserved_04",
+          "type": "uint",
+          "offset": 4,
+          "length": 4,
+          "comment": "+0x04 piVar9[1] \u2014 identity token"
+        },
+        {
+          "name": "_reserved_08",
+          "type": "uint",
+          "offset": 8,
+          "length": 4,
+          "comment": "+0x08 piVar9[2] \u2014 \"sound dir\" token"
+        },
+        {
+          "name": "feature_class_id",
+          "type": "uint",
+          "offset": 12,
+          "length": 4,
+          "comment": "+0x0C piVar9[3] \u2014 from FUN_000493d0"
+        },
+        {
+          "name": "use_skeleton_collision_word",
+          "type": "uint",
+          "offset": 16,
+          "length": 4,
+          "comment": "+0x10 piVar9[4] \u2014 contains bool at +0x13"
+        },
+        {
+          "name": "_reserved_14",
+          "type": "uint",
+          "offset": 20,
+          "length": 4,
+          "comment": "+0x14 piVar9[5] \u2014 set from a later file pass"
+        },
+        {
+          "name": "collision_radius",
+          "type": "float",
+          "offset": 24,
+          "length": 4,
+          "comment": "+0x18 piVar9[6] \u2014 \"collisionRadius\""
+        },
+        {
+          "name": "collision_aspect_ratio",
+          "type": "float",
+          "offset": 28,
+          "length": 4,
+          "comment": "+0x1C piVar9[7] \u2014 \"collisionAspectRatio\""
+        },
+        {
+          "name": "player_collision_radius",
+          "type": "float",
+          "offset": 32,
+          "length": 4,
+          "comment": "+0x20 piVar9[8] \u2014 \"playerCollisionRadius\""
+        },
+        {
+          "name": "scale",
+          "type": "float",
+          "offset": 36,
+          "length": 4,
+          "comment": "+0x24 piVar9[9] \u2014 \"scale\""
+        },
+        {
+          "name": "skin_index",
+          "type": "uint",
+          "offset": 40,
+          "length": 4,
+          "comment": "+0x28 piVar9[0xA] \u2014 \"skinIndex\""
+        },
+        {
+          "name": "bound_radius",
+          "type": "float",
+          "offset": 44,
+          "length": 4,
+          "comment": "+0x2C piVar9[0xB] \u2014 \"boundRadius\""
+        },
+        {
+          "name": "far_clip",
+          "type": "float",
+          "offset": 48,
+          "length": 4,
+          "comment": "+0x30 piVar9[0xC] \u2014 \"farClip\""
+        },
+        {
+          "name": "awake_distance",
+          "type": "float",
+          "offset": 52,
+          "length": 4,
+          "comment": "+0x34 piVar9[0xD] \u2014 \"awakeDistance\""
+        },
+        {
+          "name": "walk_speed",
+          "type": "float",
+          "offset": 56,
+          "length": 4,
+          "comment": "+0x38 piVar9[0xE] \u2014 \"walkSpeed\" (= 1.0)"
+        },
+        {
+          "name": "walk_anim_speed",
+          "type": "float",
+          "offset": 60,
+          "length": 4,
+          "comment": "+0x3C piVar9[0xF] \u2014 \"walkAnimSpeed\""
+        },
+        {
+          "name": "run_speed",
+          "type": "float",
+          "offset": 64,
+          "length": 4,
+          "comment": "+0x40 piVar9[0x10] \u2014 \"runSpeed\" (= 1.0)"
+        },
+        {
+          "name": "run_anim_speed",
+          "type": "float",
+          "offset": 68,
+          "length": 4,
+          "comment": "+0x44 piVar9[0x11] \u2014 \"runAnimSpeed\""
+        },
+        {
+          "name": "ouch2_threshold",
+          "type": "float",
+          "offset": 72,
+          "length": 4,
+          "comment": "+0x48 piVar9[0x12] \u2014 \"ouch2Threshold\""
+        },
+        {
+          "name": "ouch3_threshold",
+          "type": "float",
+          "offset": 76,
+          "length": 4,
+          "comment": "+0x4C piVar9[0x13] \u2014 \"ouch3Threshold\""
+        },
+        {
+          "name": "ouch1_knockback",
+          "type": "float",
+          "offset": 80,
+          "length": 4,
+          "comment": "+0x50 piVar9[0x14] \u2014 \"ouch1Knockback\""
+        },
+        {
+          "name": "ouch2_knockback",
+          "type": "float",
+          "offset": 84,
+          "length": 4,
+          "comment": "+0x54 piVar9[0x15] \u2014 \"ouch2Knockback\""
+        },
+        {
+          "name": "ouch3_knockback",
+          "type": "float",
+          "offset": 88,
+          "length": 4,
+          "comment": "+0x58 piVar9[0x16] \u2014 \"ouch3Knockback\""
+        },
+        {
+          "name": "victory_anim_token",
+          "type": "uint",
+          "offset": 92,
+          "length": 4,
+          "comment": "+0x5C piVar9[0x17] \u2014 \"victory anim\" ref"
+        },
+        {
+          "name": "shadow_texture_ref",
+          "type": "uint",
+          "offset": 96,
+          "length": 4,
+          "comment": "+0x60 piVar9[0x18] \u2014 transformed string"
+        },
+        {
+          "name": "realm_feature_flags",
+          "type": "uint",
+          "offset": 100,
+          "length": 4,
+          "comment": "+0x64 piVar9[0x19] \u2014 realm | other feat | ..."
+        },
+        {
+          "name": "flocking_fear",
+          "type": "uint",
+          "offset": 104,
+          "length": 4,
+          "comment": "+0x68 piVar9[0x1A] \u2014 \"f.fear\""
+        },
+        {
+          "name": "flocking_follow",
+          "type": "uint",
+          "offset": 108,
+          "length": 4,
+          "comment": "+0x6C piVar9[0x1B] \u2014 \"f.follow\""
+        },
+        {
+          "name": "flocking_attack",
+          "type": "uint",
+          "offset": 112,
+          "length": 4,
+          "comment": "+0x70 piVar9[0x1C] \u2014 \"f.attack\""
+        },
+        {
+          "name": "flocking_food",
+          "type": "uint",
+          "offset": 116,
+          "length": 4,
+          "comment": "+0x74 piVar9[0x1D] \u2014 \"f.food\""
+        },
+        {
+          "name": "_reserved_78",
+          "type": "uchar",
+          "offset": 120,
+          "length": 1,
+          "comment": "+0x78 \u2014 low byte of piVar9[0x1E]"
+        },
+        {
+          "name": "use_center_basis",
+          "type": "uchar",
+          "offset": 121,
+          "length": 1,
+          "comment": "+0x79 \u2014 \"useCenterBasis\""
+        },
+        {
+          "name": "always_glued",
+          "type": "uchar",
+          "offset": 122,
+          "length": 1,
+          "comment": "+0x7A \u2014 \"alwaysGlued\""
+        },
+        {
+          "name": "no_freeze",
+          "type": "uchar",
+          "offset": 123,
+          "length": 1,
+          "comment": "+0x7B \u2014 \"noFreeze\""
+        },
+        {
+          "name": "hits_through_walls",
+          "type": "uchar",
+          "offset": 124,
+          "length": 1,
+          "comment": "+0x7C piVar9[0x1F] (byte) \u2014 \"hitsThroughWalls\""
+        },
+        {
+          "name": "_reserved_7D",
+          "type": "uchar",
+          "offset": 125,
+          "length": 1,
+          "comment": "+0x7D..+0x7F \u2014 tail of piVar9[0x1F]"
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 126,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 127,
+          "length": 1
+        },
+        {
+          "name": "drown_time",
+          "type": "float",
+          "offset": 128,
+          "length": 4,
+          "comment": "+0x80 piVar9[0x20] \u2014 \"drownTime\""
+        },
+        {
+          "name": "corpse_wait_time",
+          "type": "float",
+          "offset": 132,
+          "length": 4,
+          "comment": "+0x84 piVar9[0x21] \u2014 \"corpseWaitTime\""
+        },
+        {
+          "name": "corpse_fade_time",
+          "type": "float",
+          "offset": 136,
+          "length": 4,
+          "comment": "+0x88 piVar9[0x22] \u2014 \"corpseFadeTime\""
+        },
+        {
+          "name": "per_type_data_ptr",
+          "type": "uint",
+          "offset": 140,
+          "length": 4,
+          "comment": "+0x8C piVar9[0x23] \u2014 per-damage-type array"
+        },
+        {
+          "name": "_reserved_90",
+          "type": "uint",
+          "offset": 144,
+          "length": 4,
+          "comment": "+0x90 piVar9[0x24]"
+        },
+        {
+          "name": "shadow_size",
+          "type": "float",
+          "offset": 148,
+          "length": 4,
+          "comment": "+0x94 piVar9[0x25] \u2014 \"shadowSize\""
+        },
+        {
+          "name": "clip_plane_offset",
+          "type": "float",
+          "offset": 152,
+          "length": 4,
+          "comment": "+0x98 piVar9[0x26] \u2014 \"clipPlaneOffset\""
+        },
+        {
+          "name": "shadow_texture_res",
+          "type": "undefined4",
+          "offset": 156,
+          "length": 4,
+          "comment": "+0x9C piVar9[0x27] \u2014 -1 = no shadow"
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 160,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 161,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 162,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 163,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 164,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 165,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 166,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 167,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 168,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 169,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 170,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 171,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 172,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 173,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 174,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 175,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 176,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 177,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 178,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 179,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 180,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 181,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 182,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 183,
+          "length": 1
+        },
+        {
+          "name": "range",
+          "type": "float",
+          "offset": 184,
+          "length": 4,
+          "comment": "+0xB8 piVar9[0x2E] \u2014 \"range\" (sight radius)"
+        },
+        {
+          "name": "range_up",
+          "type": "float",
+          "offset": 188,
+          "length": 4,
+          "comment": "+0xBC piVar9[0x2F] \u2014 \"range up\""
+        },
+        {
+          "name": "range_down",
+          "type": "float",
+          "offset": 192,
+          "length": 4,
+          "comment": "+0xC0 piVar9[0x30] \u2014 \"range down\""
+        },
+        {
+          "name": "attack_range",
+          "type": "float",
+          "offset": 196,
+          "length": 4,
+          "comment": "+0xC4 piVar9[0x31] \u2014 \"attackRange\""
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 200,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 201,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 202,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 203,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 204,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 205,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 206,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 207,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 208,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 209,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 210,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 211,
+          "length": 1
+        },
+        {
+          "name": "drop_1",
+          "type": "uint",
+          "offset": 212,
+          "length": 4,
+          "comment": "+0xD4 piVar9[0x35] \u2014 \"drop1\""
+        },
+        {
+          "name": "drop_2",
+          "type": "uint",
+          "offset": 216,
+          "length": 4,
+          "comment": "+0xD8 piVar9[0x36] \u2014 \"drop2\""
+        },
+        {
+          "name": "drop_3",
+          "type": "uint",
+          "offset": 220,
+          "length": 4,
+          "comment": "+0xDC piVar9[0x37] \u2014 \"drop3\""
+        },
+        {
+          "name": "drop_4",
+          "type": "uint",
+          "offset": 224,
+          "length": 4,
+          "comment": "+0xE0 piVar9[0x38] \u2014 \"drop4\""
+        },
+        {
+          "name": "drop_5",
+          "type": "uint",
+          "offset": 228,
+          "length": 4,
+          "comment": "+0xE4 piVar9[0x39] \u2014 \"drop5\""
+        },
+        {
+          "name": "drop_count_1",
+          "type": "uint",
+          "offset": 232,
+          "length": 4,
+          "comment": "+0xE8 piVar9[0x3A] \u2014 \"dropCount1\""
+        },
+        {
+          "name": "drop_count_2",
+          "type": "uint",
+          "offset": 236,
+          "length": 4,
+          "comment": "+0xEC piVar9[0x3B] \u2014 \"dropCount2\""
+        },
+        {
+          "name": "drop_count_3",
+          "type": "uint",
+          "offset": 240,
+          "length": 4,
+          "comment": "+0xF0 piVar9[0x3C] \u2014 \"dropCount3\""
+        },
+        {
+          "name": "drop_count_4",
+          "type": "uint",
+          "offset": 244,
+          "length": 4,
+          "comment": "+0xF4 piVar9[0x3D] \u2014 \"dropCount4\""
+        },
+        {
+          "name": "drop_count_5",
+          "type": "uint",
+          "offset": 248,
+          "length": 4,
+          "comment": "+0xF8 piVar9[0x3E] \u2014 \"dropCount5\""
+        },
+        {
+          "name": "drop_chance_1",
+          "type": "float",
+          "offset": 252,
+          "length": 4,
+          "comment": "+0xFC  piVar9[0x3F] \u2014 \"dropChance1\""
+        },
+        {
+          "name": "drop_chance_2",
+          "type": "float",
+          "offset": 256,
+          "length": 4,
+          "comment": "+0x100 piVar9[0x40] \u2014 \"dropChance2\""
+        },
+        {
+          "name": "drop_chance_3",
+          "type": "float",
+          "offset": 260,
+          "length": 4,
+          "comment": "+0x104 piVar9[0x41] \u2014 \"dropChance3\""
+        },
+        {
+          "name": "drop_chance_4",
+          "type": "float",
+          "offset": 264,
+          "length": 4,
+          "comment": "+0x108 piVar9[0x42] \u2014 \"dropChance4\""
+        },
+        {
+          "name": "drop_chance_5",
+          "type": "float",
+          "offset": 268,
+          "length": 4,
+          "comment": "+0x10C piVar9[0x43] \u2014 \"dropChance5\""
+        }
+      ]
+    },
+    {
+      "name": "PlayerInputState",
+      "size": 308,
+      "category": "/",
+      "description": "Mirror of PlayerInputState from azurik.h",
+      "fields": [
+        {
+          "name": "entity_class_ptr",
+          "type": "uint",
+          "offset": 0,
+          "length": 4,
+          "comment": "+0x00 piVar1 \u2014 class vtable ptr"
+        },
+        {
+          "name": "frame_dt_fixed",
+          "type": "uint",
+          "offset": 4,
+          "length": 4,
+          "comment": "+0x04 \u2014 constant 0x3D088889 (float 1/30 s)"
+        },
+        {
+          "name": "stick_x",
+          "type": "float",
+          "offset": 8,
+          "length": 4,
+          "comment": "+0x08 \u2014 raw stick X component"
+        },
+        {
+          "name": "stick_y",
+          "type": "float",
+          "offset": 12,
+          "length": 4
+        },
+        {
+          "name": "fall_angle",
+          "type": "float",
+          "offset": 16,
+          "length": 4,
+          "comment": "+0x10 \u2014 angle used in falling branch"
+        },
+        {
+          "name": "idle_angle",
+          "type": "float",
+          "offset": 20,
+          "length": 4,
+          "comment": "+0x14 \u2014 angle used when stick is neutral"
+        },
+        {
+          "name": "walk_angle",
+          "type": "float",
+          "offset": 24,
+          "length": 4,
+          "comment": "+0x18 \u2014 angle used when stick is pushed"
+        },
+        {
+          "name": "stick_magnitude",
+          "type": "float",
+          "offset": 28,
+          "length": 4,
+          "comment": "+0x1C \u2014 sqrt(x\u00b2+y\u00b2), in [0, 1]"
+        },
+        {
+          "name": "flags",
+          "type": "uchar",
+          "offset": 32,
+          "length": 1,
+          "comment": "+0x20 \u2014 PLAYER_FLAG_*"
+        },
+        {
+          "name": "dead",
+          "type": "uchar",
+          "offset": 33,
+          "length": 1,
+          "comment": "+0x21 \u2014 nonzero after death"
+        },
+        {
+          "name": "_reserved_22",
+          "type": "uchar",
+          "offset": 34,
+          "length": 1,
+          "comment": "+0x22"
+        },
+        {
+          "name": "_reserved_23",
+          "type": "uchar",
+          "offset": 35,
+          "length": 1,
+          "comment": "+0x23"
+        },
+        {
+          "name": "ref_x",
+          "type": "float",
+          "offset": 36,
+          "length": 4,
+          "comment": "+0x24 (speculative)"
+        },
+        {
+          "name": "ref_y",
+          "type": "float",
+          "offset": 40,
+          "length": 4,
+          "comment": "+0x28 (speculative)"
+        },
+        {
+          "name": "ref_z",
+          "type": "float",
+          "offset": 44,
+          "length": 4,
+          "comment": "+0x2C (speculative)"
+        },
+        {
+          "name": "_reserved_30",
+          "type": "uchar",
+          "offset": 48,
+          "length": 1,
+          "comment": "+0x30 \u2014 orientation / rotation scratch"
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 49,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 50,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 51,
+          "length": 1
+        },
+        {
+          "name": "*critter_data",
+          "type": "undefined4",
+          "offset": 52,
+          "length": 4,
+          "comment": "+0x34 \u2014 ptr to the player's CritterData"
+        },
+        {
+          "name": "_reserved_38",
+          "type": "uchar",
+          "offset": 56,
+          "length": 1,
+          "comment": "+0x38"
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 57,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 58,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 59,
+          "length": 1
+        },
+        {
+          "name": "target_x",
+          "type": "float",
+          "offset": 60,
+          "length": 4,
+          "comment": "+0x3C (speculative)"
+        },
+        {
+          "name": "target_y",
+          "type": "float",
+          "offset": 64,
+          "length": 4,
+          "comment": "+0x40 (speculative)"
+        },
+        {
+          "name": "target_z",
+          "type": "float",
+          "offset": 68,
+          "length": 4,
+          "comment": "+0x44 (speculative)"
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 72,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 73,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 74,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 75,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 76,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 77,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 78,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 79,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 80,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 81,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 82,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 83,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 84,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 85,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 86,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 87,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 88,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 89,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 90,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 91,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 92,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 93,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 94,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 95,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 96,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 97,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 98,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 99,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 100,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 101,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 102,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 103,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 104,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 105,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 106,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 107,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 108,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 109,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 110,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 111,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 112,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 113,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 114,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 115,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 116,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 117,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 118,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 119,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 120,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 121,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 122,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 123,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 124,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 125,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 126,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 127,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 128,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 129,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 130,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 131,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 132,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 133,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 134,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 135,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 136,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 137,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 138,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 139,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 140,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 141,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 142,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 143,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 144,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 145,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 146,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 147,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 148,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 149,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 150,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 151,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 152,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 153,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 154,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 155,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 156,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 157,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 158,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 159,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 160,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 161,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 162,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 163,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 164,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 165,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 166,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 167,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 168,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 169,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 170,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 171,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 172,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 173,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 174,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 175,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 176,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 177,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 178,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 179,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 180,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 181,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 182,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 183,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 184,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 185,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 186,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 187,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 188,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 189,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 190,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 191,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 192,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 193,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 194,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 195,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 196,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 197,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 198,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 199,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 200,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 201,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 202,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 203,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 204,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 205,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 206,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 207,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 208,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 209,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 210,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 211,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 212,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 213,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 214,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 215,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 216,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 217,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 218,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 219,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 220,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 221,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 222,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 223,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 224,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 225,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 226,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 227,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 228,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 229,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 230,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 231,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 232,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 233,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 234,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 235,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 236,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 237,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 238,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 239,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 240,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 241,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 242,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 243,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 244,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 245,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 246,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 247,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 248,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 249,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 250,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 251,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 252,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 253,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 254,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 255,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 256,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 257,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 258,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 259,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 260,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 261,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 262,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 263,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 264,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 265,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 266,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 267,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 268,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 269,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 270,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 271,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 272,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 273,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 274,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 275,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 276,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 277,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 278,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 279,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 280,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 281,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 282,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 283,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 284,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 285,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 286,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 287,
+          "length": 1
+        },
+        {
+          "name": "direction_angle",
+          "type": "float",
+          "offset": 288,
+          "length": 4,
+          "comment": "+0x120 \u2014 output angle (radians)"
+        },
+        {
+          "name": "magnitude",
+          "type": "float",
+          "offset": 292,
+          "length": 4
+        },
+        {
+          "name": "direction_x",
+          "type": "float",
+          "offset": 296,
+          "length": 4,
+          "comment": "+0x128 \u2014 -sin(direction_angle)"
+        },
+        {
+          "name": "direction_y",
+          "type": "float",
+          "offset": 300,
+          "length": 4,
+          "comment": "+0x12C \u2014  cos(direction_angle)"
+        },
+        {
+          "name": "direction_z",
+          "type": "float",
+          "offset": 304,
+          "length": 4,
+          "comment": "+0x130 \u2014 always 0 (Azurik is 2D horizontal)"
+        }
+      ]
+    }
   ]
 }

@@ -266,9 +266,14 @@ class GhidraStructField:
 
     @classmethod
     def from_json(cls, obj: dict) -> "GhidraStructField":
+        # Ghidra's REST plugin surfaces the type name as "type"
+        # in per-field responses; the summary endpoint uses
+        # "dataType" in some Ghidra revisions.  Accept either.
+        data_type = (obj.get("type") or obj.get("dataType")
+                     or obj.get("typePath", "").lstrip("/"))
         return cls(
             name=obj.get("name", ""),
-            data_type=obj.get("dataType", ""),
+            data_type=data_type,
             offset=int(obj.get("offset", 0)),
             length=int(obj.get("length", 0)),
             comment=obj.get("comment", ""),
@@ -565,6 +570,63 @@ class GhidraClient:
             "GET", f"/structs/{name}")
         body = self._require_success(resp)
         return GhidraStruct.from_json(body.get("result") or {})
+
+    def create_struct(self, name: str, *,
+                      size: int = 1,
+                      category: str = "",
+                      description: str = "",
+                      ) -> dict:
+        """Create a new empty struct in Ghidra's Data Type Manager.
+
+        ``size`` is ignored by Ghidra when the struct has no fields
+        (it starts as the minimum 1-byte unit) — pass it anyway for
+        documentation; fields are added via :meth:`add_struct_field`
+        in a second step.
+
+        Raises :class:`GhidraClientError` if Ghidra already has a
+        struct with this name (use :meth:`delete_struct` first if
+        you want to re-create one from scratch).
+        """
+        body = {"name": name, "size": int(size)}
+        if category:
+            body["category"] = category
+        if description:
+            body["description"] = description
+        resp = self._request("POST", "/structs", json_body=body)
+        return self._require_success(resp).get("result") or {}
+
+    def add_struct_field(self, name: str, *, field_name: str,
+                         field_type: str,
+                         offset: int | None = None,
+                         length: int | None = None,
+                         comment: str = "",
+                         ) -> dict:
+        """Append a field to an existing struct.
+
+        Ghidra's field-type names differ from C spelling in a few
+        cases (``uint`` / ``ushort`` / ``float`` / ``char`` /
+        ``void *`` / etc.); if in doubt, call
+        :meth:`iter_datatypes` first and pick a known type.
+        """
+        body: dict = {
+            "fieldType": field_type, "name": field_name,
+        }
+        if offset is not None:
+            body["offset"] = int(offset)
+        if length is not None:
+            body["length"] = int(length)
+        if comment:
+            body["comment"] = comment
+        resp = self._request(
+            "POST", f"/structs/{name}/fields", json_body=body)
+        return self._require_success(resp).get("result") or {}
+
+    def delete_struct(self, name: str) -> dict:
+        """Remove a struct from the DTM.  Returns the deleted
+        struct's summary or raises if it didn't exist."""
+        resp = self._request(
+            "DELETE", f"/structs/{name}")
+        return self._require_success(resp).get("result") or {}
 
     def iter_structs(self, *, page_size: int = 200
                      ) -> Iterator[dict]:

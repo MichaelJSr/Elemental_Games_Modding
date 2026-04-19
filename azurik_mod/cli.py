@@ -519,6 +519,14 @@ def main() -> None:
     p_gs.add_argument("--force", action="store_true",
         help="Overwrite functions that already have a user-meaningful "
              "name (default: skip)")
+    p_gs.add_argument("--push-structs", action="store_true",
+        help="Also push struct definitions from "
+             "shims/include/azurik.h into Ghidra's Data Type "
+             "Manager.  Skips structs already present.")
+    p_gs.add_argument("--recreate-structs", action="store_true",
+        help="With --push-structs: DELETE + recreate structs that "
+             "already exist in Ghidra.  Destructive — wipes any "
+             "Ghidra variables typed with the old layout.")
     p_gs.add_argument("--host", default=None,
         help="Ghidra host (default localhost)")
     p_gs.add_argument("--port", type=int, default=None,
@@ -693,6 +701,11 @@ def main() -> None:
         help="Include FUN_* / LAB_* / DAT_* rows (default: drop them)")
     p_gsn.add_argument("--no-labels", action="store_true",
         help="Skip the labels section (functions-only snapshot)")
+    p_gsn.add_argument("--no-structs", action="store_true",
+        help="Skip the structs section.  By default the snapshot "
+             "captures Azurik-specific structs (CritterData, "
+             "ControllerState, PlayerInputState, …) pushed via "
+             "``ghidra-sync --push-structs``.")
 
     # ------------------------------------------------------------------
     # new-shim (tier 2 #6 — scaffolder with ABI pickup)

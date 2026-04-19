@@ -62,6 +62,8 @@ class SnapshotStats:
     named_functions: int = 0
     total_labels: int = 0
     named_labels: int = 0
+    total_structs: int = 0
+    captured_structs: int = 0
     program_name: str = ""
 
 
@@ -77,6 +79,8 @@ def _format_address(addr: int | str) -> str:
 def dump_snapshot(client: GhidraClient, *,
                   include_default_names: bool = False,
                   include_labels: bool = True,
+                  include_structs: bool = True,
+                  struct_name_prefixes: tuple[str, ...] = (),
                   ) -> tuple[dict, SnapshotStats]:
     """Pull a snapshot off ``client``.
 
@@ -113,6 +117,45 @@ def dump_snapshot(client: GhidraClient, *,
             **({"signature": fn.signature} if fn.signature else {}),
         })
 
+    structs: list[dict] = []
+    if include_structs:
+        # Only capture structs from our own category tree by
+        # default — dumping the full Ghidra DTM (CRYPTO_VECTOR,
+        # _CONTEXT, XBE headers, …) would add hundreds of KB of
+        # kernel noise.  Pass ``struct_name_prefixes=("",)`` to
+        # capture everything.
+        our_prefixes = struct_name_prefixes or (
+            "CritterData", "ControllerState", "PlayerInputState",
+            "PlayerState", "PlayerPhysics", "BootState",
+            "SaveSlot", "SaveMeta", "XbeCertificate",
+        )
+
+        def _matches_our_prefixes(n: str) -> bool:
+            return any(n.startswith(p) for p in our_prefixes)
+
+        for summary in client.iter_structs(page_size=500):
+            stats.total_structs += 1
+            name = summary.get("name", "")
+            if not _matches_our_prefixes(name):
+                continue
+            try:
+                full = client.get_struct(name)
+            except Exception:
+                continue
+            structs.append({
+                "name": full.name,
+                "size": full.size,
+                "category": full.category,
+                "description": full.description,
+                "fields": [
+                    {"name": f.name, "type": f.data_type,
+                     "offset": f.offset, "length": f.length,
+                     **({"comment": f.comment} if f.comment else {})}
+                    for f in full.fields
+                ],
+            })
+            stats.captured_structs += 1
+
     labels: list[dict] = []
     if include_labels:
         for lbl in client.iter_labels(page_size=1000):
@@ -136,6 +179,7 @@ def dump_snapshot(client: GhidraClient, *,
         },
         "functions": functions,
         "labels": labels,
+        "structs": structs,
     }
     return snapshot, stats
 
@@ -143,12 +187,14 @@ def dump_snapshot(client: GhidraClient, *,
 def write_snapshot(path: str | Path, client: GhidraClient, *,
                    include_default_names: bool = False,
                    include_labels: bool = True,
+                   include_structs: bool = True,
                    indent: int = 2) -> SnapshotStats:
     """Dump a snapshot to ``path``.  Returns the stats struct."""
     snapshot, stats = dump_snapshot(
         client,
         include_default_names=include_default_names,
-        include_labels=include_labels)
+        include_labels=include_labels,
+        include_structs=include_structs)
     Path(path).expanduser().write_text(
         json.dumps(snapshot, indent=indent),
         encoding="utf-8")

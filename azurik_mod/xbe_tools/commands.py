@@ -282,9 +282,25 @@ def cmd_ghidra_coverage(args) -> None:
 # ---------------------------------------------------------------------------
 
 def cmd_ghidra_sync(args) -> None:
-    """Dispatch into :mod:`.ghidra_sync`."""
+    """Dispatch into :mod:`.ghidra_sync`.
+
+    Supports two orthogonal sync surfaces:
+
+    - **Function / comment sync** (always on): push vanilla-
+      symbol renames + plate comments for anchors + patch sites.
+    - **Struct sync** (``--push-structs``): create any struct
+      defined in ``shims/include/azurik.h`` that Ghidra doesn't
+      already have, complete with field layout.  Add
+      ``--recreate-structs`` to DELETE + rebuild structs that
+      already exist (destructive — wipes any Ghidra variables
+      typed with the old layout).
+    """
     from .ghidra_client import GhidraClient, GhidraClientError
-    from .ghidra_sync import apply_sync, format_plan, plan_sync
+    from .ghidra_sync import (
+        apply_struct_sync, apply_sync,
+        format_plan, format_struct_plan,
+        plan_struct_sync, plan_sync,
+        SyncReport)
 
     client = GhidraClient(
         host=args.host or "localhost",
@@ -300,25 +316,57 @@ def cmd_ghidra_sync(args) -> None:
         print(f"ghidra-sync: {exc}", file=sys.stderr)
         sys.exit(1)
 
+    struct_actions = []
+    if getattr(args, "push_structs", False):
+        try:
+            struct_actions = plan_struct_sync(
+                client,
+                recreate_existing=getattr(
+                    args, "recreate_structs", False))
+        except GhidraClientError as exc:
+            print(f"ghidra-sync (structs): {exc}", file=sys.stderr)
+            sys.exit(1)
+
     if args.json:
-        _emit([{
-            "va": a.va, "kind": a.kind,
-            "current_name": a.current_name,
-            "new_name": a.new_name,
-            "comment": a.comment,
-            "rationale": a.rationale,
-        } for a in actions], as_json=True)
+        _emit({
+            "symbols": [
+                {"va": a.va, "kind": a.kind,
+                 "current_name": a.current_name,
+                 "new_name": a.new_name,
+                 "comment": a.comment,
+                 "rationale": a.rationale}
+                for a in actions
+            ],
+            "structs": [
+                {"name": s.name, "kind": s.kind,
+                 "size": s.size, "field_count": s.field_count,
+                 "rationale": s.rationale}
+                for s in struct_actions
+            ],
+        }, as_json=True)
     else:
         print(format_plan(actions))
+        if getattr(args, "push_structs", False):
+            print()
+            print(format_struct_plan(struct_actions))
 
     if args.apply:
-        print("\nApplying actions to "
+        print("\nApplying symbol actions to "
               f"{client.base_url}  (force={args.force})")
         report = apply_sync(client, actions, force=args.force)
-        print(f"  attempted:  {report.attempted}")
-        print(f"  renamed:    {report.renamed}")
-        print(f"  commented:  {report.commented}")
-        print(f"  skipped:    {report.skipped}")
+        if struct_actions:
+            print(f"Applying struct actions to "
+                  f"{client.base_url}  "
+                  f"(recreate={getattr(args, 'recreate_structs', False)})")
+            apply_struct_sync(client, struct_actions, report=report)
+        print(f"  attempted:          {report.attempted}")
+        print(f"  renamed:            {report.renamed}")
+        print(f"  commented:          {report.commented}")
+        print(f"  skipped (renames):  {report.skipped}")
+        if struct_actions:
+            print(f"  structs_created:    {report.structs_created}")
+            print(f"  struct_fields:      {report.struct_fields_added}")
+            print(f"  structs_skipped:    {report.structs_skipped}")
         if report.errors:
             print(f"  errors     ({len(report.errors)}):")
             for err in report.errors[:20]:
@@ -606,13 +654,17 @@ def cmd_ghidra_snapshot(args) -> None:
         Path(args.path).expanduser(),
         client,
         include_default_names=args.keep_default_names,
-        include_labels=not args.no_labels)
+        include_labels=not args.no_labels,
+        include_structs=not getattr(args, "no_structs", False))
     print(f"Snapshot written to {args.path}")
     print(f"  program:         {stats.program_name}")
     print(f"  functions:       {stats.named_functions} named / "
           f"{stats.total_functions} total")
     print(f"  labels:          {stats.named_labels} named / "
           f"{stats.total_labels} total")
+    if stats.total_structs:
+        print(f"  structs:         {stats.captured_structs} captured / "
+              f"{stats.total_structs} total")
 
 
 def cmd_xbr_diff(args) -> None:
