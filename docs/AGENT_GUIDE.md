@@ -49,7 +49,7 @@ Elemental_Games_Modding/
 │   └── toolchain/
 │       ├── compile.sh              #   clang -target i386-pc-win32 wrapper
 │       └── new_shim.sh             #   scaffolds a whole feature folder
-├── tests/                          # 190+ pytest tests — keep green
+├── tests/                          # pytest suite — keep green (run ``pytest tests/`` for count)
 ├── docs/                           # Documentation (this file is one)
 ├── gui/                            # Tkinter GUI — separate subsystem
 └── scripts/                        # Generators + one-offs
@@ -176,16 +176,25 @@ The 16-byte figure is specific to this build of Azurik.  If anyone
 ever rebuilds the XBE, the gap may shift.  Don't hardcode `16` —
 call `find_text_padding(xbe)` which discovers the gap dynamically.
 
-### 4e. The 151-import ceiling
+### 4e. Kernel imports — two surfaces, automatic dispatch
 
-D1 exposes only the 151 kernel functions Azurik's vanilla XBE
-**already imports**.  Calling a kernel function outside that set
-requires extending the XBE kernel thunk table, which is non-trivial
-because the table has no trailing slack.  Tracked as "D1-extend"
-in `docs/SHIMS.md`.
+D1 exposes the 151 kernel functions Azurik's vanilla XBE already
+imports via static `FF 25 <thunk_va>` stubs (fastest path).  For
+ANY other xboxkrnl export, **D1-extend** (shipped; see
+`docs/D1_EXTEND.md`) emits a runtime-resolving stub that walks
+xboxkrnl.exe's PE export table at the fixed retail kernel base
+`0x80010000` on first call and caches the result inline.
 
-Workaround: find a vanilla Azurik function that wraps the kernel
-call you want, and expose it via `vanilla_symbols.py`.
+Authoring:
+- Static 151: include `shims/include/azurik_kernel.h`.
+- Extended (anything else): include
+  `shims/include/azurik_kernel_extend.h`.
+
+`shim_session.stub_for_kernel_symbol` dispatches between the two
+paths automatically based on the ordinal catalogue in
+`azurik_mod/patching/xboxkrnl_ordinals.py` — shim authors don't
+pick.  The fallback-to-vanilla-wrapper workaround the old docs
+recommended is no longer necessary for kernel-level calls.
 
 ### 4f. `config.xbr` dead data
 
@@ -321,8 +330,8 @@ When you (an agent) launch subagents:
 
 | Goal                                   | Start reading                                              |
 |----------------------------------------|------------------------------------------------------------|
-| Add a slider-driven float patch        | `azurik_mod/patches/player_physics.py` (gravity example)   |
-| Add a byte-level QoL patch             | `azurik_mod/patches/qol.py`                                |
+| Add a slider-driven float patch        | `azurik_mod/patches/player_physics/__init__.py` (gravity example) |
+| Add a byte-level QoL patch             | `azurik_mod/patches/qol_gem_popups/__init__.py` (or sibling `qol_*` folder) |
 | Write a new C shim                     | `docs/SHIM_AUTHORING.md`                                   |
 | Expose a new vanilla Azurik function   | `azurik_mod/patching/vanilla_symbols.py`                   |
 | Call a kernel function from a shim     | `shims/include/azurik_kernel.h` (all 151 declared)         |

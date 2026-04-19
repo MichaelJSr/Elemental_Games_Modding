@@ -47,7 +47,11 @@ Elemental_Games_Modding/
     AGENT_GUIDE.md                   AI-agent-specific playbook
     LEARNINGS.md                     accumulated RE findings
     PATCHES.md                       catalog of every feature pack
-    MODDING_GUIDE.md                 legacy modding notes
+    D1_EXTEND.md                     runtime xboxkrnl export resolver design
+    D2_NXDK.md                       (deferred) full NXDK integration plan
+    SAVE_FORMAT.md                   Azurik save-game format + `save inspect` CLI
+    RANDOMIZER_AUDIT.md              randomizer correctness audit + extension roadmap
+    MODDING_GUIDE.md                 legacy modding notes (partially superseded)
     DECOMP.md                        pointer to the Ghidra project
   azurik_mod/                        Library (pip-installable)
     cli.py                           argparse dispatcher ("azurik-mod")
@@ -72,9 +76,8 @@ Elemental_Games_Modding/
     backend.py                       in-process calls into azurik_mod
     pages/                           one module per screen
   scripts/                           Stand-alone utilities
-  examples/                          Ready-to-use mod JSONs
   iso/                               Drop your base ISO here (auto-detected by the GUI)
-  tests/                             pytest-based unit tests (190+)
+  tests/                             pytest-based unit + integration tests
 ```
 
 ### Key sub-packages
@@ -139,11 +142,20 @@ azurik-mod verify-patches \
 # Dump live config values
 azurik-mod dump --iso game.iso --section critters_walking --entity air_elemental
 
+# Generate an editable mod JSON populated with vanilla defaults
+# (replaces the deprecated `examples/` folder — always truthful
+# because it reads the ISO live):
+azurik-mod mod-template --iso game.iso \
+    --section critters_walking --entity goblin -o my_goblin.json
+
 # Preview a mod before writing
-azurik-mod diff --iso game.iso --mod examples/enemy_buff.json
+azurik-mod diff --iso game.iso --mod my_goblin.json
 
 # Apply one or more mods
-azurik-mod patch --iso game.iso --mod examples/player_boost.json --output out.iso
+azurik-mod patch --iso game.iso --mod my_goblin.json --output out.iso
+
+# Or use the GUI's Entity Editor tab for point-and-click editing —
+# it reads the same live values and produces the same mod JSON.
 ```
 
 All options (including `--no-major`, `--no-gems`, `--no-qol`, `--fps-unlock`, `--gravity`, `--player-walk-scale`, `--player-run-scale`, `--obsidian-cost`, `--item-pool`, `--config-mod`) pass straight through the CLI tree.

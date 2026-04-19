@@ -8,7 +8,7 @@
 > `<level>.sav` is pending acquisition of real save samples.
 >
 > **Python module**: [`azurik_mod.save_format`](../azurik_mod/save_format/)
-> **CLI**: `azurik-cli save inspect <path>`
+> **CLI**: `azurik-mod save inspect <path>`
 
 ---
 
@@ -53,7 +53,7 @@ directory.  To inspect a save slot with the tools in this repo:
 4. Pick a loose destination folder on your host; xemu drops the
    SaveMeta.xbx / SaveImage.xbx / signature.sav / `<level>.sav`
    files into it.
-5. Run `azurik-cli save inspect <exported_folder>` for a summary.
+5. Run `azurik-mod save inspect <exported_folder>` for a summary.
 
 ### Option B — qcow2 + FATX (manual)
 
@@ -192,7 +192,7 @@ test in `tests/test_save_format.py` that pins the byte offsets.
 ## 5. CLI
 
 ```
-$ azurik-cli save inspect ~/exports/my_save_slot/
+$ azurik-mod save inspect ~/exports/my_save_slot/
 save directory: ~/exports/my_save_slot/
   display name:     'My Hero's Journey'
   title name:       'Azurik: Rise of Perathia'
@@ -208,7 +208,7 @@ save directory: ~/exports/my_save_slot/
 JSON output for downstream tooling:
 
 ```
-$ azurik-cli save inspect ~/exports/my_save_slot/ --json
+$ azurik-mod save inspect ~/exports/my_save_slot/ --json
 {
   "path": "...",
   "save_name": "My Hero's Journey",
@@ -221,7 +221,7 @@ $ azurik-cli save inspect ~/exports/my_save_slot/ --json
 Single-file inspection:
 
 ```
-$ azurik-cli save inspect signature.sav
+$ azurik-mod save inspect signature.sav
 file:     signature.sav
 size:     4116 bytes
 header:

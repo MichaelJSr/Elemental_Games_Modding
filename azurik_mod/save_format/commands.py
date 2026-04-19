@@ -16,7 +16,7 @@ from .container import SaveDirectory
 
 
 def cmd_save_inspect(args) -> None:
-    """Handle ``azurik-cli save inspect <path>`` — human / JSON summary.
+    """Handle ``azurik-mod save inspect <path>`` — human / JSON summary.
 
     ``<path>`` may be either a single ``.sav`` file or a directory
     containing the Xbox save-container bundle.  Missing files are

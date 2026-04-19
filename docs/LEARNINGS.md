@@ -26,7 +26,7 @@ use the C1-style redirect (rewrite the instruction at the call site
 to reference a freshly-injected per-game constant) instead of
 mutating the shared value.
 
-Reference: `azurik_mod/patches/player_physics.py::apply_player_speed`.
+Reference: `azurik_mod/patches/player_physics/__init__.py::apply_player_speed`.
 
 ### `CritterData.walkSpeed` and `runSpeed` are dead data
 
@@ -131,7 +131,7 @@ buffer corruption).  Cap 4 is known-stable.  Don't go higher
 without xemu testing — larger caps can produce similar corruption
 on transition-heavy frames.
 
-Reference: `azurik_mod/patches/fps_unlock.py`.
+Reference: `azurik_mod/patches/fps_unlock/__init__.py`.
 
 ---
 
@@ -147,7 +147,7 @@ reader for player physics**, so mutating it in place (via
 `ParametricPatch`) is safe.  Side effects on non-player falling
 entities are acceptable — the user sees gravity apply uniformly.
 
-Reference: `azurik_mod/patches/player_physics.py::GRAVITY_PATCH`.
+Reference: `azurik_mod/patches/player_physics/__init__.py::GRAVITY_PATCH`.
 
 ---
 

@@ -49,14 +49,42 @@ def parse_xbe_sections(data: bytes) -> tuple[int, list[dict[str, Any]]]:
     invasively touch every ``bytearray(...)`` construction site.
     The ~1 ms aggregate overhead isn't worth that — parsing stays
     unconditional.
+
+    Robustness: the XBE header's ``section_count`` +
+    ``section_headers_addr`` are user-controlled fields; a
+    truncated / hostile buffer could point past ``len(data)`` and
+    crash ``struct.unpack_from`` or ``data.index`` with a
+    unhelpful traceback.  We validate every field access against
+    the buffer length and surface a clear ``ValueError`` for bad
+    input instead.
     """
+    if len(data) < 0x180:
+        raise ValueError(
+            f"XBE image header requires at least 384 B, got {len(data)}")
     if data[:4] != b"XBEH":
         raise ValueError("Not a valid XBE file (bad magic)")
 
     base_addr = struct.unpack_from("<I", data, 0x104)[0]
     section_count = struct.unpack_from("<I", data, 0x11C)[0]
     section_headers_addr = struct.unpack_from("<I", data, 0x120)[0]
+
+    # Sanity cap: a real XBE typically has <100 sections; something
+    # claiming 2^32 / 2 sections is clearly garbage.
+    if section_count > 0xFFFF:
+        raise ValueError(
+            f"XBE section_count {section_count} exceeds sanity limit "
+            f"(65535); file is corrupt or hostile")
+    if section_headers_addr < base_addr:
+        raise ValueError(
+            f"XBE section_headers_addr 0x{section_headers_addr:X} is "
+            f"below base_addr 0x{base_addr:X} — corrupt header")
     section_headers_offset = section_headers_addr - base_addr
+    end_offset = section_headers_offset + section_count * 56
+    if end_offset > len(data):
+        raise ValueError(
+            f"XBE section header array ends at file offset "
+            f"0x{end_offset:X} but image is only 0x{len(data):X} B "
+            f"— truncated or corrupt")
 
     sections: list[dict[str, Any]] = []
     for i in range(section_count):
@@ -67,8 +95,25 @@ def parse_xbe_sections(data: bytes) -> tuple[int, list[dict[str, Any]]]:
         raw_addr = struct.unpack_from("<I", data, off + 12)[0]
         raw_size = struct.unpack_from("<I", data, off + 16)[0]
         name_addr = struct.unpack_from("<I", data, off + 20)[0]
+        # Validate name-pointer bounds before reaching into ``data``.
+        if name_addr < base_addr:
+            raise ValueError(
+                f"XBE section #{i}: name_addr 0x{name_addr:X} is "
+                f"below base_addr 0x{base_addr:X}")
         name_offset = name_addr - base_addr
-        name_end = data.index(b"\x00", name_offset)
+        if name_offset >= len(data):
+            raise ValueError(
+                f"XBE section #{i}: name_offset 0x{name_offset:X} "
+                f"past end of image (0x{len(data):X})")
+        # ``bytes.index`` raises ValueError on miss; catch it to
+        # emit a contextual error instead of the bare "subsection
+        # not found" message.
+        try:
+            name_end = data.index(b"\x00", name_offset)
+        except ValueError:
+            raise ValueError(
+                f"XBE section #{i}: name at 0x{name_offset:X} is "
+                f"not null-terminated within the image")
         name = data[name_offset:name_end].decode("ascii", errors="replace")
         sections.append({
             "name": name,

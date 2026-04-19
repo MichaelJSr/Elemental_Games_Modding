@@ -97,8 +97,43 @@ def read_config_data(args) -> bytearray:
         sys.exit(1)
 
 
+# Cache keyed by (resolved ISO path, mtime, size).  ``verify-patches
+# --original`` extracts both a patched ISO and the vanilla original
+# in one command, so caching by identity avoids a second
+# ``xdvdfs copy-out`` for the identical file.  Cache invalidates
+# automatically if the ISO is modified on disk.
+#
+# Memory cost: one ~4 MB bytearray per cached ISO — trivial; we cap
+# at 4 entries just to bound worst-case growth across long-running
+# sessions (verify-patches is the only real consumer; it reads at
+# most 2 ISOs per run).
+_xbe_cache: dict[tuple[str, float, int], bytearray] = {}
+_XBE_CACHE_MAX = 4
+
+
+def _cache_key_for(path: Path) -> tuple[str, float, int] | None:
+    try:
+        st = path.stat()
+        return (str(path.resolve()), st.st_mtime, st.st_size)
+    except OSError:
+        return None
+
+
 def extract_xbe_from_iso(iso_path: Path) -> bytearray:
-    """Pull default.xbe out of an Xbox ISO via `xdvdfs copy-out`."""
+    """Pull default.xbe out of an Xbox ISO via `xdvdfs copy-out`.
+
+    Cached by ``(resolved_path, mtime, size)`` so a second call with
+    the same unchanged ISO reuses the first call's bytearray (a
+    ~4 MB copy).  Callers mutating the returned buffer in place
+    will poison the cache — they should ``bytearray(result)`` first
+    if they need an independent copy.  Current consumers
+    (``cmd_verify_patches``, ``cmd_randomize_full``) read-only, so
+    this is safe today.
+    """
+    key = _cache_key_for(iso_path)
+    if key is not None and key in _xbe_cache:
+        return _xbe_cache[key]
+
     xdvdfs = require_xdvdfs()
     with tempfile.TemporaryDirectory(prefix="azurik_verify_") as tmpdir:
         out_file = Path(tmpdir) / "default.xbe"
@@ -107,7 +142,14 @@ def extract_xbe_from_iso(iso_path: Path) -> bytearray:
         if not out_file.exists():
             print(f"ERROR: Could not extract default.xbe from {iso_path}")
             sys.exit(1)
-        return bytearray(out_file.read_bytes())
+        data = bytearray(out_file.read_bytes())
+
+    if key is not None:
+        # Bounded eviction — drop oldest entry if cache is full.
+        while len(_xbe_cache) >= _XBE_CACHE_MAX:
+            _xbe_cache.pop(next(iter(_xbe_cache)))
+        _xbe_cache[key] = data
+    return data
 
 
 def read_xbe_bytes(iso_or_xbe: Path) -> bytearray:

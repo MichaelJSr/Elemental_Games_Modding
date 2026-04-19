@@ -188,8 +188,10 @@ shipping a broken ISO.
 
 **Still-to-do** (not in this round): re-shuffle when a collision
 would occur, or pre-filter `base_types` to only those that fit
-each slot.  Tracked as
-[ROADMAP-G1](#g1-gem-size-aware-shuffle).
+each slot.  Tracked as **G1 — Gem-size-aware shuffle** in the
+[Extension roadmap](#extension-roadmap) below (rolled into the
+wider [P1 composable pipeline](#p1--composable-pipeline-high-value-1-week)
+refactor).
 
 ---
 

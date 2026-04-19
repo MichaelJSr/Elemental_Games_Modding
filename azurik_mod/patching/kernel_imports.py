@@ -26,10 +26,16 @@ for Win32 / PE imports.  We reimplement the bare minimum of that
 contract here.
 
 Adding a NEW kernel import (one Azurik does not already reference)
-is Phase 2 D1-extend work and is NOT supported by this module — the
-thunk table has zero trailing slack in Azurik's XBE.  Such imports
-can still be called indirectly by going through an Azurik function
-that wraps the kernel API (the A3 vanilla-symbol registry).
+is **supported** via Phase 2 D1-extend — see ``docs/D1_EXTEND.md``.
+This module handles only the fast-path STATIC thunk imports (the
+151 Azurik already references); D1-extend's runtime resolver in
+``shims/shared/xboxkrnl_resolver.c`` + the stub generator in
+``shim_session._place_extended_kernel_stub`` handle the rest by
+walking xboxkrnl.exe's PE export table at runtime.  Shim authors
+don't have to pick between the two paths —
+``shim_session.stub_for_kernel_symbol`` dispatches automatically
+based on whether the requested ordinal sits in Azurik's static
+thunk table or the extended catalogue.
 """
 
 from __future__ import annotations

@@ -1,12 +1,25 @@
 # Azurik: Rise of Perathia — Modding Toolkit
 
+> **Status note**: this file is partially superseded by the per-
+> subsystem docs under `docs/` and the modern `azurik-mod` CLI.
+> The command names below have been updated from the obsolete
+> `python azurik_mod.py <cmd>` invocation to the packaged
+> `azurik-mod <cmd>` entry point that `pip install -e .` wires
+> onto your PATH.  Prefer the targeted docs for authoring work:
+> [`ONBOARDING.md`](ONBOARDING.md), [`PATCHES.md`](PATCHES.md),
+> [`SHIM_AUTHORING.md`](SHIM_AUTHORING.md),
+> [`RANDOMIZER_AUDIT.md`](RANDOMIZER_AUDIT.md).
+
+
 A set of tools for modding Azurik: Rise of Perathia (Xbox, 2001). Patch game config values, randomize collectibles, edit level entities, inspect game files, and extract save data. All tools produce xemu-ready ISOs.
 
 ## Requirements
 
 - **Python 3.10+**
-- **xdvdfs** — Xbox DVD filesystem tool ([download](https://github.com/antangelo/xdvdfs/releases))
-  - Place `xdvdfs.exe` in the `tools/` folder, or install via `cargo install xdvdfs-cli`
+- **xdvdfs** — Xbox DVD filesystem tool.  Auto-downloaded into the
+  per-user cache on first use (Windows / Linux).  **macOS users:**
+  install with `cargo install xdvdfs-cli` (or set `$AZURIK_XDVDFS`)
+  since no prebuilt macOS binary ships upstream.
 - **Original Azurik ISO** — Your own legally-obtained copy of the game
 - **xemu** — Original Xbox emulator ([xemu.app](https://xemu.app)) for testing
 
@@ -17,7 +30,7 @@ A set of tools for modding Azurik: Rise of Perathia (Xbox, 2001). Patch game con
 Shuffle gem types, disk fragments, and elemental power-ups across every level:
 
 ```bash
-python azurik_mod.py randomize \
+azurik-mod randomize \
   --iso "Azurik - Rise of Perathia.iso" \
   --seed 42 \
   --output Azurik_randomized.iso
@@ -33,10 +46,10 @@ Use `--seed` for reproducible results. Same seed = same layout every time.
 Skip specific categories if you want:
 ```bash
 # Only randomize fragments and powers (leave gems alone)
-python azurik_mod.py randomize --iso Azurik.iso --seed 42 --no-gems -o modded.iso
+azurik-mod randomize --iso Azurik.iso --seed 42 --no-gems -o modded.iso
 
 # Only randomize gems
-python azurik_mod.py randomize --iso Azurik.iso --seed 42 --no-fragments --no-powers -o modded.iso
+azurik-mod randomize --iso Azurik.iso --seed 42 --no-fragments --no-powers -o modded.iso
 ```
 
 ### 2. Apply a Config Mod
@@ -44,7 +57,7 @@ python azurik_mod.py randomize --iso Azurik.iso --seed 42 --no-fragments --no-po
 Patch gameplay values (enemy behavior, player stats) using a JSON mod file:
 
 ```bash
-python azurik_mod.py patch \
+azurik-mod patch \
   --iso "Azurik - Rise of Perathia.iso" \
   --mod example_enemy_buff.json \
   --output Azurik_modded.iso
@@ -52,7 +65,7 @@ python azurik_mod.py patch \
 
 You can stack multiple mods:
 ```bash
-python azurik_mod.py patch --iso Azurik.iso \
+azurik-mod patch --iso Azurik.iso \
   -m example_enemy_buff.json \
   -m example_player_boost.json \
   -o Azurik_modded.iso
@@ -62,10 +75,10 @@ python azurik_mod.py patch --iso Azurik.iso \
 
 ```bash
 # See what a mod would change
-python azurik_mod.py diff --iso Azurik.iso --mod example_enemy_buff.json
+azurik-mod diff --iso Azurik.iso --mod example_enemy_buff.json
 
 # Dump current values for a config section
-python azurik_mod.py dump --iso Azurik.iso -s critters_walking -e catalisk
+azurik-mod dump --iso Azurik.iso -s critters_walking -e catalisk
 ```
 
 ---
@@ -88,13 +101,13 @@ The primary tool for building modded ISOs.
 **Browse what's moddable:**
 ```bash
 # List all config sections
-python azurik_mod.py list --sections
+azurik-mod list --sections
 
 # List entities in a section
-python azurik_mod.py list --entities critters_walking
+azurik-mod list --entities critters_walking
 
 # Dump all values for an entity
-python azurik_mod.py dump --iso Azurik.iso -s critters_walking -e air_elemental
+azurik-mod dump --iso Azurik.iso -s critters_walking -e air_elemental
 ```
 
 ### level_editor.py — Level Entity Editor
@@ -242,7 +255,7 @@ Directly modify entities in level files:
 | `critters_damage` | Per-enemy damage values |
 | `critters_engine` | Movement/physics per enemy |
 
-Use `python azurik_mod.py list --sections` and `--entities` to explore all available values.
+Use `azurik-mod list --sections` and `--entities` to explore all available values.
 
 ---
 

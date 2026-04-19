@@ -365,7 +365,7 @@ class SaveDirectoryInspection(unittest.TestCase):
 
 
 class CliSaveInspectSmoke(unittest.TestCase):
-    """``azurik-cli save inspect`` handlers produce parseable output."""
+    """``azurik-mod save inspect`` handlers produce parseable output."""
 
     def test_inspect_single_sav_json(self):
         from azurik_mod.save_format.commands import cmd_save_inspect

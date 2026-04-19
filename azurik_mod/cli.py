@@ -14,6 +14,7 @@ from azurik_mod.randomizer.commands import (
     cmd_diff,
     cmd_dump,
     cmd_list,
+    cmd_mod_template,
     cmd_patch,
     cmd_randomize,
     cmd_randomize_full,
@@ -77,6 +78,54 @@ def main() -> None:
     source2.add_argument("--iso", help="Read config.xbr from a game ISO")
     source2.add_argument("--input", "-i", help="Read a raw config.xbr file directly")
     p_diff.add_argument("--mod", "-m", action="append", required=True)
+
+    # mod-template — one-shot "give me an editable JSON of vanilla
+    # values I can tweak" workflow.  Replaces the old examples/
+    # folder which shipped stale-on-arrival sample mods.
+    p_tmpl = sub.add_parser(
+        "mod-template",
+        help="Emit an editable mod-JSON populated with vanilla defaults",
+        description=(
+            "Produce a self-contained mod JSON, populated with the\n"
+            "CURRENT vanilla values for one or more entities, ready\n"
+            "for the user to edit values and feed back through\n"
+            "``azurik-mod patch`` or ``--config-mod`` on\n"
+            "``randomize-full``.\n"
+            "\n"
+            "This replaces the old ``examples/`` folder — those files\n"
+            "drifted out of sync with reality.  ``mod-template`` reads\n"
+            "the vanilla values live from your ISO, so the output is\n"
+            "always truthful.\n"
+            "\n"
+            "Workflows:\n"
+            "  # One entity (common):\n"
+            "  %(prog)s mod-template --iso Azurik.iso \\\n"
+            "      --section critters_walking --entity goblin \\\n"
+            "      -o goblin_template.json\n"
+            "\n"
+            "  # Whole section:\n"
+            "  %(prog)s mod-template --iso Azurik.iso \\\n"
+            "      --section critters_walking -o all_walkers.json\n"
+            "\n"
+            "  # Multiple sections in one file:\n"
+            "  %(prog)s mod-template --iso Azurik.iso \\\n"
+            "      --section critters_walking --section damage \\\n"
+            "      -o big_template.json"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    tmpl_source = p_tmpl.add_mutually_exclusive_group(required=True)
+    tmpl_source.add_argument("--iso", help="Read config.xbr from a game ISO")
+    tmpl_source.add_argument("--input", "-i",
+                              help="Read a raw config.xbr file directly")
+    p_tmpl.add_argument("--section", "-s", action="append", required=True,
+                         help="Section name (repeat for multiple sections)")
+    p_tmpl.add_argument("--entity", "-e",
+                         help="Limit to a single entity within the section(s)")
+    p_tmpl.add_argument("--output", "-o",
+                         help="Output JSON path (default: stdout)")
+    p_tmpl.add_argument("--name", default="my-mod",
+                         help="Mod name to embed in the JSON (default: my-mod)")
 
     # randomize-gems (legacy, gems only)
     p_rand = sub.add_parser(
@@ -308,6 +357,7 @@ def main() -> None:
         "dump": cmd_dump,
         "diff": cmd_diff,
         "patch": cmd_patch,
+        "mod-template": cmd_mod_template,
         "randomize-gems": cmd_randomize_gems,
         "randomize": cmd_randomize,
         "randomize-full": cmd_randomize_full,
@@ -326,7 +376,7 @@ def _dispatch_save(args) -> None:
     else:
         raise SystemExit(
             f"unknown save subcommand: {args.save_command!r}.  "
-            f"Try `azurik-cli save inspect --help`.")
+            f"Try `azurik-mod save inspect --help`.")
 
 
 __all__ = ["main"]

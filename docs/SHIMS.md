@@ -86,57 +86,74 @@ Target: arm64-apple-darwin25.4.0 (host)  →  i386-pc-win32 (output)
    output with `objdump -d shims/build/<name>.o` to confirm the code
    looks sane.
 
-3. **Declare a TrampolinePatch** in the appropriate pack module
-   (e.g. [`azurik_mod/patches/qol.py`](../azurik_mod/patches/qol.py)):
+3. **Create a feature folder** — the canonical layout is
+   `azurik_mod/patches/<feature_name>/` with an `__init__.py` that
+   declares the `TrampolinePatch` and registers the feature.  Run
+   `bash shims/toolchain/new_shim.sh <feature_name>` to scaffold
+   the folder + a starter `shim.c` in one step (see
+   [`docs/SHIM_AUTHORING.md`](./SHIM_AUTHORING.md) for the full
+   walkthrough).  The file layout ends up like:
+
+   ```
+   azurik_mod/patches/my_feature/
+       __init__.py        ← pack metadata, TrampolinePatch, register_feature call
+       shim.c             ← your C source
+   ```
+
+4. **Declare + register the pack** in `__init__.py` — the unified
+   `Feature` dataclass (aliased as `PatchPack`) + `ShimSource` +
+   `register_feature` together carry everything
+   [`apply_pack`](../azurik_mod/patching/apply.py) needs:
 
    ```python
+   from pathlib import Path
+   from azurik_mod.patching.spec import TrampolinePatch
+   from azurik_mod.patching.feature import ShimSource
+   from azurik_mod.patching.registry import (
+       Feature, ParametricPatch, register_feature,
+   )
+
+   _HERE = Path(__file__).resolve().parent
+
    MY_FEATURE_TRAMPOLINE = TrampolinePatch(
        name="my_feature",
        label="Short human description",
-       va=0xDEADBEEF,                      # site in vanilla XBE
-       replaced_bytes=bytes([...]),        # pinned 10-byte sequence
+       va=0xDEADBEEF,                   # site in vanilla XBE
+       replaced_bytes=bytes([...]),     # pinned 10-byte sequence
        shim_object=Path("shims/build/my_feature.o"),
-       shim_symbol="_c_my_feature",        # note leading underscore
-       mode="call",                        # or "jmp"
+       shim_symbol="_c_my_feature",     # note leading underscore
+       mode="call",                     # or "jmp"
    )
-   ```
 
-4. **Register the pack** — add the trampoline to a `PatchPack.sites`
-   list and tag it with `c-shim` so tooling can surface that:
-
-   ```python
-   register_pack(PatchPack(
+   register_feature(Feature(
        name="my_feature",
-       description="...",
-       sites=[MY_FEATURE_TRAMPOLINE],
-       apply=apply_my_feature_patch,
+       description="Short human description for the Patches UI.",
+       sites=(MY_FEATURE_TRAMPOLINE,),
+       shim=ShimSource(folder=_HERE),   # auto-compiles shim.c when needed
        tags=("qol", "c-shim"),
    ))
    ```
 
-5. **Write the apply function** using
-   [`apply_trampoline_patch`](../azurik_mod/patching/apply.py):
+   `apply_pack` routes the trampoline through
+   `apply_trampoline_patch` automatically — no bespoke `apply`
+   function needed.  For simple byte patches or parametric
+   sliders, set `sites=(...)` to a tuple of `PatchSpec` /
+   `ParametricPatch` and `shim=None`.
 
-   ```python
-   def apply_my_feature_patch(xbe_data: bytearray) -> None:
-       apply_trampoline_patch(xbe_data, MY_FEATURE_TRAMPOLINE,
-                              repo_root=_REPO_ROOT)
-   ```
-
-6. **Add tests** mirroring
+5. **Add tests** mirroring
    [`tests/test_qol_skip_logo.py`](../tests/test_qol_skip_logo.py):
 
    - Pin the trampoline descriptor fields.
    - Exercise apply + verify end-to-end against the vanilla XBE.
    - Assert `verify_trampoline_patch` returns `"applied"` / `"original"`.
 
-7. **Run the full suite**:
+6. **Run the full suite**:
 
    ```bash
    python3 -m pytest tests/ -q
    ```
 
-8. **Boot in xemu** to confirm the observable behaviour — shims that
+7. **Boot in xemu** to confirm the observable behaviour — shims that
    pass the unit tests still need to survive real execution.
 
 ## What happens at apply time
@@ -488,15 +505,19 @@ table whenever a tier lands or a new candidate becomes concrete.
    - `entity_lookup` — entity registry name lookup (`__fastcall`,
      pinned from two callers in `FUN_000353F0` and `FUN_0003A610`).
 
-   Investigated but **deferred**:
-   - `FUN_00085700` (gravity integration) — Ghidra decomps as
-     `__fastcall` but the body reads `in_EAX` as an implicit
-     output-pointer (MSVC RVO pattern).  clang's
-     `__attribute__((fastcall))` doesn't let you declare an
-     implicit EAX parameter, so safe exposure needs a naked-asm
-     wrapper.  See `docs/LEARNINGS.md` "Vanilla-function exposure".
+   Shipped via inline-asm wrapper:
+   - `gravity_integrate_raw` (`FUN_00085700`) — **done**; wrapper
+     at `shims/shared/gravity_integrate.c` exposes a clean
+     `stdcall(20)` `azurik_gravity_integrate(...)` via
+     `shims/include/azurik_gravity.h`.  Pattern documented in
+     `docs/LEARNINGS.md` "Handling MSVC-RVO ABIs" — reuse it for
+     any other `__fastcall`-with-RVO target.
+
+   Still deferred:
    - `FUN_000d1420` / `FUN_000d1520` (config-table lookups) —
-     `__thiscall`, same naked-asm-wrapper requirement.
+     `__thiscall`; uses the same inline-asm-wrapper pattern as
+     the gravity shipped above.  Low priority until a shim
+     actually needs runtime config lookup.
 
    Add entries as concrete shims need them, not speculatively.
 

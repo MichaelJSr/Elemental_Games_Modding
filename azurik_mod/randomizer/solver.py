@@ -53,33 +53,90 @@ class SolverState:
     power_levels: dict[str, int] = field(default_factory=dict)
 
     def has_all(self, requirements: list[str] | dict) -> bool:
-        """Check if inventory satisfies a requirement expression."""
+        """Check if inventory satisfies a requirement expression.
+
+        Fail CLOSED (return False) when handed a malformed requirement
+        dict whose shape we don't understand — previously this fell
+        through to a vacuous ``return True``, which is the same class
+        of "silently-permissive solver check" that let the power-
+        placement bug ship undetected for months.  If a hand-edited
+        ``logic_db.json`` uses an unrecognised schema, the solver
+        should report UNSOLVABLE (or the caller should catch the
+        mismatch) rather than silently pass every check.
+
+        Accepted shapes:
+          - ``[]`` / ``[item, ...]``                 — all of the list
+          - ``{"items": [...], "type": "all_of"}``   — all of
+          - ``{"items": [...], "type": "any_of"}``   — any of
+          - ``{"all_of": [...]}``                    — all of
+          - ``{"any_of": [...]}``                    — any of
+          - ``{}`` / ``{"items": []}`` / empty lists — vacuously True
+            (a node with no requirements is always reachable)
+        """
         if isinstance(requirements, list):
             return all(r in self.inventory for r in requirements)
-        elif isinstance(requirements, dict):
-            # Support both {"all_of": [...]} and {"type": "all_of", "items": [...]}
-            items = requirements.get("items") or requirements.get("all_of") or requirements.get("any_of")
-            req_type = requirements.get("type", "all_of" if "all_of" in requirements else
-                                        "any_of" if "any_of" in requirements else None)
-            if req_type == "all_of" and items:
+        if isinstance(requirements, dict):
+            # Empty dict / empty-items dict: vacuously true — a node
+            # that lists no requirements is always accessible.
+            items = (requirements.get("items")
+                     or requirements.get("all_of")
+                     or requirements.get("any_of"))
+            if not items:
+                return True
+            req_type = requirements.get(
+                "type",
+                "all_of" if "all_of" in requirements
+                else "any_of" if "any_of" in requirements
+                else None)
+            if req_type == "all_of":
                 return all(self.has_all([r]) if isinstance(r, str)
                           else self.has_all(r)
                           for r in items)
-            elif req_type == "any_of" and items:
+            if req_type == "any_of":
                 return any(self.has_all([r]) if isinstance(r, str)
                           else self.has_all(r)
                           for r in items)
-            elif not items:
-                return True
-        return True
+            # Unknown shape — fail closed.  Previously fell through to
+            # ``return True``; see docstring for the rationale.
+            return False
+        # Not a list or dict — also fail closed.
+        return False
+
+
+# Module-level cache for parsed ``logic_db.json`` — keyed by
+# ``(resolved_path, mtime)`` so an edit to the DB file invalidates
+# cleanly.  Previously every ``Solver()`` construction re-read +
+# re-parsed the ~50 KB JSON; a single ``randomize-full`` run
+# instantiates the Solver at least twice (major items + powers).
+# Amortising the parse is a free ~10 ms per run for zero behavioural
+# change.
+_db_cache: dict[tuple[str, float], dict] = {}
+
+
+def _load_logic_db(path: Path) -> dict:
+    """Return the parsed logic DB for ``path``, caching by mtime."""
+    try:
+        st = path.stat()
+        key = (str(path.resolve()), st.st_mtime)
+    except OSError:
+        key = None
+
+    if key is not None and key in _db_cache:
+        return _db_cache[key]
+
+    with open(path, "r") as f:
+        db = json.load(f)
+
+    if key is not None:
+        _db_cache[key] = db
+    return db
 
 
 class Solver:
     def __init__(self, logic_db_path: str | Path | None = None):
         if logic_db_path is None:
             logic_db_path = Path(__file__).parent / "logic_db.json"
-        with open(logic_db_path, "r") as f:
-            self.db = json.load(f)
+        self.db = _load_logic_db(Path(logic_db_path))
         self.nodes = self.db["nodes"]
         self.edges = self.db["edges"]
         self.disc_sources = self.db["disc_sources"]

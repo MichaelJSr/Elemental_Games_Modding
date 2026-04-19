@@ -43,7 +43,7 @@ params)`:
 | `ParametricPatch`    | slider-driven float rewrite (GUI shows a slider) |
 | `TrampolinePatch`    | CALL-into-C-shim code injection               |
 
-**Tests:** 190+ pytest tests under [`tests/`](../tests/), covering
+**Tests:** comprehensive pytest suite under [`tests/`](../tests/), covering
 every pack and the layout pipeline.  Always keep them green.
 
 **Ghidra:** the XBE and keyed-table `.xbr` files are usually already
@@ -67,7 +67,7 @@ Install deps:
 
 ```bash
 python -m pip install -e .
-python -m pytest tests/ -q   # 190+ tests — should all pass
+python -m pytest tests/ -q   # all tests should pass
 ```
 
 ## 3. Worked example A — a tiny byte patch
@@ -248,9 +248,9 @@ Key files behind each step:
 | "What packs exist?"                               | [PATCHES.md](PATCHES.md) (catalog + per-pack details) |
 | "Can I call xboxkrnl function X from a shim?"     | Yes — any xboxkrnl export, even ones Azurik doesn't import.  Static 151: [shims/include/azurik_kernel.h](../shims/include/azurik_kernel.h).  Extended (runtime resolver): [shims/include/azurik_kernel_extend.h](../shims/include/azurik_kernel_extend.h) + [docs/D1_EXTEND.md](D1_EXTEND.md) |
 | "How do I integrate gravity on an entity?"        | [shims/include/azurik_gravity.h](../shims/include/azurik_gravity.h) — `azurik_gravity_integrate(...)` wraps the vanilla MSVC-RVO ABI behind a clean stdcall C API. |
-| "What format are Azurik save files in?"           | [docs/SAVE_FORMAT.md](SAVE_FORMAT.md) + `azurik-cli save inspect <path>` (Python module: [azurik_mod/save_format/](../azurik_mod/save_format/)). |
+| "What format are Azurik save files in?"           | [docs/SAVE_FORMAT.md](SAVE_FORMAT.md) + `azurik-mod save inspect <path>` (Python module: [azurik_mod/save_format/](../azurik_mod/save_format/)). |
 | "My feature needs to survive without clang"       | Add `legacy_sites=(...,)` to the `Feature`; users set `AZURIK_NO_SHIMS=1` |
-| "Where do I put shared helper code?"              | `azurik_mod/patches/_shared.py` (non-pack) or a dedicated shim library placed via `ShimLayoutSession.apply_shared_library` |
+| "Where do I put shared helper code?"              | Underscore-prefixed helper modules beside the packs (e.g. `azurik_mod/patches/_qol_shared.py`, `_player_character.py`), OR a dedicated shim library placed via `ShimLayoutSession.apply_shared_library` |
 
 ## 7. PR-ready checklist
 

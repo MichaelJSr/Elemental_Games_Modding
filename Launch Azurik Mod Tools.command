@@ -41,10 +41,24 @@ fi
 
 # Then fall back to `python3 -m gui` from the repo root.  This works
 # even without `pip install -e .` as long as sv_ttk / platformdirs are
-# importable for the chosen interpreter.
+# importable for the chosen interpreter.  If the import fails we
+# surface an install hint before the Terminal window closes.
 for py in python3.12 python3.11 python3.10 python3 python; do
     if command -v "$py" >/dev/null 2>&1; then
-        exec "$py" -m gui
+        if "$py" -c "import gui" 2>/dev/null; then
+            exec "$py" -m gui
+        fi
+        echo "Found $py but could not import the \`gui\` package."
+        echo "This usually means the project hasn't been installed yet."
+        echo
+        echo "From this directory, run:"
+        echo "    $py -m pip install -e ."
+        echo
+        echo "Then retry the launcher."
+        echo
+        read -n 1 -s -r -p "Press any key to close..."
+        echo
+        exit 1
     fi
 done
 

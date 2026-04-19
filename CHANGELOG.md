@@ -2,6 +2,128 @@
 
 ## Unreleased
 
+### Deep second-pass audit — correctness + optimisation + UX
+
+A wide correctness + optimisation + UX pass, followed by full
+docs overhaul and launcher hardening.  326 tests passing (+20 new).
+
+#### Correctness fixes
+
+- **``SolverState.has_all`` fails closed on malformed inputs**
+  (``azurik_mod/randomizer/solver.py``).  Previously a dict with
+  non-empty ``items`` but an unrecognised ``type`` fell through
+  to ``return True`` — the same class of silently-permissive
+  solver check that let the power-placement bug ship.  Now
+  returns False for unknown shapes + non-list non-dict inputs;
+  pure-empty forms still evaluate as vacuously true (a node
+  with no requirements is always reachable).
+- **``parse_xbe_sections`` bounds-checks header fields**
+  (``azurik_mod/patching/xbe.py``).  Previously a truncated /
+  hostile XBE could crash ``struct.unpack_from`` mid-parse or
+  raise a bare "subsection not found".  Now validates image
+  length, magic, section-count sanity cap, ``base_addr`` vs
+  ``section_headers_addr``, end-of-header-array vs image size,
+  and each name-pointer before indexing into the buffer.
+  Surfaces descriptive ``ValueError``s instead.
+
+#### Optimisations
+
+- **``extract_xbe_from_iso`` caches by (path, mtime, size)**.
+  Mirrors the GUI's ``extract_config_xbr`` cache.
+  ``cmd_verify_patches --original`` used to extract twice per
+  run (once for patched, once for vanilla); now the second call
+  is O(0) when the input ISO hasn't changed.  Bounded at 4
+  entries to avoid runaway memory on long sessions.
+- **Solver DB parse cached at module level**.  Constructing
+  ``Solver()`` twice in one run (major items + powers paths)
+  used to re-read + re-parse ``logic_db.json`` every time.  Now
+  ``_load_logic_db(path)`` memoises by ``(resolved_path, mtime)``;
+  two Solver instances share one dict.  Edits to the DB file
+  invalidate cleanly.
+
+#### examples/ → ``azurik-mod mod-template``
+
+The ``examples/`` folder shipped three JSONs that drifted out of
+sync with reality (``default_settings.json`` in particular had
+pre-correction field alignments in deeper sections).  Deleted
+entirely; replaced by a new CLI subcommand:
+
+```
+azurik-mod mod-template --iso Azurik.iso \
+    --section critters_walking --entity goblin -o goblin.json
+```
+
+Reads the ISO / config.xbr at runtime, so the output JSON is
+ALWAYS truthful.  Users edit values, feed back through
+``azurik-mod patch --mod`` or ``randomize-full --config-mod``.
+The GUI's Entity Editor tab produces the same JSON shape.
+Accepts multiple ``--section`` flags, optional ``--entity``
+narrowing, ``--name`` for the embedded mod name, and defaults
+to stdout if ``-o`` is omitted (pipe-friendly).
+
+#### Launcher hardening
+
+Both ``Launch Azurik Mod Tools.command`` (macOS/Linux) and
+``Launch Azurik Mod Tools.bat`` (Windows) now ``python -c
+'import gui'`` BEFORE running the GUI, so a stale install /
+missing deps produces a specific "run ``pip install -e .``"
+message instead of a flash-and-close console window.
+
+#### Docs overhaul
+
+Second audit found a web of stale references; this pass fixes:
+
+- **``azurik-cli`` → ``azurik-mod``** across 6 files (docs +
+  test strings + CLI error messages).  The installed console
+  script is ``azurik-mod`` per ``pyproject.toml``; every doc
+  example now matches.
+- **D1-extend contradictions** resolved.  ``SHIMS.md`` +
+  ``AGENT_GUIDE.md`` + ``kernel_imports.py`` docstring were
+  still framing D1-extend as deferred future work; they now
+  reflect that the runtime resolver shipped (see
+  ``docs/D1_EXTEND.md``).
+- **Gravity wrapper deferred → shipped** in ``SHIMS.md``.  The
+  ``FUN_00085700`` inline-asm wrapper landed weeks ago; the
+  "Investigated but deferred" section now documents it as
+  shipped + points at the pattern for future RVO targets.
+- **Stale tutorial code** in ``SHIMS.md`` step 3-5 updated to
+  current ``Feature`` + ``ShimSource`` + feature-folder layout
+  (was still referencing ``register_pack`` + flat ``qol.py``).
+- **MODDING_GUIDE.md** had 11 broken ``python azurik_mod.py``
+  invocations (that script doesn't exist).  Rewrote to
+  ``azurik-mod`` + added a top banner pointing at the modern
+  targeted docs.
+- **Test-count references** removed.  The hardcoded "190+" /
+  "306" figures drifted every release; docs now say "run
+  ``pytest tests/`` for the count".
+- **Path references** fixed: ``patches/<feature>.py`` →
+  ``patches/<feature>/__init__.py`` (feature-folder layout is
+  now canonical).
+- **README docs/ index** now lists ``D1_EXTEND.md``,
+  ``D2_NXDK.md``, ``SAVE_FORMAT.md``, ``RANDOMIZER_AUDIT.md``
+  which landed without README updates.
+- **RANDOMIZER_AUDIT.md broken anchor** fixed; ``G1 —
+  Gem-size-aware shuffle`` now points at a real section.
+
+#### Tests (``tests/test_deep_pass.py``, 20 new)
+
+- 7 tests pin ``SolverState.has_all`` behaviour (empty list /
+  empty dict / empty items → vacuously True; unknown shape /
+  string input → False; real all_of / any_of still work).
+- 5 tests cover ``parse_xbe_sections`` bounds
+  (too-small / bad-magic / insane-section-count / headers-past-
+  EOF all rejected; vanilla XBE still parses).
+- 2 tests pin the ``extract_xbe_from_iso`` cache
+  (reuse + mtime invalidation).
+- 1 test pins the module-level Solver DB cache.
+- 1 test exercises the ``mod-template`` CLI end-to-end
+  against a real config.xbr.
+- 1 test enforces the ``examples/`` folder stays deleted.
+- 1 test greps every doc + every .py file for ``azurik-cli``
+  references + fails if any appear.
+- 2 tests pin the dep-check ``import gui`` guard + ``pip
+  install -e .`` hint in both launchers.
+
 ### Deep randomizer audit — 2 CRITICAL bugs fixed + extension roadmap
 
 Full correctness + robustness audit of the randomizer subsystem
@@ -140,7 +262,7 @@ cache too.
 description but deeper sections (critters_walking etc.) carry
 pre-correction row/column alignments.  The name+description now
 explicitly flag it as a historical dump, with guidance to use
-``azurik-cli dump --iso ...`` for the canonical live view.
+``azurik-mod dump --iso ...`` for the canonical live view.
 
 #### Considered + declined
 
@@ -404,7 +526,7 @@ New infrastructure to bridge the gap:
 #### Save-file format — initial scaffold
 
 New top-level Python module `azurik_mod.save_format` + CLI
-subcommand `azurik-cli save inspect` for introspecting Azurik
+subcommand `azurik-mod save inspect` for introspecting Azurik
 save slots exported from xemu's HDD image.
 
 - **Xbox-standard container files fully decoded**:
@@ -428,7 +550,7 @@ save slots exported from xemu's HDD image.
   (SaveMeta / TitleMeta / SaveImage / TitleImage / `.sav` files)
   and keeps unknowns in `extra_files`.  JSON-serialisable
   `summary()` for tooling.
-- **CLI**: `azurik-cli save inspect <path>` with `--json` flag.
+- **CLI**: `azurik-mod save inspect <path>` with `--json` flag.
   Handles both directory and single-file inspection.  Lazy-imports
   the module so normal patch workflows don't pay its cost.
 - **28 new tests** in `test_save_format.py` pinning parser
