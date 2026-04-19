@@ -393,25 +393,51 @@ def run_config_dump(iso_path: Path, section: str, entity: str | None = None) -> 
     return buf.getvalue()
 
 
-def list_sections() -> list[str]:
-    """List config sections from the registry."""
+# Registry JSON is ~876 KB and gets queried by the Config Editor on
+# every section-dropdown change (``list_entities``) + once at page
+# build (``list_sections``).  Re-parsing 876 KB for every flick of
+# the dropdown was a 20-30 ms stall per click.  Memoise by
+# ``(path, mtime_ns, size)`` so the cache drops transparently if the
+# registry file is regenerated on disk.
+_registry_cache: tuple[tuple[str, int, int], dict] | None = None
+
+
+def _load_registry() -> dict:
+    """Return the bundled registry JSON as a dict, cached across calls.
+
+    Returns an empty dict if the file is missing or unreadable — the
+    list-returning wrappers below then yield the empty list.
+    """
+    global _registry_cache
     from azurik_mod.config import REGISTRY_PATH
 
     if not REGISTRY_PATH.exists():
-        return []
-    with open(REGISTRY_PATH) as f:
-        data = json.load(f)
+        return {}
+    try:
+        st = os.stat(REGISTRY_PATH)
+    except OSError:
+        return {}
+    key = (str(REGISTRY_PATH), st.st_mtime_ns, st.st_size)
+    if _registry_cache is not None and _registry_cache[0] == key:
+        return _registry_cache[1]
+    try:
+        with open(REGISTRY_PATH) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    _registry_cache = (key, data)
+    return data
+
+
+def list_sections() -> list[str]:
+    """List config sections from the registry."""
+    data = _load_registry()
     return sorted(data.get("sections", {}).keys())
 
 
 def list_entities(section: str) -> list[str]:
     """List entities in a config section from the registry."""
-    from azurik_mod.config import REGISTRY_PATH
-
-    if not REGISTRY_PATH.exists():
-        return []
-    with open(REGISTRY_PATH) as f:
-        data = json.load(f)
+    data = _load_registry()
     sec = data.get("sections", {}).get(section, {})
     return sorted(sec.get("entities", {}).keys())
 

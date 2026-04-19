@@ -122,12 +122,12 @@ class ConfigEditorTab(Page):
             return
 
         import json
-        from azurik_mod.config import REGISTRY_PATH as registry_path
-        if not registry_path.exists():
+        # Share the memoised registry cache that ``list_sections`` /
+        # ``list_entities`` already built — no point re-parsing 876 KB
+        # just for the "no ISO loaded" fallback.
+        reg = backend._load_registry()
+        if not reg:
             return
-
-        with open(registry_path) as f:
-            reg = json.load(f)
 
         sections = reg.get("sections", {})
         if section not in sections:

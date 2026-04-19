@@ -168,12 +168,49 @@ class EntityEditorTab(Page):
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        def _on_mousewheel(event):
-            # Only scroll if content overflows the visible area
+        # Mouse-wheel handling.  Two bugs in the earlier draft:
+        #   (1) ``bind_all("<MouseWheel>", ...)`` fires on EVERY widget
+        #       in the app, not just this canvas.  Scrolling on the
+        #       Randomize / Patches pages would also drive this
+        #       canvas, visibly jitter-scrolling an invisible tab.
+        #   (2) ``event.delta / 120`` assumes Windows semantics;
+        #       macOS sends delta = ±1..±3 (not multiples of 120) so
+        #       every wheel tick scrolled by zero units.  Linux
+        #       doesn't use ``<MouseWheel>`` at all — it uses
+        #       ``<Button-4>`` / ``<Button-5>``.
+        # Fix both by copying the enter/leave gating + delta
+        # normalisation pattern from ``widgets.ScrollableFrame``.
+        def _yview_wheel(units: int) -> None:
+            if not units:
+                return
             bbox = canvas.bbox("all")
             if bbox and bbox[3] > canvas.winfo_height():
-                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        canvas.bind_all("<MouseWheel>", _on_mousewheel, add="+")
+                canvas.yview_scroll(units, "units")
+
+        def _on_wheel(event):
+            delta = event.delta
+            if abs(delta) >= 120:
+                units = -int(delta / 120)
+            else:
+                units = -int(delta)
+            _yview_wheel(units)
+
+        def _on_wheel_linux(event):
+            _yview_wheel(-1 if event.num == 4 else 1)
+
+        def _bind_wheel(_event=None):
+            canvas.bind_all("<MouseWheel>", _on_wheel)
+            canvas.bind_all("<Button-4>", _on_wheel_linux)
+            canvas.bind_all("<Button-5>", _on_wheel_linux)
+
+        def _unbind_wheel(_event=None):
+            canvas.unbind_all("<MouseWheel>")
+            canvas.unbind_all("<Button-4>")
+            canvas.unbind_all("<Button-5>")
+
+        editor_frame.bind("<Enter>", _bind_wheel)
+        editor_frame.bind("<Leave>", _unbind_wheel)
+
         self._canvas = canvas
 
         # -- Status --

@@ -2,6 +2,67 @@
 
 ## Unreleased
 
+### Entity Editor mouse-wheel bug fix + registry memoisation
+
+**Bug fixes**
+
+- **Entity Editor mouse-wheel leak** — ``gui/pages/entity_editor.py``
+  used ``canvas.bind_all("<MouseWheel>", ...)`` with no
+  ``<Enter>`` / ``<Leave>`` gating, so wheel events on ANY other
+  page (Randomize, Patches, Build & Logs, …) fired into the
+  Entity Editor's canvas in addition to their own scroller.  The
+  invisible Entity Editor would jitter-scroll while the user was
+  reading a different page; switching tabs made the scrollbar
+  jump by whatever delta accumulated.  Also the delta-normalisation
+  (``event.delta / 120``) was Windows-only — macOS
+  (delta ±1..±3) and Linux (``<Button-4>`` / ``<Button-5>``)
+  produced zero or wrong scroll.  Fixed by copying the
+  ``widgets.ScrollableFrame`` pattern: enter/leave gating + a
+  three-axis delta normaliser that handles Windows / macOS / Linux.
+
+**Perf**
+
+- **Config registry now memoised in-process**
+  (``gui/backend._load_registry``).  The 876 KB JSON was re-parsed
+  on every ``list_sections()`` / ``list_entities(section)`` call —
+  20-30 ms per dropdown flick in the Config Editor.  Memoised by
+  ``(path, mtime_ns, size)`` so an edit on disk transparently
+  drops the cache; wall-clock benchmark drops from ~40 ms per
+  (sections + entities) pair to **0.013 ms** (~3000× faster).
+  ``gui/pages/config_editor._show_registry_data`` shares the same
+  cache instead of re-parsing again.
+
+**Cleanup**
+
+- Removed the lingering unused ``from azurik_mod.patches.fps_unlock
+  import apply_fps_patches`` in ``azurik_mod/randomizer/commands.py``
+  — ``apply_pack(pack, xbe, params)`` dispatches through the
+  registry, so the direct ``apply_fps_patches`` handle hasn't been
+  needed since the unified-dispatcher reorganisation.  The comment
+  now documents why the ``import azurik_mod.patches`` line is kept
+  (for its ``register_feature`` side effects).
+
+**Patch + GUI audits**
+
+Spot-checked every non-FPS patch's ``PatchSpec`` + ``TrampolinePatch``
+``va`` / ``original`` bytes against the real vanilla XBE:
+
+| Pack                          | Sites | Status |
+|-------------------------------|-------|--------|
+| ``player_physics``            | 3     | OK (gravity .rdata f32 + 2 sliders w/ vanilla guard) |
+| ``qol_gem_popups``            | 5     | OK (``loc/english/popups/<gem>`` strings) |
+| ``qol_other_popups``          | 9     | OK (``loc/english/popups/<misc>`` strings) |
+| ``qol_pickup_anims``          | 1     | OK (``MOV EAX,[EBP+0xC]; FMUL`` @ 0x4C3EE) |
+| ``qol_skip_logo``             | 1     | OK (trampoline @ VA 0x5F6E5) |
+| ``qol_skip_save_signature``   | 1     | OK (3-byte ``MOV AL, 1 ; RET`` @ 0x5C990) |
+| ``enable_dev_menu``           | 2     | OK (two ``JZ`` → ``NOP`` @ 0x52F7E + 0x52F95) |
+
+All vanilla-byte guards match.  Config Editor + Entity Editor
+audited page-by-page; the mouse-wheel + registry-cache issues
+above were the only real finds.
+
+**Drift guards**: 698 passed / 1 skipped.
+
 ### qol_skip_save_signature + startup-perf pass
 
 **New pack: ``qol_skip_save_signature``** (category ``qol``, opt-in).

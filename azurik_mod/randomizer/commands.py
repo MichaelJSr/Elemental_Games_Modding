@@ -28,9 +28,13 @@ from azurik_mod.iso.xdvdfs import require_xdvdfs
 
 # Importing the patches package runs each feature folder's
 # ``register_feature(...)`` side effect, so the registry is fully
-# populated before cmd_randomize_full walks it.
+# populated before cmd_randomize_full walks it.  The import is the
+# POINT — nothing below references ``fps_unlock``, ``player_physics``
+# etc. directly for execution; ``apply_pack(pack, xbe, params)``
+# dispatches through the registry.  Keeping ``apply_player_physics``
+# + ``apply_player_speed`` around below for the ``apply-physics``
+# CLI shortcut which pre-dates the unified dispatcher.
 import azurik_mod.patches  # noqa: F401
-from azurik_mod.patches.fps_unlock import apply_fps_patches
 from azurik_mod.patches.player_physics import (
     apply_player_physics,
     apply_player_speed,
