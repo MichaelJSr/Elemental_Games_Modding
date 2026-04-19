@@ -125,6 +125,7 @@ class BuildPage(Page):
         self._bar.start(15)
 
         packs, pack_params = self._merge_packs()
+        config_edits = self._merge_config_edits(config.config_edits)
 
         # Pass the full enabled-packs dict through so the backend
         # doesn't need per-pack kwargs.  The unified apply_pack
@@ -142,10 +143,62 @@ class BuildPage(Page):
             pack_params=pack_params,
             item_pool=config.item_pool,
             obsidian_cost=config.obsidian_cost,
-            config_edits=config.config_edits,
+            config_edits=config_edits,
             force_unsolvable=force or config.force_unsolvable,
         )
         self._poll_queue()
+
+    def _merge_config_edits(self, existing: dict | None) -> dict | None:
+        """Merge Entity Editor pending edits into ``config_edits``.
+
+        The Entity Editor tab buffers user-entered property tweaks in
+        memory; until this merge the build pipeline never saw them
+        (the tab was orphaned — :meth:`get_pending_mod` was defined
+        but never called from anywhere).  Now every Start-build run
+        folds them into the same ``--config-mod`` JSON blob that the
+        CLI already consumes.
+
+        If both sources define edits for the same ``section/entity/
+        property`` cell, the Entity Editor wins — it represents the
+        more-recent interactive state.  Keyed-table patches
+        (``_keyed_patches``) are concatenated by section/entity with
+        the same "editor wins on conflict" rule.
+
+        Returns ``None`` when neither side has anything; else a fresh
+        dict safe to json.dumps().
+        """
+        tab = getattr(self.app, "tab_entity", None)
+        editor_mod = tab.get_pending_mod() if tab is not None else None
+        if editor_mod is None:
+            return existing
+
+        # Deep-ish copy so we don't mutate the editor's live buffer.
+        import copy
+        merged = copy.deepcopy(existing) if existing else {
+            "name": "Combined mod", "format": "grouped", "sections": {}}
+        # Ensure top-level shape.
+        merged.setdefault("format", "grouped")
+        merged.setdefault("sections", {})
+
+        # 1. Merge variant sections (section -> entity -> prop -> value).
+        for sec_key, entities in editor_mod.get("sections", {}).items():
+            dst = merged["sections"].setdefault(sec_key, {})
+            for ent, props in entities.items():
+                dst.setdefault(ent, {}).update(props)
+
+        # 2. Merge keyed patches (top-level `_keyed_patches` blob).
+        ek = editor_mod.get("_keyed_patches")
+        if ek:
+            dst_kp = merged.setdefault("_keyed_patches", {})
+            for sec_key, entities in ek.items():
+                dst_sec = dst_kp.setdefault(sec_key, {})
+                for ent, props in entities.items():
+                    dst_sec.setdefault(ent, {}).update(props)
+
+        self._log.append(
+            f"  + Entity Editor contributes "
+            f"{tab.get_edit_count()} pending edits\n")
+        return merged
 
     def _merge_packs(self) -> tuple[dict[str, bool], dict[str, dict[str, float]]]:
         """Read pack enablement + slider values from AppState.

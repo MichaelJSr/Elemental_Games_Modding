@@ -2,6 +2,79 @@
 
 ## Unreleased
 
+### Entity Editor — critical build-wire fix + UX refinements
+
+The Entity Editor tab had a **silent orphan bug**: users could make
+hundreds of property edits, click "Start build" on the Build page,
+and see their edits quietly discarded.  The tab's
+``get_pending_mod()`` method was defined but never called from
+anywhere, and ``RandomizerConfig.config_edits`` was never populated
+from the UI — the full edit buffer simply evaporated at build time.
+
+This release wires the editor into the build pipeline and adds
+several UX improvements:
+
+#### Critical fix: edits now reach the build
+
+- ``BuildPage._merge_config_edits`` folds the editor's pending mod
+  into the CLI's ``--config-mod`` JSON at build time.  Both
+  grouped ``sections`` (variant records) and ``_keyed_patches``
+  (keyed-table cells) merge correctly; on per-cell conflict the
+  editor's value wins over any file-sourced ``config_edits``.
+- Deep-copy invariant: the merge never mutates the input dicts,
+  so file-sourced edits remain intact if the build is retried.
+- Build log now surfaces how many editor edits contributed to a
+  given run (``+ Entity Editor contributes N pending edits``).
+
+#### UX refinements
+
+- **Entity search/filter**: typing in the new "Filter entities:"
+  box narrows the dropdown live — essential for sections with
+  500+ critters where scrolling is hopeless.  Status label
+  shows "N of M match" / "M entities" depending on filter state.
+- **Per-entity edit indicator**: entities with pending edits are
+  prefixed with a bullet + count ("● goblin (3)") in the dropdown.
+  A green "(3 edits)" label next to the combo tracks the currently-
+  selected entity in real time.
+- **Reset This Entity** button: clears edits for the currently-
+  selected entity only, with a confirm dialog.  Complements the
+  existing "Reset All Edits" (which also now has a confirm).
+- **Import Mod JSON** button: round-trips any previously-exported
+  mod JSON back into the editor's edit buffer — merges with
+  existing edits rather than replacing them.  Parses both the
+  grouped-sections and ``_keyed_patches`` shapes; malformed
+  entries are skipped (not fatal) with a status-line summary.
+- **Edit-count breakdown**: the edit-count label now shows
+  "N edit(s) across X entities / Y sections" instead of just
+  a flat count — gives users a sense of the scope of their changes.
+
+#### Internal reshuffle
+
+- ``_on_entity_change`` + ``_rebuild_property_grid`` defensively
+  normalise the combobox value to strip the edit-indicator
+  decoration before using it as a lookup key.  ``_randomize_entity``
+  and every other entity-reading code path uses the same
+  normalisation — no more stray decorations leaking into registry
+  lookups.
+
+#### Tests
+
+18 new tests in ``tests/test_entity_editor.py`` (total 277, up
+from 259):
+
+- Surface-area drift guard (every expected method exists).
+- Label-decoration reversibility (``_format_entity_label`` /
+  ``_unformat_entity_label`` round-trip, idempotent on
+  undecorated input, tolerant of manually-typed parens).
+- ``get_pending_mod`` shape (variant → ``sections``, keyed →
+  ``_keyed_patches``, empty edits → ``None``).
+- **Build-page merge** — the critical orphan-fix:
+  7 subtests covering every combination of file / editor edits
+  including conflict resolution (editor-wins) and
+  non-mutation invariants.
+- Import round-trip (merge vs replace, malformed-entry
+  skipping).
+
 ### VA audit + new `AZURIK_PLAYER_STATE_PTR_ARRAY_VA` anchor
 
 Comprehensive VA-correctness sweep via Ghidra MCP + real XBE bytes.

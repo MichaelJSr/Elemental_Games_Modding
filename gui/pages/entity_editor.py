@@ -78,9 +78,36 @@ class EntityEditorTab(Page):
         self._entity_var = tk.StringVar()
         self._entity_combo = ttk.Combobox(
             ctrl, textvariable=self._entity_var,
-            values=[], state="readonly", width=20)
-        self._entity_combo.pack(side=tk.LEFT, padx=(0, 10))
-        self._entity_combo.bind("<<ComboboxSelected>>", lambda e: self._rebuild_property_grid())
+            values=[], state="readonly", width=24)
+        self._entity_combo.pack(side=tk.LEFT, padx=(0, 5))
+        self._entity_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda e: self._on_entity_change())
+
+        # Entity-specific edit indicator (e.g. "(3 edits)") right
+        # next to the combobox.  Refreshed on every value-edit /
+        # selection change.
+        self._entity_edits_label = ttk.Label(ctrl, text="",
+                                              foreground="#2a6")
+        self._entity_edits_label.pack(side=tk.LEFT, padx=(0, 10))
+
+        # -- Search / filter row --
+        search_frame = ttk.Frame(self._body)
+        search_frame.pack(fill=tk.X, pady=(0, 5))
+        ttk.Label(search_frame, text="Filter entities:").pack(
+            side=tk.LEFT, padx=(0, 5))
+        self._search_var = tk.StringVar()
+        self._search_entry = ttk.Entry(
+            search_frame, textvariable=self._search_var, width=30)
+        self._search_entry.pack(side=tk.LEFT, padx=(0, 5))
+        self._search_var.trace_add(
+            "write", lambda *_: self._refresh_entity_list())
+        ttk.Button(search_frame, text="Clear",
+                   command=lambda: self._search_var.set("")).pack(
+            side=tk.LEFT, padx=(0, 10))
+        self._filter_status = ttk.Label(search_frame, text="",
+                                         foreground="gray")
+        self._filter_status.pack(side=tk.LEFT)
 
         # -- Button row --
         btn_frame = ttk.Frame(self._body)
@@ -88,6 +115,8 @@ class EntityEditorTab(Page):
 
         ttk.Button(btn_frame, text="Load from ISO",
                    command=self._load_from_iso).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(btn_frame, text="Import Mod JSON",
+                   command=self._import_mod).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(btn_frame, text="Export Mod JSON",
                    command=self._export_mod).pack(side=tk.LEFT, padx=(0, 5))
         self._edit_count_label = ttk.Label(btn_frame, text="")
@@ -95,6 +124,9 @@ class EntityEditorTab(Page):
 
         ttk.Button(btn_frame, text="Reset All Edits",
                    command=self._reset_edits).pack(side=tk.RIGHT)
+        ttk.Button(btn_frame, text="Reset This Entity",
+                   command=self._reset_entity).pack(
+            side=tk.RIGHT, padx=(0, 5))
 
         # -- Randomize controls --
         rand_frame = ttk.LabelFrame(self._body, text="Randomize Stats")
@@ -176,6 +208,117 @@ class EntityEditorTab(Page):
                 return key, disp, fmt
         return "", "", ""
 
+    def _get_all_entities(self) -> list[str]:
+        """Return every entity for the currently-selected section,
+        unfiltered.  Returns ``["(all settings)"]`` for keyed_flat
+        sections (they don't have a real entity dimension)."""
+        section_key, _, fmt = self._get_section_info()
+        if not section_key:
+            return []
+        if fmt == "keyed_flat":
+            return ["(all settings)"]
+        if fmt == "keyed" and self._keyed_tables and section_key in self._keyed_tables:
+            return sorted(self._keyed_tables[section_key].col_names)
+        if fmt == "variant" and self._registry:
+            return sorted(
+                self._registry.get("sections", {})
+                .get(section_key, {}).get("entities", {}).keys())
+        return []
+
+    def _format_entity_label(self, entity: str) -> str:
+        """Prepend an edit-count prefix to entities that have pending
+        edits (``* goblin (3)``) so they're visually distinct in the
+        dropdown list without losing their raw name."""
+        section_key, _, _ = self._get_section_info()
+        n = len(self._edits.get(section_key, {}).get(entity, {}))
+        if n == 0:
+            return entity
+        return f"● {entity} ({n})"
+
+    def _unformat_entity_label(self, label: str) -> str:
+        """Inverse of :meth:`_format_entity_label` — strip the
+        decoration to recover the raw entity name.  A label without
+        decoration passes through unchanged."""
+        if label.startswith("● "):
+            # strip "● <name> (<n>)"
+            rest = label[2:]
+            if rest.endswith(")") and " (" in rest:
+                return rest.rsplit(" (", 1)[0]
+            return rest
+        return label
+
+    def _on_entity_change(self):
+        """Entity combobox selection handler.  Normalises the selected
+        label (stripping any edit-indicator prefix) and refreshes the
+        property grid + entity-edit count label."""
+        raw = self._entity_var.get()
+        clean = self._unformat_entity_label(raw)
+        if clean != raw:
+            # Silently overwrite the decorated label with the raw
+            # name so downstream lookups (table.col_names etc.) work.
+            self._entity_var.set(clean)
+        self._rebuild_property_grid()
+        self._refresh_entity_edit_count()
+
+    def _refresh_entity_edit_count(self):
+        """Update the per-entity '(N edits)' label next to the combo."""
+        section_key, _, _ = self._get_section_info()
+        entity = self._entity_var.get()
+        n = len(self._edits.get(section_key, {}).get(entity, {}))
+        self._entity_edits_label.config(
+            text=f"({n} edit{'s' if n != 1 else ''})" if n else "")
+
+    def _refresh_entity_list(self):
+        """Re-compute the combobox values from current section + filter.
+
+        Called on every section change AND every keystroke in the
+        search box.  Re-applies edit-indicator decorations so
+        already-edited entities remain visually distinct after a
+        filter narrows the list.
+        """
+        section_key, _, fmt = self._get_section_info()
+        if not section_key:
+            return
+
+        all_entities = self._get_all_entities()
+        needle = self._search_var.get().strip().lower()
+        if fmt == "keyed_flat":
+            # No search / decoration for flat-mode single-entry lists.
+            self._entity_combo.config(values=all_entities)
+            self._filter_status.config(text="")
+            if all_entities:
+                self._entity_combo.set(all_entities[0])
+            return
+
+        if needle:
+            filtered = [e for e in all_entities if needle in e.lower()]
+        else:
+            filtered = all_entities
+
+        decorated = [self._format_entity_label(e) for e in filtered]
+        self._entity_combo.config(values=decorated)
+
+        # Preserve selection if still visible; otherwise pick first.
+        current = self._unformat_entity_label(self._entity_var.get())
+        if current in filtered:
+            # Re-select with the potentially-updated decoration.
+            self._entity_var.set(self._format_entity_label(current))
+        elif filtered:
+            self._entity_var.set(self._format_entity_label(filtered[0]))
+            self._on_entity_change()
+        else:
+            self._entity_var.set("")
+            for w in self._prop_frame.winfo_children():
+                w.destroy()
+
+        # Status: "42 of 512" when filtering, "512 entities" when not.
+        if needle:
+            self._filter_status.config(
+                text=f"{len(filtered)} of {len(all_entities)} match")
+        else:
+            self._filter_status.config(
+                text=f"{len(all_entities)} entities" if all_entities else "")
+
     def _on_section_change(self):
         section_key, _, fmt = self._get_section_info()
         if not section_key:
@@ -183,26 +326,21 @@ class EntityEditorTab(Page):
 
         if fmt == "keyed_flat":
             # Flat sections show all settings in one list, no entity dropdown
-            self._entity_combo.config(values=["(all settings)"])
-            self._entity_combo.set("(all settings)")
+            self._search_entry.config(state=tk.DISABLED)
+            self._refresh_entity_list()
             self._rebuild_property_grid()
             return
 
-        entities = []
-        if fmt == "keyed" and self._keyed_tables and section_key in self._keyed_tables:
-            table = self._keyed_tables[section_key]
-            entities = sorted(table.col_names)
-        elif fmt == "variant" and self._registry:
-            entities = sorted(
-                self._registry.get("sections", {}).get(section_key, {}).get("entities", {}).keys()
-            )
+        self._search_entry.config(state=tk.NORMAL)
+        self._refresh_entity_list()
 
-        self._entity_combo.config(values=entities)
-        if entities:
-            self._entity_combo.set(entities[0])
+        # On section change, force-rebuild against the freshly-chosen
+        # entity (if any) so the property grid reflects the new section.
+        if self._entity_var.get():
             self._rebuild_property_grid()
+            self._refresh_entity_edit_count()
         else:
-            self._status.config(text=f"No entities loaded — click 'Load from ISO' first")
+            self._status.config(text="No entities loaded — click 'Load from ISO' first")
 
     def _build_flat_grid(self, section_key: str):
         """Build a flat property list for sections like magic where each 'entity' is really a setting."""
@@ -325,7 +463,10 @@ class EntityEditorTab(Page):
 
     def _rebuild_property_grid(self):
         section_key, _, fmt = self._get_section_info()
-        entity = self._entity_var.get()
+        # The dropdown text may carry our edit-indicator decoration
+        # (``● goblin (3)``); strip it before using as a lookup key.
+        raw = self._entity_var.get()
+        entity = self._unformat_entity_label(raw)
         if not section_key:
             return
 
@@ -536,7 +677,25 @@ class EntityEditorTab(Page):
 
     def _update_edit_count(self):
         total = sum(len(p) for e in self._edits.values() for p in e.values())
-        self._edit_count_label.config(text=f"{total} edit(s) pending" if total else "")
+        # Count distinct (section, entity) pairs that carry edits.
+        n_entities = sum(len(ents) for ents in self._edits.values())
+        n_sections = len(self._edits)
+        if total:
+            breakdown = (
+                f"{total} edit(s) pending across "
+                f"{n_entities} entit{'y' if n_entities == 1 else 'ies'} / "
+                f"{n_sections} section{'s' if n_sections != 1 else ''}"
+            )
+        else:
+            breakdown = ""
+        self._edit_count_label.config(text=breakdown)
+
+        # Refresh the entity-combo decorations so newly-edited items
+        # gain / lose their bullet marker.  Cheap — a few-dozen item
+        # dropdown at worst.
+        if hasattr(self, "_search_entry"):
+            self._refresh_entity_list()
+        self._refresh_entity_edit_count()
 
     def _ensure_defaults(self, section_key: str, entity: str) -> dict[str, float]:
         defaults = self._default_values.get(section_key, {}).get(entity, {})
@@ -552,7 +711,7 @@ class EntityEditorTab(Page):
 
     def _randomize_entity(self):
         section_key, _, _ = self._get_section_info()
-        entity = self._entity_var.get()
+        entity = self._unformat_entity_label(self._entity_var.get())
         if not section_key or not entity:
             return
         defaults = self._ensure_defaults(section_key, entity)
@@ -642,9 +801,112 @@ class EntityEditorTab(Page):
         return sum(len(p) for e in self._edits.values() for p in e.values())
 
     def _reset_edits(self):
+        if self._edits and not messagebox.askyesno(
+                "Reset all edits?",
+                f"Discard all {self.get_edit_count()} pending edit(s)?  "
+                f"This can't be undone."):
+            return
         self._edits.clear()
         self._rebuild_property_grid()
         self._update_edit_count()
+
+    def _reset_entity(self):
+        """Clear pending edits for the currently-selected entity only.
+
+        Useful when a user experimented on one creature, decided they
+        don't like the tweaks, but wants to keep edits on every other
+        creature.  No-op + informational message if the entity has
+        no edits to reset.
+        """
+        section_key, _, _ = self._get_section_info()
+        entity = self._entity_var.get()
+        if not section_key or not entity:
+            return
+        ent_edits = self._edits.get(section_key, {}).get(entity)
+        if not ent_edits:
+            self._status.config(
+                text=f"{section_key}/{entity} has no pending edits to reset.")
+            return
+        n = len(ent_edits)
+        if not messagebox.askyesno(
+                "Reset this entity?",
+                f"Discard {n} pending edit(s) on {section_key}/{entity}?"):
+            return
+        del self._edits[section_key][entity]
+        if not self._edits[section_key]:
+            del self._edits[section_key]
+        self._rebuild_property_grid()
+        self._update_edit_count()
+        self._status.config(
+            text=f"Reset {n} edit(s) on {section_key}/{entity}")
+
+    def _import_mod(self):
+        """Load a previously-exported Mod JSON back into the editor.
+
+        Merges the file's edits into the current in-memory buffer —
+        does NOT replace them, so a user can combine a saved preset
+        with fresh interactive tweaks.  Format auto-detected: both
+        the grouped-section shape (``sections: {key: {entity: {prop:
+        value}}}``) and the ``_keyed_patches`` shape are accepted
+        (the same file can carry both — matches what Export emits).
+        """
+        path = filedialog.askopenfilename(
+            title="Import Mod JSON",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            with open(path) as f:
+                mod = json.load(f)
+        except Exception as e:
+            messagebox.showerror(
+                "Import failed",
+                f"Could not parse {Path(path).name}:\n{e}")
+            return
+
+        # Expected shape: {"sections": {<key>: {<entity>: {<prop>: value}}}}.
+        imported = 0
+        skipped = 0
+
+        # 1. Grouped "sections" (variant-record format).
+        for sec_key, entities in mod.get("sections", {}).items():
+            if not isinstance(entities, dict):
+                skipped += 1; continue
+            for entity, props in entities.items():
+                if not isinstance(props, dict):
+                    skipped += 1; continue
+                for prop_key, value in props.items():
+                    try:
+                        f_val = float(value)
+                    except (TypeError, ValueError):
+                        skipped += 1; continue
+                    self._edits.setdefault(sec_key, {}).setdefault(
+                        entity, {})[prop_key] = f_val
+                    imported += 1
+
+        # 2. Keyed patches (top-level _keyed_patches).
+        for sec_key, entities in mod.get("_keyed_patches", {}).items():
+            if not isinstance(entities, dict):
+                skipped += 1; continue
+            for entity, props in entities.items():
+                if not isinstance(props, dict):
+                    skipped += 1; continue
+                for prop_key, value in props.items():
+                    try:
+                        f_val = float(value)
+                    except (TypeError, ValueError):
+                        skipped += 1; continue
+                    self._edits.setdefault(sec_key, {}).setdefault(
+                        entity, {})[prop_key] = f_val
+                    imported += 1
+
+        self._rebuild_property_grid()
+        self._update_edit_count()
+        summary = f"Imported {imported} edit(s) from {Path(path).name}"
+        if skipped:
+            summary += f" ({skipped} malformed entr{'ies' if skipped != 1 else 'y'} skipped)"
+        self._status.config(text=summary)
 
     def _export_mod(self):
         if not self._edits:
