@@ -13,6 +13,8 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from azurik_mod.patches.player_physics import (  # noqa: E402
+    AIR_CONTROL_SCALE,
+    FLAP_HEIGHT_SCALE,
     GRAVITY_BASELINE,
     GRAVITY_PATCH,
     JUMP_SPEED_SCALE,
@@ -110,6 +112,8 @@ class VirtualSlidersAreHandled(unittest.TestCase):
         self.assertTrue(ROLL_SPEED_SCALE.is_virtual)
         self.assertTrue(SWIM_SPEED_SCALE.is_virtual)
         self.assertTrue(JUMP_SPEED_SCALE.is_virtual)
+        self.assertTrue(AIR_CONTROL_SCALE.is_virtual)
+        self.assertTrue(FLAP_HEIGHT_SCALE.is_virtual)
         # Back-compat alias points at the same descriptor as roll.
         self.assertIs(RUN_SPEED_SCALE, ROLL_SPEED_SCALE)
 

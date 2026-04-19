@@ -22,6 +22,8 @@ from azurik_mod.patches.fps_unlock import (
     apply_fps_patches,
 )
 from azurik_mod.patches.player_physics import (
+    AIR_CONTROL_SCALE,
+    FLAP_HEIGHT_SCALE,
     GRAVITY_PATCH,
     JUMP_SPEED_SCALE,
     PLAYER_PHYSICS_SITES,
@@ -29,6 +31,8 @@ from azurik_mod.patches.player_physics import (
     RUN_SPEED_SCALE,           # back-compat alias -> ROLL_SPEED_SCALE
     SWIM_SPEED_SCALE,
     WALK_SPEED_SCALE,
+    apply_air_control_speed,
+    apply_flap_height,
     apply_jump_speed,
     apply_player_physics,
     apply_player_speed,
@@ -111,6 +115,8 @@ __all__ = [
     "GRAVITY_PATCH",
     "OTHER_POPUP_OFFSETS",
     "PICKUP_ANIM_SPEC",
+    "AIR_CONTROL_SCALE",
+    "FLAP_HEIGHT_SCALE",
     "JUMP_SPEED_SCALE",
     "PLAYER_PHYSICS_SITES",
     "QOL_PATCH_SITES",
@@ -122,6 +128,8 @@ __all__ = [
     "SKIP_SAVE_SIG_SITES",
     "SWIM_SPEED_SCALE",
     "WALK_SPEED_SCALE",
+    "apply_air_control_speed",
+    "apply_flap_height",
     "apply_fps_patches",
     "apply_gem_popups_patch",
     "apply_jump_speed",

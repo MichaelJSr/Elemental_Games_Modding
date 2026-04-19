@@ -279,9 +279,30 @@ def main() -> None:
                              "state).  Independent of walk/roll.")
     p_full.add_argument("--player-jump-scale", type=float, metavar="X",
                         help="Player jump-height multiplier (default 1.0, "
-                             "range 0.1-5.0).  Scales the 9.0 jump-"
-                             "velocity imm32 at all five FUN_00089060 "
-                             "airborne-state entry sites.")
+                             "range 0.1-5.0).  Rewrites the FLD "
+                             "[0x001980A8] at VA 0x89160 in "
+                             "FUN_00089060's `v0 = sqrt(2gh)` formula to "
+                             "reference an injected 9.8*jump_scale^2 "
+                             "constant — linearly scales initial jump "
+                             "velocity, quadratic effect on peak jump "
+                             "height.  Independent of gravity slider.")
+    p_full.add_argument("--player-air-control-scale", type=float,
+                        metavar="X",
+                        help="Player airborne horizontal-steering speed "
+                             "multiplier (default 1.0, range 0.1-10.0).  "
+                             "Rewrites the 5 MOV [reg+0x140], 9.0 imm32 "
+                             "writes that initialize the air-control "
+                             "scalar read by FUN_00089480 per-frame "
+                             "while airborne.  Doesn't affect jump "
+                             "height (use --player-jump-scale for that).")
+    p_full.add_argument("--player-flap-scale", type=float,
+                        metavar="X",
+                        help="Player wing-flap (Air-power double-"
+                             "jump) vertical-impulse multiplier "
+                             "(default 1.0, range 0.1-10.0).  "
+                             "Rewrites FADD [0x001A25C0] at VA "
+                             "0x896EA so the flap adds 8.0 * "
+                             "flap_scale to velocity.z.")
 
     # apply-physics (standalone physics slider runner)
     p_physics = sub.add_parser(
@@ -328,6 +349,17 @@ def main() -> None:
              "an injected 9.8 * jump_scale^2 constant — linearly "
              "scales initial jump velocity, quadratic effect on "
              "peak jump height.  Independent of gravity slider.")
+    p_physics.add_argument("--air-control-speed", type=float,
+        metavar="X",
+        help="Player airborne horizontal-steering speed multiplier "
+             "(default 1.0; range 0.1-10.0).  Rewrites 5 "
+             "MOV [reg+0x140], 9.0 imm32 writes feeding "
+             "FUN_00089480's per-frame mid-air steering FMUL.")
+    p_physics.add_argument("--flap-height", type=float, metavar="X",
+        help="Player wing-flap / Air-power double-jump vertical "
+             "impulse multiplier (default 1.0; range 0.1-10.0).  "
+             "Rewrites FADD [0x001A25C0] at VA 0x896EA so each "
+             "flap press adds 8.0*flap_scale to velocity.z.")
 
     # inspect-physics (diagnostic — read-only dump of patch state)
     p_inspect = sub.add_parser(

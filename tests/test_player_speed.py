@@ -45,6 +45,10 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from azurik_mod.patches.player_physics import (  # noqa: E402
+    _AIR_CONTROL_IMM32_VANILLA,
+    _AIR_CONTROL_SITE_VAS,
+    _FLAP_SITE_VA,
+    _FLAP_SITE_VANILLA,
     _JUMP_SITE_VA,
     _JUMP_SITE_VANILLA,
     _ROLL_FORCE_ON_1_PATCH,
@@ -57,12 +61,16 @@ from azurik_mod.patches.player_physics import (  # noqa: E402
     _ROLL_SITE_VANILLA,
     _SWIM_SITE_VA,
     _SWIM_SITE_VANILLA,
+    _VANILLA_AIR_CONTROL,
+    _VANILLA_FLAP_IMPULSE,
     _VANILLA_JUMP_GRAVITY,
     _VANILLA_PLAYER_BASE_SPEED,
     _VANILLA_ROLL_MULTIPLIER,
     _VANILLA_SWIM_MULTIPLIER,
     _WALK_SITE_VA,
     _WALK_SITE_VANILLA,
+    apply_air_control_speed,
+    apply_flap_height,
     apply_jump_speed,
     apply_player_physics,
     apply_player_speed,
@@ -545,6 +553,150 @@ class RollForceAlwaysOn(unittest.TestCase):
 
 @unittest.skipUnless(_XBE_PATH,
     "vanilla default.xbe fixture not available")
+class ApplyAirControlBehaviour(unittest.TestCase):
+    """``air_control_speed_scale`` rewrites the 5 imm32 sites that
+    initialise ``entity + 0x140`` (the airborne horizontal-steering
+    scalar consumed per-frame by FUN_00089480)."""
+
+    def setUp(self):
+        self.orig = _XBE_PATH.read_bytes()
+
+    def test_default_is_noop(self):
+        data = bytearray(self.orig)
+        self.assertFalse(apply_air_control_speed(data))
+        self.assertEqual(bytes(data), self.orig,
+            msg="air_control_scale=1.0 must leave the XBE "
+                "byte-identical.")
+
+    def test_all_five_sites_vanilla_is_9_point_0(self):
+        for va in _AIR_CONTROL_SITE_VAS:
+            off = va_to_file(va)
+            current = bytes(self.orig[off:off + 4])
+            self.assertEqual(current, _AIR_CONTROL_IMM32_VANILLA,
+                msg=f"site at VA 0x{va:X} drifted from 9.0 (got "
+                    f"{current.hex()})")
+
+    def test_scale_2_rewrites_all_sites_to_18(self):
+        data = bytearray(self.orig)
+        self.assertTrue(apply_air_control_speed(
+            data, air_control_scale=2.0))
+        for va in _AIR_CONTROL_SITE_VAS:
+            off = va_to_file(va)
+            value = struct.unpack("<f",
+                                  bytes(data[off:off + 4]))[0]
+            self.assertAlmostEqual(value, 18.0, places=3)
+
+    def test_does_not_touch_jump_or_walk_sites(self):
+        """Isolation: air-control patch must leave the jump FLD
+        site and the walk MOV+FLD site at vanilla bytes."""
+        data = bytearray(self.orig)
+        self.assertTrue(apply_air_control_speed(
+            data, air_control_scale=3.0))
+        for va, vanilla in (
+            (_JUMP_SITE_VA, _JUMP_SITE_VANILLA),
+            (_WALK_SITE_VA, _WALK_SITE_VANILLA),
+        ):
+            off = va_to_file(va)
+            self.assertEqual(bytes(data[off:off + 6]), vanilla,
+                msg=f"air-control touched VA 0x{va:X}")
+
+    def test_apply_player_physics_routes_air_control(self):
+        data = bytearray(self.orig)
+        apply_player_physics(data, air_control_scale=1.5)
+        off = va_to_file(_AIR_CONTROL_SITE_VAS[0])
+        value = struct.unpack("<f",
+                              bytes(data[off:off + 4]))[0]
+        self.assertAlmostEqual(
+            value, _VANILLA_AIR_CONTROL * 1.5, places=3)
+
+
+@unittest.skipUnless(_XBE_PATH,
+    "vanilla default.xbe fixture not available")
+class ApplyFlapHeightBehaviour(unittest.TestCase):
+    """``flap_height_scale`` rewrites the single
+    ``FADD [0x001A25C0]`` at VA 0x896EA (inside FUN_00089480) to
+    reference an injected ``8.0 × flap_scale`` constant.  Affects
+    the vertical impulse added on the Air-power double-jump
+    (wing flap) — ``velocity.z += 8.0 × flap_scale`` per trigger."""
+
+    def setUp(self):
+        self.orig = _XBE_PATH.read_bytes()
+
+    def test_default_is_noop(self):
+        data = bytearray(self.orig)
+        self.assertFalse(apply_flap_height(data))
+        self.assertEqual(bytes(data), self.orig,
+            msg="flap_scale=1.0 must leave the XBE "
+                "byte-identical.")
+
+    def test_vanilla_bytes_are_fadd_of_flap_constant(self):
+        off = va_to_file(_FLAP_SITE_VA)
+        current = bytes(self.orig[off:off + 6])
+        self.assertEqual(current, _FLAP_SITE_VANILLA,
+            msg=f"flap site at VA 0x{_FLAP_SITE_VA:X} drifted "
+                f"(got {current.hex()})")
+
+    def test_scale_2_injects_16(self):
+        data = bytearray(self.orig)
+        self.assertTrue(apply_flap_height(data, flap_scale=2.0))
+        off = va_to_file(_FLAP_SITE_VA)
+        patch = bytes(data[off:off + 6])
+        self.assertEqual(patch[:2], b"\xD8\x05",
+            msg="flap site must become FADD [abs32] "
+                "(opcode D8 05)")
+        inject_va = struct.unpack("<I", patch[2:6])[0]
+        from azurik_mod.patching.xbe import parse_xbe_sections
+        _, secs = parse_xbe_sections(bytes(data))
+        inject_fo = None
+        for s in secs:
+            if s["vaddr"] <= inject_va < s["vaddr"] + s["vsize"]:
+                inject_fo = s["raw_addr"] + (inject_va - s["vaddr"])
+                break
+        self.assertIsNotNone(inject_fo)
+        value = struct.unpack("<f",
+                              bytes(data[inject_fo:inject_fo + 4]))[0]
+        self.assertAlmostEqual(
+            value, _VANILLA_FLAP_IMPULSE * 2.0, places=3)
+
+    def test_shared_constant_is_untouched(self):
+        """0x001A25C0 has 4 non-player readers.  apply_flap_height
+        must leave the shared constant at 8.0."""
+        data = bytearray(self.orig)
+        self.assertTrue(apply_flap_height(data, flap_scale=3.0))
+        fo = 0x188000 + (0x001A25C0 - 0x18F3A0)
+        shared = struct.unpack("<f", bytes(data[fo:fo + 4]))[0]
+        self.assertAlmostEqual(shared, 8.0, places=3,
+            msg="shared flap constant at 0x001A25C0 must NOT be "
+                "modified — 4 other readers depend on it.")
+
+    def test_does_not_touch_jump_walk_or_air_control_sites(self):
+        data = bytearray(self.orig)
+        self.assertTrue(apply_flap_height(data, flap_scale=2.5))
+        for va, vanilla in (
+            (_JUMP_SITE_VA, _JUMP_SITE_VANILLA),
+            (_WALK_SITE_VA, _WALK_SITE_VANILLA),
+        ):
+            off = va_to_file(va)
+            self.assertEqual(bytes(data[off:off + 6]), vanilla)
+        for va in _AIR_CONTROL_SITE_VAS:
+            off = va_to_file(va)
+            self.assertEqual(
+                bytes(data[off:off + 4]),
+                _AIR_CONTROL_IMM32_VANILLA,
+                msg=f"flap patch touched air-control VA "
+                    f"0x{va:X}")
+
+    def test_apply_player_physics_routes_flap(self):
+        data = bytearray(self.orig)
+        apply_player_physics(data, flap_scale=2.0)
+        off = va_to_file(_FLAP_SITE_VA)
+        self.assertEqual(bytes(data[off:off + 2]), b"\xD8\x05",
+            msg="apply_player_physics(flap_scale=...) must "
+                "rewrite the FADD site")
+
+
+@unittest.skipUnless(_XBE_PATH,
+    "vanilla default.xbe fixture not available")
 class ApplyPlayerPhysicsRouting(unittest.TestCase):
     """`apply_player_physics` accepts gravity + walk + roll + swim
     kwargs together and routes each to its own sub-patch."""
@@ -611,15 +763,18 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
     (walk, roll, swim) + up to three injected per-player floats."""
 
     def test_vanilla_xbe_includes_all_static_sites(self):
-        """On a vanilla XBE:
-         - Four 6-byte instruction-site ranges (walk, roll, swim,
-           jump-FLD)
-         - 2-byte roll edge-lock range
-         - Two 2-byte roll force-always-on ranges
-         are ALWAYS whitelisted.  The roll + swim sites look like
-        ``FMUL [abs32]`` natively so the callback also follows each
-        abs32 and whitelists a 4-byte range at the shared
-        constants (harmless — those never change)."""
+        """On a vanilla XBE the callback whitelists every planned
+        patch site so ``verify-patches --strict`` won't flag them
+        as unexpected byte flips if the pack is disabled:
+
+         - 5 × 6-byte instruction-site ranges (walk, roll, swim,
+           jump-FLD, flap-FADD)
+         - 5 × 4-byte imm32 ranges (air-control sites)
+         - 3 × 2-byte roll auxiliary ranges (edge-lock + 2 force-on)
+         - up to 4 extra 4-byte follows (shared roll 3.0 +
+           shared swim 10.0 + shared gravity 9.8 via jump FLD +
+           shared flap 8.0 via flap FADD)
+        """
         from azurik_mod.patches.player_physics import (
             _ROLL_EDGE_LOCK_VA,
             _player_speed_dynamic_whitelist,
@@ -630,6 +785,7 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         roll_off = va_to_file(_ROLL_SITE_VA)
         swim_off = va_to_file(_SWIM_SITE_VA)
         jump_off = va_to_file(_JUMP_SITE_VA)
+        flap_off = va_to_file(_FLAP_SITE_VA)
         edge_off = va_to_file(_ROLL_EDGE_LOCK_VA)
         f1_off = va_to_file(_ROLL_FORCE_ON_1_VA)
         f2_off = va_to_file(_ROLL_FORCE_ON_2_VA)
@@ -637,13 +793,18 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         self.assertIn((roll_off, roll_off + 6), ranges)
         self.assertIn((swim_off, swim_off + 6), ranges)
         self.assertIn((jump_off, jump_off + 6), ranges)
+        self.assertIn((flap_off, flap_off + 6), ranges)
         self.assertIn((edge_off, edge_off + 2), ranges)
         self.assertIn((f1_off, f1_off + 2), ranges)
         self.assertIn((f2_off, f2_off + 2), ranges)
-        # 4 instr sites (6-byte) + 3 two-byte roll-aux sites +
-        # up to 3 extra 4-byte follows (shared roll constant +
-        # shared swim constant + shared gravity for jump FLD).
-        self.assertIn(len(ranges), (7, 8, 9, 10),
+        for ac_va in _AIR_CONTROL_SITE_VAS:
+            ac_off = va_to_file(ac_va)
+            self.assertIn((ac_off, ac_off + 4), ranges,
+                msg=f"air-control site 0x{ac_va:X} missing "
+                    f"from whitelist")
+        # 5 instr sites + 3 two-byte + 5 air-control 4-byte +
+        # up to 4 extra 4-byte follows.
+        self.assertIn(len(ranges), (13, 14, 15, 16, 17),
             msg=f"unexpected range count {len(ranges)}: {ranges}")
 
     def test_patched_xbe_adds_injected_float_ranges(self):
@@ -658,6 +819,9 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
             data, walk_scale=2.0, roll_scale=1.5))
         self.assertTrue(apply_swim_speed(data, swim_scale=2.0))
         self.assertTrue(apply_jump_speed(data, jump_scale=1.5))
+        self.assertTrue(apply_air_control_speed(data,
+                                                air_control_scale=2.0))
+        self.assertTrue(apply_flap_height(data, flap_scale=2.0))
         ranges = _player_speed_dynamic_whitelist(bytes(data))
         four_byte_ranges = [(lo, hi) for lo, hi in ranges
                             if hi - lo == 4]
@@ -665,14 +829,16 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
                            if hi - lo == 6]
         two_byte_ranges = [(lo, hi) for lo, hi in ranges
                            if hi - lo == 2]
-        # 4 instruction-site rewrites (walk/roll/swim/jump) —
-        # jump is now an FLD rewrite at VA 0x89160, not an imm32.
-        self.assertEqual(len(six_byte_ranges), 4,
-            msg="4 instruction-site rewrites (walk/roll/swim/jump)")
-        # 4 injected floats (walk base, roll mult, swim mult,
-        # jump gravity scalar).
-        self.assertEqual(len(four_byte_ranges), 4,
-            msg="4 injected floats (walk + roll + swim + jump)")
+        # 5 instruction-site rewrites: walk/roll/swim/jump/flap
+        # (all D9 05 or D8 0D/05 prefixes).
+        self.assertEqual(len(six_byte_ranges), 5,
+            msg="5 instr-site rewrites (walk/roll/swim/jump/flap)")
+        # 4-byte ranges: 5 injected floats (walk base, roll mult,
+        # swim mult, jump gravity scalar, flap impulse) + 5
+        # air-control imm32 sites = 10.
+        self.assertEqual(len(four_byte_ranges), 10,
+            msg="5 injected floats + 5 air-control imm32 = 10 "
+                "four-byte ranges")
         # 3 two-byte ranges (edge-lock + 2 force-on sites).
         self.assertEqual(len(two_byte_ranges), 3,
             msg="3 roll-aux ranges (edge-lock + 2 force-on)")

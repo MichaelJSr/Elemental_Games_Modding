@@ -2,6 +2,74 @@
 
 ## Unreleased
 
+### player_physics — air-control + wing-flap sliders
+
+Two new player-movement patches, bringing the pack to **7
+sliders** (gravity + walk + roll + swim + jump + air-control +
+flap).  Both requested by user testing; both correctly
+isolated to player-only physics (no shared-constant disturbance).
+
+**#1. Horizontal air-control speed.**  `entity + 0x140` stores a
+per-frame mid-air horizontal steering multiplier that
+`FUN_00089480` applies every airborne frame.  Vanilla `9.0`.
+Written by 5 `MOV DWORD [reg+0x140], 0x41100000` imm32
+instructions across the airborne-state entry paths (main
+ground jump in `FUN_00089060`, plus 4 alternate paths).
+``apply_air_control_speed`` rewrites each imm32 to
+``9.0 × air_control_scale``.  5-site in-place patch; no shim.
+
+Does NOT affect jump HEIGHT (which is computed from the SQRT
+formula in `FUN_00089060` reading `entity + 0x144`, owned by
+`apply_jump_speed`).  Only affects mid-air horizontal
+movement.  These are the 5 sites the pre-v2 jump patch
+mistakenly targeted — they DO meaningfully affect movement,
+just horizontally not vertically, so they're kept as a
+separate slider now.
+
+**#2. Wing-flap / Air-power double-jump height.**
+`FUN_00089480` adds `8.0` to the z-velocity when BOTH the
+flap button (input flag 0x04) AND the roll flag (0x40) are
+set — the Air-power double-jump.  The FADD lives at VA
+`0x000896EA` as `FADD dword [0x001A25C0]`.
+``apply_flap_height`` rewrites it to
+`FADD dword [inject_va]` where `inject_va` holds
+`8.0 × flap_scale`.  Single 6-byte rewrite + 4-byte
+injected float; shim-landed.  The shared `8.0` at
+`0x001A25C0` has 4 non-player readers and is left untouched.
+
+**User-facing changes**:
+- GUI Patches page now shows two new sliders:
+  "Player air-control speed" (range 0.1–10.0) and
+  "Player wing-flap (double jump) height" (range 0.1–10.0).
+  Both default 1.0, text-box unclamped like the others.
+- CLI: `--player-air-control-scale` and `--player-flap-scale`
+  on `randomize-full`; `--air-control-speed` and
+  `--flap-height` on `apply-physics`.
+- `apply_player_physics` accepts new kwargs
+  `air_control_scale` and `flap_scale` alongside the existing
+  ones.
+- `azurik-mod inspect-physics` reports both new patches
+  (per-site for air-control's 5 imm32s, FADD rewrite state +
+  injected value for flap).
+
+**Tests**: 759 passed (+11 new):
+- `ApplyAirControlBehaviour` (5 tests) pins all 5 imm32 sites,
+  verifies isolation from jump/walk, scale=2 imm32
+  replacement, apply_player_physics routing.
+- `ApplyFlapHeightBehaviour` (6 tests) pins the FADD rewrite,
+  verifies the shared 8.0 at VA 0x001A25C0 stays intact,
+  isolation from jump/walk/air-control, apply_player_physics
+  routing.
+- Dynamic-whitelist tests updated for new site counts: vanilla
+  yields 13-17 ranges; patched yields 5 six-byte instruction
+  rewrites + 10 four-byte (5 injected floats + 5 air-control
+  imm32) + 3 two-byte roll-aux.
+
+**Docs updated**:
+- `docs/LEARNINGS.md`: new "Airborne horizontal-control speed"
+  and "Wing-flap (double-jump) vertical impulse" sections with
+  the FUN_00089060/FUN_00089480 decode.
+
 ### player_physics — jump-formula fix + roll force-always-on + inspect-physics
 
 Three user-reported "still doesn't work" issues traced to root

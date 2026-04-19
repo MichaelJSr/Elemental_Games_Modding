@@ -205,6 +205,61 @@ The old `run_*` kwargs / attr names remain as transparent
 aliases so pinned callers don't break, but all documentation
 and tests use the new name.
 
+### Airborne horizontal-control speed (new April 2026)
+
+While the player is airborne, horizontal movement velocity is
+computed per-frame in `FUN_00089480` as:
+
+```
+local_16c = entity[+0x140] × magnitude
+```
+
+`entity + 0x140` stores a speed scalar written during jump
+initialisation by five `MOV DWORD [reg+0x140], 0x41100000`
+(= 9.0) imm32 instructions at VAs `0x84ED3`, `0x856D4`,
+`0x890EA`, `0x89126`, `0x8D322` (main ground jump +
+4 alternate airborne-state entry paths).
+
+`apply_air_control_speed` rewrites the imm32 at all 5 sites to
+`9.0 × air_control_scale`.  Per-site imm32-in-place patch; no
+shim, no shared-constant touched.
+
+✅ **Learning**: **don't confuse the initial jump velocity
+scalar with mid-air horizontal control**.  I initially (v1
+jump patch) conflated them because both get written on jump
+entry.  They're two separate entity fields, `+0x140` (air
+control / horizontal) and `+0x144` (height / vertical),
+consumed by different physics paths.  The correct mapping only
+became clear after reading the consuming FPU chain in
+`FUN_00089480`.
+
+### Wing-flap (double-jump) vertical impulse (new April 2026)
+
+When the player holds the Air-power / flap button mid-air,
+`FUN_00089480`'s airborne physics adds a fixed vertical impulse
+to `entity + 0x2C` (velocity.z):
+
+```asm
+0008967B: 0F 84 B8 00 00 00   JZ (skip if roll flag 0x40 not set)
+0008969A: F6 C1 04             TEST CL, 0x04                      ; flap button
+0008969D: 0F 84 96 00 00 00    JZ (skip if flap not pressed)
+000896E0: D9 44 24 28          FLD [ESP+0x28]
+000896E4: D8 05 C0 25 1A 00    FADD [0x001A25C0]   ; + 8.0
+000896EA: D9 5C 24 28          FSTP [ESP+0x28]
+```
+
+Gated on BOTH the flap button (input flag 0x04) AND the
+roll/air-boost flag (input flag 0x40, which
+``apply_player_speed`` force-always-on already enables) being
+set, the impulse adds `8.0` to the z-component.  The 8.0 lives
+at VA `0x001A25C0` and has 5 readers, only this one on the
+player path.
+
+`apply_flap_height` rewrites the FADD at VA `0x896EA` to
+`FADD [inject_va]` where `inject_va` holds `8.0 × flap_scale`.
+At `flap_scale = 2`, each wing flap adds `16.0` to vertical
+velocity — doubling the height gained per flap press.
+
 ### Jump velocity: the v2 correction (April 2026)
 
 `FUN_00089060` is the main jump initiation (plays

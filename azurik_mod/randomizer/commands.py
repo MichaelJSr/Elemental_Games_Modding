@@ -1295,6 +1295,9 @@ def cmd_randomize_full(args):
             or 1.0)
         swim_scale = float(getattr(args, 'player_swim_scale', None) or 1.0)
         jump_scale = float(getattr(args, 'player_jump_scale', None) or 1.0)
+        air_control_scale = float(
+            getattr(args, 'player_air_control_scale', None) or 1.0)
+        flap_scale = float(getattr(args, 'player_flap_scale', None) or 1.0)
         player_char = getattr(args, 'player_character', None)
         xbe_path = extract_dir / "default.xbe"
 
@@ -1311,7 +1314,9 @@ def cmd_randomize_full(args):
                                or walk_scale != 1.0
                                or roll_scale != 1.0
                                or swim_scale != 1.0
-                               or jump_scale != 1.0),
+                               or jump_scale != 1.0
+                               or air_control_scale != 1.0
+                               or flap_scale != 1.0),
         }
 
         needs_xbe = any(_FLAG_PACKS.values()) or bool(player_char)
@@ -1330,6 +1335,8 @@ def cmd_randomize_full(args):
                     "roll_speed_scale": roll_scale,
                     "swim_speed_scale": swim_scale,
                     "jump_speed_scale": jump_scale,
+                    "air_control_scale": air_control_scale,
+                    "flap_height_scale": flap_scale,
                 },
             }
 
@@ -1745,6 +1752,8 @@ def cmd_inspect_physics(args):
     from azurik_mod.iso.pack import extract_xbe_from_iso
     from azurik_mod.patching.xbe import parse_xbe_sections, va_to_file
     from azurik_mod.patches.player_physics import (
+        _AIR_CONTROL_IMM32_VANILLA, _AIR_CONTROL_SITE_VAS,
+        _FLAP_SITE_VA, _FLAP_SITE_VANILLA,
         _JUMP_SITE_VA, _JUMP_SITE_VANILLA,
         _ROLL_EDGE_LOCK_PATCH, _ROLL_EDGE_LOCK_VA,
         _ROLL_FORCE_ON_1_PATCH, _ROLL_FORCE_ON_1_VA,
@@ -1817,6 +1826,24 @@ def cmd_inspect_physics(args):
                 _SWIM_SITE_VA, _SWIM_SITE_VANILLA, b"\xD8\x0D")
     _check_site("jump (FLD)",
                 _JUMP_SITE_VA, _JUMP_SITE_VANILLA, b"\xD9\x05")
+    _check_site("flap (FADD)",
+                _FLAP_SITE_VA, _FLAP_SITE_VANILLA, b"\xD8\x05")
+
+    # Air-control: 5 imm32 sites.  Each either has the vanilla 9.0
+    # imm32 or has been rewritten to 9.0 × air_control_scale.
+    print()
+    print("Air-control speed (5 imm32 sites at entity+0x140):")
+    for site_va in _AIR_CONTROL_SITE_VAS:
+        off = va_to_file(site_va)
+        current = bytes(xbe_bytes[off:off + 4])
+        if current == _AIR_CONTROL_IMM32_VANILLA:
+            print(f"  VA 0x{site_va:06X} [VANILLA]  "
+                  f"imm32 = 9.0")
+        else:
+            val = _struct.unpack("<f", current)[0]
+            print(f"  VA 0x{site_va:06X} [PATCHED]  "
+                  f"imm32 = {val:.4f}  (= "
+                  f"{val / 9.0:.3f}× vanilla)")
 
     # Roll aux: edge-lock + force-on sites.
     print("\nRoll auxiliary patches:")
@@ -1887,16 +1914,21 @@ def cmd_apply_physics(args):
         or 1.0)
     swim_scale = float(getattr(args, "swim_speed", None) or 1.0)
     jump_scale = float(getattr(args, "jump_speed", None) or 1.0)
+    air_control_scale = float(
+        getattr(args, "air_control_speed", None) or 1.0)
+    flap_scale = float(getattr(args, "flap_height", None) or 1.0)
 
     if (gravity is None
             and walk_scale == 1.0
             and roll_scale == 1.0
             and swim_scale == 1.0
-            and jump_scale == 1.0):
+            and jump_scale == 1.0
+            and air_control_scale == 1.0
+            and flap_scale == 1.0):
         print("No physics changes requested.  "
               "Pass --gravity, --walk-speed, --roll-speed (or "
-              "legacy --run-speed), --swim-speed, and/or "
-              "--jump-speed.")
+              "legacy --run-speed), --swim-speed, --jump-speed, "
+              "--air-control-speed, and/or --flap-height.")
         return
 
     def _patch_xbe_in_place(xbe_path: Path) -> None:
@@ -1908,6 +1940,9 @@ def cmd_apply_physics(args):
             roll_scale=roll_scale if roll_scale != 1.0 else None,
             swim_scale=swim_scale if swim_scale != 1.0 else None,
             jump_scale=jump_scale if jump_scale != 1.0 else None,
+            air_control_scale=(air_control_scale
+                               if air_control_scale != 1.0 else None),
+            flap_scale=flap_scale if flap_scale != 1.0 else None,
         )
         xbe_path.write_bytes(data)
 

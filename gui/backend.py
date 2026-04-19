@@ -272,6 +272,8 @@ def run_randomizer(
                       else physics.get("run_speed_scale"))
         swim_scale = physics.get("swim_speed_scale")
         jump_scale = physics.get("jump_speed_scale")
+        air_control_scale = physics.get("air_control_scale")
+        flap_scale = physics.get("flap_height_scale")
         # Only forward when clearly non-default to preserve byte-identity.
         if gravity is not None and abs(gravity - 9.8) < 1e-6:
             gravity = None
@@ -283,6 +285,11 @@ def run_randomizer(
             swim_scale = None
         if jump_scale is not None and abs(jump_scale - 1.0) < 1e-6:
             jump_scale = None
+        if air_control_scale is not None and \
+                abs(air_control_scale - 1.0) < 1e-6:
+            air_control_scale = None
+        if flap_scale is not None and abs(flap_scale - 1.0) < 1e-6:
+            flap_scale = None
 
         args = argparse.Namespace(
             command="randomize-full",
@@ -323,6 +330,8 @@ def run_randomizer(
             player_roll_scale=roll_scale,
             player_swim_scale=swim_scale,
             player_jump_scale=jump_scale,
+            player_air_control_scale=air_control_scale,
+            player_flap_scale=flap_scale,
         )
 
         result: BuildResult

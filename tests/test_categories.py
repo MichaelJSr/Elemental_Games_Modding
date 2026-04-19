@@ -304,14 +304,16 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         slider_keys = sorted(browser.sliders().keys())
         self.assertEqual(
             slider_keys,
-            [("player_physics", "gravity"),
+            [("player_physics", "air_control_scale"),
+             ("player_physics", "flap_height_scale"),
+             ("player_physics", "gravity"),
              ("player_physics", "jump_speed_scale"),
              ("player_physics", "roll_speed_scale"),
              ("player_physics", "swim_speed_scale"),
              ("player_physics", "walk_speed_scale")])
         # Initial values mirrored into pack_params.
         self.assertIn("player_physics", params)
-        self.assertEqual(len(params["player_physics"]), 5)
+        self.assertEqual(len(params["player_physics"]), 7)
 
     def test_plugin_category_gets_its_own_tab(self):
         """Simulate a plugin: register a category + a pack referencing
