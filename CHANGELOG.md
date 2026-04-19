@@ -2,6 +2,63 @@
 
 ## Unreleased
 
+### Audio extractor — duplicate detection + raw-PCM previews for the 448 undecoded entries
+
+The April 2026 audio pass decoded the 103 ``xbox-adpcm``
+entries, but the remaining **448 ``likely-audio`` entries** carry
+no recognisable header and their codec isn't reversed yet.  This
+commit ships the pragmatic workflow for those 448 entries:
+
+**Duplicate detection** (default, always on).  Every entry whose
+first 32 bytes + total size match an earlier one gets a
+``duplicate_of`` field in ``manifest.json`` pointing at the
+canonical index.  In vanilla ``fx.xbr`` this surfaces **48
+duplicates** across all classifications — same SFX referenced
+by multiple symbolic names from ``index.xbr``.  Deduplicating
+the working set cuts RE cycles on redundant payloads.
+
+**Raw-PCM preview wrappers** (opt-in via ``--raw-previews``).
+Emits ``*.preview.wav`` alongside every likely-audio entry,
+wrapping the raw bytes as 16-bit mono PCM at 22050 Hz (the
+most common Azurik rate).  The output is **NOT** the intended
+audio — the real codec isn't decoded — it's a diagnostic WAV
+that lets an analyst drop each blob into Audacity for waveform
+/ spectrogram inspection.  Useful for spotting codec-frame
+boundaries by eye, confirming duplicates visually, and
+validating that a blob is actually audio vs binary garbage.
+Preview sample rate override: ``--preview-sample-rate 44100``.
+
+**The RE trail**.  ``docs/LEARNINGS.md`` § fx.xbr wave codec
+documents what's been ruled out (raw PCM, headerless IMA,
+standard MS/Xbox ADPCM block sizes, every common container
+magic) + the most likely decoder callsite to bisect:
+``load_asset_by_fourcc`` @ VA ``0x000A67A0``.  Future RE
+sessions have a concrete starting point instead of a
+blank-page problem.
+
+Vanilla ``fx.xbr`` numbers after this pass (700 entries):
+
+- 103 xbox-adpcm (header decoded, ``.wav`` emitted)
+- 448 likely-audio — **421 preview WAVs** + **27 duplicates skipped**
+-  48 total duplicates detected (across all classifications)
+- 118 likely-animation
+-  31 too-small
+
+**API additions**:
+
+- ``build_raw_preview_wav(payload, *, sample_rate, channels,
+  bits_per_sample)`` — public helper for Python callers that
+  want to wrap arbitrary bytes as a diagnostic RIFF/WAVE.
+- ``WaveEntry.duplicate_of`` + ``WaveEntry.preview_output_rel``
+  fields + corresponding ``manifest.json`` shape.
+- ``DumpReport.duplicates_detected`` / ``preview_wav_written``
+  counters for scripts consuming the report.
+
+6 new regression tests in ``RawPreviewWav`` +
+``DuplicateDetection`` test classes pin the RIFF shape, the
+sample-rate override, odd-payload padding, canonical-index
+pointing, and the dedup-aware preview skip.
+
 ### Audio extractor now decodes headers + wraps WAV; roadmap cleanup
 
 **`audio dump` — xbox-adpcm header decoding + WAV wrapping shipped**

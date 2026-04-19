@@ -696,6 +696,9 @@ def cmd_audio_dump(args) -> None:
             entropy_min=args.entropy_min,
             only_audio=args.only_audio,
             emit_wav=not getattr(args, "no_wav", False),
+            emit_raw_previews=getattr(args, "raw_previews", False),
+            preview_sample_rate=getattr(
+                args, "preview_sample_rate", 22050),
             index_xbr=getattr(args, "index_xbr", None))
     except (FileNotFoundError, ValueError) as exc:
         print(f"audio dump: {exc}", file=sys.stderr)

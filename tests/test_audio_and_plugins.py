@@ -298,6 +298,98 @@ class AudioDumpWithHeader(unittest.TestCase):
         self.assertFalse(
             (self.output / "waves" / "wave_0000.wav").exists())
 
+
+class RawPreviewWav(unittest.TestCase):
+    """The raw-PCM preview wrapper for the 448 headerless
+    likely-audio entries whose real codec we haven't reversed yet."""
+
+    def test_wraps_payload_as_riff_16bit_mono(self):
+        from azurik_mod.xbe_tools.audio_dump import build_raw_preview_wav
+        payload = bytes(range(256)) * 4  # 1 KiB of uniform data
+        wav = build_raw_preview_wav(payload, sample_rate=22050)
+        self.assertEqual(wav[:4], b"RIFF")
+        self.assertEqual(wav[8:12], b"WAVE")
+        # Format-chunk at offset 12..
+        self.assertEqual(wav[12:16], b"fmt ")
+        fmt_tag, channels, rate, _br, block_align, bits = struct.unpack_from(
+            "<HHIIHH", wav, 20)
+        self.assertEqual(fmt_tag, 0x0001)   # WAVE_FORMAT_PCM
+        self.assertEqual(channels, 1)
+        self.assertEqual(rate, 22050)
+        self.assertEqual(bits, 16)
+        # Data chunk follows the fmt block.
+        self.assertIn(b"data", wav)
+
+    def test_sample_rate_override(self):
+        from azurik_mod.xbe_tools.audio_dump import build_raw_preview_wav
+        wav = build_raw_preview_wav(b"\x00" * 128, sample_rate=44100)
+        _tag, _ch, rate, *_ = struct.unpack_from("<HHIIHH", wav, 20)
+        self.assertEqual(rate, 44100)
+
+    def test_odd_length_payload_padded(self):
+        """RIFF data chunks must be an even byte count for 16-bit
+        samples — an odd-length payload gets a single zero-byte pad."""
+        from azurik_mod.xbe_tools.audio_dump import build_raw_preview_wav
+        wav = build_raw_preview_wav(b"\x01" * 7)
+        # data-chunk payload should be 8 bytes (7 + 1 pad)
+        data_idx = wav.rfind(b"data")
+        data_size = struct.unpack_from("<I", wav, data_idx + 4)[0]
+        self.assertEqual(data_size, 8)
+
+
+class DuplicateDetection(unittest.TestCase):
+    """Duplicate-of detection surfaces wave entries that share
+    first-32-bytes + size — same SFX referenced by multiple
+    ``fx/sound/...`` names in the vanilla ISO."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="azurik-dup-"))
+        self.addCleanup(shutil.rmtree, self.tmp)
+        # Build three entries: two identical, one distinct.
+        # All classified as likely-audio (high entropy, no header).
+        common = bytes(range(256)) * 2        # 512 B, uniform histogram
+        distinct = bytes(reversed(range(256))) * 2
+        self.fx_path = self.tmp / "synthetic_fx.xbr"
+        self.fx_path.write_bytes(_make_fake_fx_xbr(
+            waves=[common, common, distinct]))
+        self.output = self.tmp / "out"
+
+    def test_duplicate_pointed_at_earliest_index(self):
+        from azurik_mod.xbe_tools.audio_dump import dump_waves
+        report = dump_waves(self.fx_path, self.output)
+        self.assertEqual(report.duplicates_detected, 1)
+        # Entry 0 is the canonical, entry 1 duplicates entry 0,
+        # entry 2 is distinct.
+        self.assertEqual(report.entries[0].duplicate_of, -1)
+        self.assertEqual(report.entries[1].duplicate_of, 0)
+        self.assertEqual(report.entries[2].duplicate_of, -1)
+
+    def test_duplicate_flagged_in_manifest_json(self):
+        from azurik_mod.xbe_tools.audio_dump import dump_waves
+        dump_waves(self.fx_path, self.output)
+        manifest = json.loads(
+            (self.output / "manifest.json").read_text())
+        self.assertEqual(manifest["entries"][1]["duplicate_of"], 0)
+        # Canonical entry doesn't carry the field.
+        self.assertNotIn("duplicate_of", manifest["entries"][0])
+
+    def test_raw_previews_skip_duplicates(self):
+        """Running with --raw-previews should NOT emit the preview
+        for an entry whose bytes are identical to an earlier one —
+        Audacity would just show the same waveform twice."""
+        from azurik_mod.xbe_tools.audio_dump import dump_waves
+        report = dump_waves(self.fx_path, self.output,
+                            emit_raw_previews=True)
+        self.assertEqual(report.preview_wav_written, 2,
+            msg="canonical entries 0 + 2 get previews; duplicate 1 "
+                "should be skipped to avoid redundant output")
+        self.assertFalse(
+            (self.output / "waves" / "wave_0001.preview.wav").exists())
+        self.assertTrue(
+            (self.output / "waves" / "wave_0000.preview.wav").exists())
+        self.assertTrue(
+            (self.output / "waves" / "wave_0002.preview.wav").exists())
+
     def test_missing_file_raises(self):
         from azurik_mod.xbe_tools.audio_dump import dump_waves
         with self.assertRaises(FileNotFoundError):

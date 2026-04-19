@@ -634,6 +634,73 @@ shim authors who want to trigger specific effects).  Deferred
 until a concrete shim needs it; the inline-asm wrapper cost
 (à la gravity) isn't worth paying speculatively.
 
+### fx.xbr wave codec — what's decoded, what isn't (April 2026)
+
+``fx.xbr`` contains **700** ``wave`` TOC entries.  Post-April-2026
+they split into four buckets:
+
+- **103 xbox-adpcm** — entries whose payload starts with the
+  20-byte header ``[sample_rate u32][sample_count u32]
+  [format_magic u32][reserved u32][reserved u32]``.  The
+  ``format_magic`` dword decomposes byte-for-byte as
+  ``channels = byte[0]``, ``bits_per_sample = byte[1]``,
+  ``codec_id = byte[3]``; 97 of the 100 header-carrying entries
+  use ``0x01000401`` = mono, 4-bit, codec 1 (Xbox ADPCM).  The
+  ``audio dump`` tool wraps these in RIFF/WAVE containers using
+  ``WAVE_FORMAT_XBOX_ADPCM`` (0x0069).  vgmstream / Audacity /
+  ffmpeg can play them directly.
+- **448 likely-audio** — high-entropy payloads with NO recognisable
+  header.  The exact codec is not yet reversed.  What we've
+  ruled out:
+  * Raw 16-bit / 8-bit PCM — mean ``|Δ|`` between adjacent int16
+    samples ≈ 30 000 (near-uniform-random).  Real PCM audio
+    runs ``|Δ| ≲ 3 000``.
+  * Headerless IMA ADPCM with either ``(predictor=0, step=0)``
+    start or first-4-bytes-as-header — both produce noise.
+  * MS / Xbox ADPCM 36-byte block codec — 0 of 448 sizes divide
+    cleanly by 36, 72, 140, or any other standard ADPCM block.
+  * Common containers: no RIFF / XMA / XMA2 / xWMA / FSB /
+    OggS / BNK magic anywhere in the blob range.
+
+  What we've confirmed about the 448:
+
+  * **~50% of sizes divide by 8**, another 29% by 16 — a
+    block-based codec with a non-standard (or varying) block size
+    is most plausible.
+  * **48 entries are exact duplicates** of earlier entries (same
+    first 32 bytes + same total size).  Likely the same SFX
+    referenced by multiple ``fx/sound/...`` symbolic names.  The
+    ``audio dump`` tool surfaces this via ``duplicate_of`` in the
+    manifest + skips redundant preview emission.
+  * **Most likely decoder callsite**: ``load_asset_by_fourcc``
+    at VA ``0x000A67A0`` → ``wave``-tag branch.  Bisecting from
+    there would isolate the decoder.
+
+- **118 likely-animation** — Maya-particle-system curve data.
+  First 64 bytes contain 4-byte TOC tags (``gshd`` / ``ndbg`` /
+  ``node`` / ``rdms``), no audio codec structure.  Not audio.
+- **31 too-small** — payloads under 64 bytes.  Likely terminator
+  rows or null-sentinel entries.
+
+**Practical workflow for the likely-audio bucket**: run ``audio
+dump --raw-previews`` to emit ``*.preview.wav`` wrappers that
+treat each payload as 16-bit mono PCM at 22050 Hz.  The result
+is NOT the intended audio (the real codec isn't decoded), but
+it's valid RIFF so analysts can open each blob in Audacity to
+eyeball the waveform / spectrogram for codec-frame boundaries or
+recognisable envelope shapes.  ``build_raw_preview_wav`` in
+``azurik_mod/xbe_tools/audio_dump.py`` exposes the same helper
+for Python callers.
+
+**Takeaway for future RE**: the decoder callsite is likely
+reachable from ``load_asset_by_fourcc``'s wave branch; the best
+next step is setting a breakpoint there in xemu, stepping into
+the wave-specific handler, and documenting which function
+consumes the payload bytes.  Once named, dumping the decoder's
+C decompile + comparing to standard ADPCM variants should
+surface the variant quickly.  Tooling is ready; the RE
+investment is the outstanding cost.
+
 ## prefetch-lists.txt — the level manifest goldmine
 
 Azurik's ISO ships with a plain-text **level manifest** at

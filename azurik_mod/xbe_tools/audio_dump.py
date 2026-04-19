@@ -101,6 +101,51 @@ Classification values:
 - ``likely-animation`` — animation-curve metadata (TOC tags in first
                          64 bytes, or low entropy)
 - ``too-small``       — < 64 bytes of payload
+
+## Decoding the 448 likely-audio entries
+
+These don't carry the 20-byte header and their exact codec has NOT
+been reversed.  The April 2026 analysis ruled out:
+
+- **Straight 16-bit / 8-bit PCM** — adjacent-sample delta is close to
+  uniform-random (mean |Δ| ≈ 30 000 on int16 interpretation); real
+  audio gives mean |Δ| ≲ 3 000.
+- **Headerless IMA ADPCM** with either ``(0, 0)`` start state or
+  first-4-bytes-as-header — both produce noise.
+- **MS/Xbox ADPCM** 36-byte block variant — 0 of 448 sizes divide
+  cleanly by 36, 72, 140, or any other standard ADPCM block.
+- **Common RIFF / XMA / XMA2 / xWMA / FSB / OggS / BNK containers**
+  — no matching magic.
+
+Most likely candidates given what matches the bytes:
+
+- A proprietary Azurik ADPCM variant (some sizes divide by 8 or 16
+  which hints at a block-based codec with non-standard block size).
+- Data that's been post-processed (XOR-key'd, nibble-interleaved,
+  byte-reversed) on top of a standard codec.
+- A codec whose decoder sits in ``default.xbe`` and hasn't been
+  reversed yet.  Likely callsite to bisect:
+  ``load_asset_by_fourcc`` (VA ``0x000A67A0``) → ``wave``-tag branch.
+
+Until someone reverses the decoder, the tool offers two pragmatic
+workflows for the likely-audio bucket:
+
+1. **Duplicate detection.**  Many entries share identical first-32
+   bytes across different symbolic names — the same SFX referenced
+   from multiple ``fx/sound/...`` paths.  The manifest's
+   ``duplicate_of`` field points each duplicate at the earlier
+   canonical index so RE tooling can deduplicate before spending
+   cycles on redundant blobs.
+2. **Raw-PCM preview wrappers.**  Pass ``--raw-previews`` to emit
+   ``*.preview.wav`` alongside every likely-audio entry, wrapping
+   the raw bytes as 16-bit mono PCM at 22050 Hz.  This is NOT the
+   intended audio — it's a diagnostic that lets you drop the
+   payload into Audacity to inspect the waveform / spectrogram,
+   spot codec-frame boundaries visually, or confirm duplicates by
+   shape.
+
+Decoder RE progress is tracked in ``docs/LEARNINGS.md`` §
+fx.xbr wave codec.
 """
 
 from __future__ import annotations
@@ -122,6 +167,7 @@ __all__ = [
     "dump_waves",
     "entropy_ratio",
     "parse_wave_header",
+    "build_raw_preview_wav",
 ]
 
 
@@ -199,6 +245,8 @@ class WaveEntry:
     header: WaveHeader | None = None
     wav_output_rel: str = ""    # "" if no WAV wrapper emitted
     probable_name: str = ""     # from index.xbr cross-reference
+    duplicate_of: int = -1      # -1 or the lowest index sharing first 32B
+    preview_output_rel: str = ""  # raw-PCM preview .wav (likely-audio only)
 
     def to_dict(self) -> dict:
         d = {
@@ -216,6 +264,10 @@ class WaveEntry:
             d["probable_name"] = self.probable_name
         if self.wav_output_rel:
             d["wav_output"] = self.wav_output_rel
+        if self.duplicate_of >= 0:
+            d["duplicate_of"] = self.duplicate_of
+        if self.preview_output_rel:
+            d["preview_wav"] = self.preview_output_rel
         return d
 
 
@@ -228,6 +280,8 @@ class DumpReport:
     total_waves: int = 0
     written: int = 0
     wav_written: int = 0
+    preview_wav_written: int = 0
+    duplicates_detected: int = 0
     xbox_adpcm: int = 0
     pcm_raw: int = 0
     likely_audio: int = 0
@@ -242,6 +296,8 @@ class DumpReport:
             "total_waves": self.total_waves,
             "written": self.written,
             "wav_written": self.wav_written,
+            "preview_wav_written": self.preview_wav_written,
+            "duplicates_detected": self.duplicates_detected,
             "classification_counts": {
                 "xbox-adpcm":        self.xbox_adpcm,
                 "pcm-raw":           self.pcm_raw,
@@ -349,6 +405,55 @@ def classify_entry(size: int, head: bytes,
 # WAV wrapping — emit a RIFF container around the decoded payload so
 # external tools can consume the audio without knowing about XBR.
 # ---------------------------------------------------------------------------
+
+
+def build_raw_preview_wav(
+    payload: bytes,
+    *,
+    sample_rate: int = 22050,
+    channels: int = 1,
+    bits_per_sample: int = 16,
+) -> bytes:
+    """Wrap ``payload`` as a raw-PCM WAV using the given sample-rate
+    guess.
+
+    Use case: the 448 ``likely-audio`` entries in Azurik's
+    ``fx.xbr`` carry no recognisable header (see module docstring).
+    The bytes have high entropy, no consistent block size, and
+    naive IMA / MS-ADPCM decoders produce noise.  Until someone
+    reverses the exact codec from Azurik's XBE, a RAW-PCM WAV
+    wrapper at the most common Azurik sample rate (22050 Hz mono)
+    gives analysts something they can drop into Audacity to:
+
+    - Spot codec hints by eye (spectrogram shows frame boundaries
+      or regular beating patterns for ADPCM-style codecs)
+    - Identify duplicates from waveform shape
+    - Confirm the entry is actually audio vs binary garbage
+
+    The output is NOT playable as intended audio — it's a
+    diagnostic wrapper.  ``bits_per_sample`` defaults to 16 because
+    a payload aligned to 16-bit samples is the most common
+    interpretation to probe; callers can override to 8.
+    """
+    block_align = channels * (bits_per_sample // 8)
+    byte_rate = sample_rate * block_align
+    fmt_chunk = struct.pack(
+        "<HHIIHH",
+        _WAVE_FORMAT_PCM,
+        channels,
+        sample_rate,
+        byte_rate,
+        block_align,
+        bits_per_sample,
+    )
+    # Pad to an even byte count so the data chunk length matches
+    # the sample granularity.
+    if bits_per_sample == 16 and len(payload) % 2 == 1:
+        payload = payload + b"\x00"
+    data_chunk = b"data" + struct.pack("<I", len(payload)) + payload
+    fmt_payload = b"fmt " + struct.pack("<I", len(fmt_chunk)) + fmt_chunk
+    body = b"WAVE" + fmt_payload + data_chunk
+    return b"RIFF" + struct.pack("<I", len(body)) + body
 
 
 def _build_wav_container(header: WaveHeader, payload: bytes) -> bytes:
@@ -462,6 +567,8 @@ def dump_waves(
     entropy_min: float = 0.0,
     only_audio: bool = False,
     emit_wav: bool = True,
+    emit_raw_previews: bool = False,
+    preview_sample_rate: int = 22050,
     index_xbr: str | Path | None = None,
 ) -> DumpReport:
     """Extract every ``wave`` TOC entry from ``fx_xbr``.
@@ -485,6 +592,18 @@ def dump_waves(
         When ``True`` (default) emit a RIFF/WAVE wrapper alongside
         each ``xbox-adpcm`` / ``pcm-raw`` entry so external tools
         (vgmstream, Audacity, ffmpeg) can pick them up directly.
+    emit_raw_previews
+        When ``True``, emit a ``*.preview.wav`` alongside every
+        ``likely-audio`` entry — the raw payload wrapped as
+        16-bit mono PCM at ``preview_sample_rate``.  Output is
+        NOT the intended audio (the real codec isn't decoded
+        yet) but makes the bytes openable in Audacity for
+        waveform / spectrogram inspection; useful for eyeballing
+        codec boundaries + spotting duplicates by shape.
+    preview_sample_rate
+        Sample rate to use for raw-preview wrappers (default
+        22050 Hz — the most common Azurik rate, so plausible
+        durations surface without further tuning).
     index_xbr
         Optional path to ``index.xbr`` — when provided, the
         manifest gets a best-effort ``probable_name`` field per
@@ -517,6 +636,14 @@ def dump_waves(
 
     width = max(4, len(str(len(waves) - 1)) if waves else 4)
 
+    # First pass — build a (first-32-bytes) -> earliest-index map so
+    # the main loop can flag duplicates without re-scanning.  Many of
+    # the 448 headerless ``likely-audio`` entries share identical
+    # prefixes across different TOC slots (same sound referenced by
+    # multiple symbolic names); surfacing the redundancy cuts analysis
+    # time for RE workflows.
+    first_prefix_seen: dict[bytes, int] = {}
+
     for i, e in enumerate(waves):
         payload = data[e.file_offset:e.file_offset + e.size]
         head = payload[:64]
@@ -524,6 +651,18 @@ def dump_waves(
         classification = classify_entry(e.size, head, header)
         ratio = entropy_ratio(payload[:256]) if payload else 0.0
         output_rel = f"waves/wave_{i:0{width}d}.bin"
+
+        # Duplicate-of detection — same 32-byte prefix AND same size.
+        # Requiring matching size excludes "long clip prefixed by a
+        # short clip" false positives; 32 bytes is enough to
+        # distinguish distinct sounds while tolerating minor trailing
+        # differences.
+        dup_key = (head[:32], e.size)
+        duplicate_of = first_prefix_seen.get(dup_key, -1)
+        if duplicate_of < 0:
+            first_prefix_seen[dup_key] = i
+        else:
+            report.duplicates_detected += 1
 
         if classification == "too-small":
             report.too_small += 1
@@ -556,6 +695,22 @@ def dump_waves(
             (out / wav_output_rel).write_bytes(wav_bytes)
             report.wav_written += 1
 
+        # Raw-PCM preview wrapper for likely-audio entries.  The
+        # actual codec hasn't been reversed yet; this gives the user
+        # something they can drop into Audacity (NOT the intended
+        # playback).  Skip duplicates — they share bytes with the
+        # canonical entry so the same preview would land N times.
+        preview_output_rel = ""
+        if (should_write and emit_raw_previews
+                and classification == "likely-audio"
+                and duplicate_of < 0):
+            preview_bytes = build_raw_preview_wav(
+                payload, sample_rate=preview_sample_rate,
+                channels=1, bits_per_sample=16)
+            preview_output_rel = output_rel[:-4] + ".preview.wav"
+            (out / preview_output_rel).write_bytes(preview_bytes)
+            report.preview_wav_written += 1
+
         # Opportunistic naming — only for codec-recognised entries
         # (the pool order aligns with those, not with animation data).
         probable_name = ""
@@ -573,6 +728,8 @@ def dump_waves(
             header=header,
             wav_output_rel=wav_output_rel,
             probable_name=probable_name,
+            duplicate_of=duplicate_of,
+            preview_output_rel=preview_output_rel,
         ))
 
     (out / "manifest.json").write_text(
@@ -592,6 +749,8 @@ def format_report(report: DumpReport, *, preview: int = 0) -> str:
         f"  total wave entries:      {report.total_waves}",
         f"  blobs written to disk:   {report.written}",
         f"  WAV wrappers emitted:    {report.wav_written}",
+        f"  raw-PCM previews:        {report.preview_wav_written}",
+        f"  duplicates detected:     {report.duplicates_detected}",
         "  classification:",
         f"     xbox-adpcm:           {report.xbox_adpcm}",
         f"     pcm-raw:              {report.pcm_raw}",

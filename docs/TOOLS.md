@@ -280,12 +280,33 @@ azurik-mod audio dump gamedata/fx.xbr \
 # Skip animation / tiny blobs + only write high-entropy audio
 azurik-mod audio dump gamedata/fx.xbr -o audio_out/ \
     --only-audio --entropy-min 0.5
+
+# RE mode: also emit 16-bit mono preview WAVs for the 448
+# "likely-audio" entries whose real codec isn't decoded yet —
+# NOT the intended playback, but lets you inspect the waveform /
+# spectrogram in Audacity to hunt for codec structure.
+azurik-mod audio dump gamedata/fx.xbr -o audio_out/ \
+    --raw-previews --preview-sample-rate 22050
 ```
 
 Manifest entries surface the decoded ``sample_rate`` /
 ``sample_count`` / ``duration_ms`` / ``channels`` /
 ``bits_per_sample`` / ``codec_id`` for every recognised entry,
 so downstream tools can consume the JSON directly.
+
+**Duplicate detection**: every entry whose first 32 bytes +
+size match an earlier one gets a ``duplicate_of`` field pointing
+at the canonical index.  In vanilla ``fx.xbr`` this surfaces
+~50 redundant SFX (same sound referenced by multiple symbolic
+names); ``--raw-previews`` skips redundant output automatically.
+
+**What about the 448 likely-audio entries?**  Their exact codec
+isn't reversed yet — April 2026 analysis ruled out raw PCM,
+headerless IMA ADPCM, and standard MS/Xbox ADPCM block sizes.
+``--raw-previews`` is the pragmatic workflow until someone
+bisects the decoder from ``load_asset_by_fourcc`` @ VA
+``0x000A67A0``.  See ``docs/LEARNINGS.md`` § fx.xbr wave codec
+for the full investigation trail + next RE steps.
 
 ### `assets fingerprint` — sha1-index a file tree
 ```bash

@@ -816,6 +816,15 @@ def main() -> None:
         help="Do NOT emit .wav RIFF wrappers alongside recognised "
              "blobs (default: emit one .wav per xbox-adpcm / pcm-raw "
              "entry so external audio tools can play them directly).")
+    p_ad.add_argument("--raw-previews", action="store_true",
+        help="Emit *.preview.wav alongside every likely-audio entry "
+             "(the 448 blobs whose codec isn't decoded yet) — wraps "
+             "the raw bytes as 16-bit mono PCM so you can open them "
+             "in Audacity for waveform / spectrogram inspection. "
+             "NOT the intended playback; diagnostic only.")
+    p_ad.add_argument("--preview-sample-rate", type=int, default=22050,
+        help="Sample rate for --raw-previews wrappers (default 22050, "
+             "the most common Azurik rate).")
     p_ad.add_argument("--index-xbr",
         help="Optional path to gamedata/index/index.xbr; when "
              "provided, the manifest's recognised-codec entries get "
