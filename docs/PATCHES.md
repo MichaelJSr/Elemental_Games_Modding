@@ -53,7 +53,7 @@ register_category(Category(
 | `rand_gems`          | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_barriers`      | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_connections`   | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
-| `enable_dev_menu`    | 2     | no         | `experimental` | cheat, dev    | [azurik_mod/patches/enable_dev_menu/](../azurik_mod/patches/enable_dev_menu/) |
+| `enable_dev_menu`    | 1     | no         | `experimental` | cheat, dev    | [azurik_mod/patches/enable_dev_menu/](../azurik_mod/patches/enable_dev_menu/) |
 
 ---
 
@@ -228,7 +228,13 @@ Replaces the `garret4` string at file offset `0x1976C8` (VA `0x0019EA68`, in `.r
 
 ## `player_physics`
 
-Three sliders, all patching `default.xbe` directly: **world gravity**, **player walk speed**, **player run speed**.  Phase 2 C1 brought walk and run speed back after discovering that the earlier `config.xbr`-based approach was writing to dead data; the new implementation patches the actual player-movement code path and is verified end-to-end.
+Four sliders, all patching `default.xbe` directly: **world
+gravity**, **player walk speed**, **player roll speed**
+(the WHITE / BACK-button boost), and **player swim speed**.
+Phase 2 C1 brought speed patches back after discovering that
+the earlier `config.xbr`-based approach was writing to dead
+data; April 2026 refined the naming + added swim after
+tracing the state dispatcher and input polling in Ghidra.
 
 ### Gravity (`--gravity M_PER_S2`)
 
@@ -238,33 +244,67 @@ Three sliders, all patching `default.xbe` directly: **world gravity**, **player 
 - `--gravity 9.8` produces a byte-identical XBE so the `verify-patches --strict` whitelist diff stays clean.
 - GUI: exact-value entry field next to the slider for precise tuning.
 
-### Walk speed / run speed (`--walk-speed X`, `--run-speed X`)
+### Walk speed / roll speed (`--walk-speed X`, `--roll-speed X`)
 
 The player-movement formula in `FUN_00085f50` (called per-frame from the player tick `FUN_0008c230`) computes:
 
 ```
 velocity = base_speed × magnitude × direction_vec
-  base_speed        = [entity->runSpeed at +0x40]   (= 1.0; "dead data" default)
-  magnitude         = stick_magnitude × (3.0 when running, else 1.0)
+  base_speed        = [entity->run_speed at +0x40]   (vanilla runtime = 7.0)
+  magnitude         = stick_magnitude × (3.0 when WHITE/BACK held, else 1.0)
   3.0 multiplier    = float at VA 0x001A25BC (SHARED — 45 other read sites!)
 ```
+
+The 3.0 boost at VA `0x849E4` is gated by
+`PlayerInputState.flags & 0x40`, which is set when the
+player holds **WHITE** (or **BACK**) on the controller —
+Azurik's roll / dive / dodge button.  That's why it's called
+`roll_scale`, not `run_scale`: Azurik has no separate run
+speed (walking just scales with stick magnitude).  The old
+`run_*` names are kept as back-compat aliases.
 
 Naively patching `0x001A25BC` would change collision, AI, audio, and many other systems.  Instead we inject **per-player** float constants and rewrite the two player-site instructions to reference them:
 
 - VA `0x85F62` (6 bytes): `MOV EAX,[EBP+0x34]; FLD [EAX+0x40]` → `FLD [<our walk-speed VA>]`.
-  - The new float defaults to `1.0 × walk_scale`.  Player walking velocity becomes `walk_scale × stick × direction` — leaving the always-1.0 entity-struct field unused.
-- VA `0x849E4` (6 bytes): `FMUL [0x001A25BC]` → `FMUL [<our run-multiplier VA>]`.
-  - The new float defaults to `3.0 × run_scale`.  Only the **player movement** FMUL is redirected; the shared 3.0 constant at `0x001A25BC` stays untouched so all 45 other systems keep their vanilla behaviour.
+  - The new float equals `7.0 × walk_scale`.  Player walking velocity becomes `walk_scale × vanilla_walking × stick × direction`.
+- VA `0x849E4` (6 bytes): `FMUL [0x001A25BC]` → `FMUL [<our roll-multiplier VA>]`.
+  - The new float equals `3.0 × roll_scale / walk_scale` (independence math — divides by `walk_scale` so the cross-term cancels in the rolling path).  Only the **player** FMUL is redirected; the shared `0x001A25BC` stays untouched so all 45 other systems keep vanilla behaviour.
 
 The two injected floats land via the Phase 2 A1 shim-landing infrastructure: preferably the 16-byte trailing `.text` VA-gap, falling back to an appended `SHIMS` section when the gap is full.  `verify-patches --strict` knows how to resolve the VAs in the rewritten `FLD`/`FMUL` instructions back to file offsets (via `PatchPack.dynamic_whitelist_from_xbe`) so the diff stays clean.
 
-Semantics of the sliders:
+Semantics of the sliders (each scales ONLY its own baseline):
 
-- `walk_scale = 2.0, run_scale = 1.0` → walking and running both 2× faster, same run/walk ratio.
-- `walk_scale = 1.0, run_scale = 2.0` → walking unchanged, running 2× faster.
-- `walk_scale = 2.0, run_scale = 2.0` → walking 2×, running 4× (both multipliers compound).
+- `walk_scale = 2.0, roll_scale = 1.0` → walking 2× vanilla, rolling unchanged at 3× walking = vanilla rolling.
+- `walk_scale = 1.0, roll_scale = 2.0` → walking unchanged, rolling 2× vanilla.
+- `walk_scale = 2.0, roll_scale = 2.0` → both 2× their respective vanilla speeds.
+- `walk_scale = 1.0, roll_scale = 1.0` → byte-identity no-op.
 
-Both default to `1.0 ⇒` byte-identical behaviour to vanilla.  Range `0.1 … 10.0`.
+Both default to `1.0`.  Range `0.1 … 10.0`.
+
+### Swim speed (`--swim-speed X`)
+
+The swim-state function `FUN_0008b700` is entered via the
+state dispatcher (state 6) once the "in water" flag at
+`entity + 0x135 & 1` trips.  The stroke velocity is
+computed at VA `0x8B7BF`:
+
+```asm
+FLD  [ESI + 0x124]              ; magnitude
+FMUL float [0x001A25B4]         ; × 10.0  ← the swim coefficient
+```
+
+Shared `10.0` at VA `0x001A25B4` has 8 readers globally, most
+unrelated to player movement.  We patch only the player site:
+rewrite the 6-byte `FMUL [abs32]` at VA `0x8B7BF` to
+reference an injected `10.0 × swim_scale` float.
+
+- Independent of `walk_scale` and `roll_scale` by construction
+  (different site, different constant, no cross-coupling).
+- Magnitude feeding the FMUL is the `FUN_00084940` output,
+  so WHITE-button-held underwater produces a 3× stack on top
+  of swim_scale (vanilla WHITE-swim = 30 × raw_stick).
+
+Range `0.1 … 10.0`, default `1.0` (byte-identity).
 
 ### CLI
 
@@ -273,18 +313,23 @@ Both default to `1.0 ⇒` byte-identical behaviour to vanilla.  Range `0.1 … 1
 azurik-mod apply-physics --iso iso/Azurik.iso --output iso/lowgrav.iso \
     --gravity 4.9
 
-# Turbo mode
+# Turbo-walk + slightly faster roll + faster swimming
 azurik-mod apply-physics --xbe default.xbe \
-    --walk-speed 1.5 --run-speed 3.0
+    --walk-speed 1.5 --roll-speed 2.0 --swim-speed 1.5
 
 # Roll everything into a full randomize-full build
 azurik-mod randomize-full --iso iso/Azurik.iso --output out.iso \
-    --seed 42 --gravity 7.0 --player-walk-scale 1.2 --player-run-scale 1.5
+    --seed 42 --gravity 7.0 \
+    --player-walk-scale 1.2 --player-roll-scale 1.5 \
+    --player-swim-scale 1.3
 ```
+
+`--player-run-scale` / `--run-speed` are still accepted as
+deprecated aliases for `--player-roll-scale` / `--roll-speed`.
 
 ### GUI
 
-The Patches page renders all three `ParametricSlider` widgets under the `player_physics` section.  Slider values live on `AppState.pack_params["player_physics"]` and are forwarded to `cmd_randomize_full` / `cmd_apply_physics` by `gui/backend.run_randomizer`.
+The Patches page renders all four `ParametricSlider` widgets under the `player_physics` section (gravity, walk, roll, swim).  Slider values live on `AppState.pack_params["player_physics"]` and are forwarded to `cmd_randomize_full` / `cmd_apply_physics` by `gui/backend.run_randomizer`.
 
 ---
 

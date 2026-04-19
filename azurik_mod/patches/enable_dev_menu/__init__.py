@@ -1,111 +1,120 @@
-"""enable_dev_menu — force ``selector.xbr`` (developer cheat hub)
-to load at game start.
+"""enable_dev_menu — unlock Azurik's native in-game cheat UI.
 
-## What gets loaded
+## What this patch enables
 
-``selector.xbr`` is a legitimate but manifest-orphan level that
-acts as a developer level-select hub: 22 portal strings to every
-live level in the game + 10 direct cutscene triggers (prophecy,
-training, possessed, etc.).  See docs/LEARNINGS.md § selector.xbr
-for the full decode.
+Azurik has a built-in developer cheat UI (referenced in the shipping
+XBE as strings from ``\\Elemental\\src\\game\\cheats.cpp``):
 
-The vanilla ``default.xbe`` already contains every string + loader
-code path needed to reach the selector — it just doesn't GET
-reached because of two runtime checks in ``FUN_00052F50``
-(documented Python-side as ``dev_menu_flag_check``).
+- ``"Game state..."`` submenu
+- ``"magic level: %d"`` live editor for each element (Fire / Water /
+  Air / Earth / Chromatic)
+- ``"Change level..."`` + ``"startspot"`` level picker
+- ``"foc cam"`` / ``"cheatsave"`` / ``"srcSpecies"`` hooks
+- three developer toggles: ``"enable snapshot"``,
+  ``"enable debug camera"``, and ``"enable cheat buttons"``
+
+``"enable cheat buttons"`` is the MASTER gate.  When it's off
+(vanilla), the cheat UI exists in the binary but never triggers —
+the button combos and menu entries are silently ignored.  When it's
+on, holding **LEFT TRIGGER** and pressing face buttons brings up the
+cheat menu (see "Activation" below).
 
 ## How the gate works
 
-From the Ghidra decomp of ``FUN_00052F50``:
+The bool is stored at ``VA 0x0037AF20`` (BSS — zero-initialised at
+load time, so it's ``false`` by default).  Every code site that
+needs its value goes through a tiny wrapper function at
+``VA 0x000FFFC0``:
 
-.. code-block:: c
+.. code-block:: text
 
-    cVar3 = (**(code **)(*(int *)param_1[10] + 8))();
-    if (cVar3 == '\\0') {
-        // Big "new-save" bootstrap path — loads nothing.
-    } else {
-        cVar3 = (**(code **)(*(int *)param_1[10] + 4))();
-        if (cVar3 == '\\0') {
-            iVar11 = 1;
-            pcVar10 = "levels/training_room";     // training gate
-        } else {
-            iVar11 = DAT_001bcdd8;
-            if (DAT_001bcdd8 == -1) iVar11 = 3;
-            pcVar10 = "levels/selector";           // dev menu!
-        }
-    }
+    FUN_000fffc0:
+        68 20 AF 37 00   PUSH  0x0037AF20      ; &enable_cheat_buttons
+        E8 86 E1 FC FF   CALL  cvar_read       ; -> EAX
+        C3               RET
+        90 90 90 90 90   NOP padding
 
-Both vtable calls have to return non-zero for the selector path
-to execute.  Shipping Azurik's vtables return 0 (the dev flags
-were stripped at release time), so vanilla always falls into the
-"training_room" branch.
+The function returns whatever the CVar system reads for the
+``"enable cheat buttons"`` cvar.  Because the storage is in BSS,
+we can't flip the default by patching ``.data`` — there are no
+stored bytes to flip.  Instead we short-circuit the GETTER:
 
-## Our patch
+.. code-block:: text
 
-We NOP-out the two ``JZ`` instructions that guard the selector
-path.  Both jumps live at fixed file offsets we can patch
-directly — no trampoline, no shim, no runtime code needed.
+    Patched FUN_000fffc0:
+        B8 01 00 00 00   MOV EAX, 1
+        C3               RET
+        (86 E1 FC FF C3) unreachable tail (unchanged)
+        90 90 90 90 90   NOP padding (unchanged)
 
-- ``0x42F7E``  ``0F 84 FB 00 00 00`` (6-byte JZ far) → 6× NOP
-- ``0x42F95``  ``74 1C``             (2-byte JZ)     → 2× NOP
+Every caller now reads ``1`` without ever touching the real cvar.
+Total diff: 6 bytes.  Clean byte patch, no shim, no trampoline.
 
-Total: 8 bytes of replacement, all in the ``.text`` section.
-Every byte comes out identical on a NOP-ped XBE except those 8.
+## Activation (after building a patched ISO)
 
-After the patch the vtable results are IGNORED and the selector
-path is unconditional.  The BSS flag at VA ``0x001BCDD8`` then
-controls WHICH SPOT in selector.xbr you spawn at (default 3 when
-the flag's uninitialised / -1).
-
-## Activation (what to do after you ship a patched ISO)
-
-1. Build the patched ISO with ``enable_dev_menu`` ticked:
+1. Build with ``enable_dev_menu`` ticked:
 
    .. code-block:: bash
 
       azurik-mod patch --iso Azurik.iso --mod \\
         '{"enable_dev_menu": true}' -o Azurik_devmenu.iso
 
-   Or from the GUI: **Patches tab → Experimental → tick
+   Or from the GUI: **Patches → Experimental → tick
    ``enable_dev_menu`` → Build & Logs → Start build**.
 
-2. Boot the resulting ISO in xemu.  Skip / sit through the
-   intro logos as usual (pair with ``qol_skip_logo`` for a
-   faster iteration loop).
+2. Boot the patched ISO in xemu.  No special boot-time combo — the
+   cheat buttons are live from the first frame.
 
-3. The game's "Start New Game" flow will now drop you directly
-   into ``levels/selector`` — a small room with a wall of
-   portal plaques.  Each plaque teleports you to one level or
-   directly plays one cutscene.
+3. **In-game, hold LEFT TRIGGER** and press one of the face
+   buttons (A / B / X / Y) to trigger the cheat dispatcher
+   (``FUN_00083d80`` -> ``FUN_00083410(0..3)``).  The four slots
+   map to the four developer actions registered in
+   ``FUN_000721b0``'s command table — typically "Game state",
+   "magic level", "Change level", and either snapshot or foc-cam
+   depending on the build.
 
-4. Save (if you like) and quit.  The dev menu becomes your new
-   "Start New Game" destination until you rebuild without the
-   patch.
+4. If a cheat enters a modal menu (magic level editor, level
+   picker), the DPad / analog stick navigates it and A / B confirm
+   or cancel.
 
 ## Caveats
 
-- **May break the original save flow.**  The vanilla "New Game"
-  ceremony sets up player-character init state that the
-  selector level doesn't.  Save files created after using the
-  dev menu may behave oddly if loaded with this patch OFF.  Keep
-  a backup of Azurik.iso before saving any new campaigns.
-- **Selector references cut level ``levels/earth/e4``** — the
-  plaque for e4 will portal to a missing level and soft-lock.
-  Documented in ``KNOWN_CUT_LEVELS`` (azurik_mod.assets).
-- **Intended for developers + speedrunners / level tours**, not
-  regular play.  Hence the ``experimental`` category.
+- **The two companion cheat cvars are still off.**  ``"enable
+  debug camera"`` lives at ``VA 0x0037B148`` and ``"enable
+  snapshot"`` at ``VA 0x0037AFA0``; if you want them too, either
+  build similar byte patches on their getters
+  (``FUN_000FFFD0`` and ``FUN_000FFFE0``) or write a C shim that
+  pokes all three BSS bytes to 1 at startup.
+- **Save files may behave oddly.**  The cheat UI edits player
+  stats and bypasses the vanilla "New Game" init ceremony —
+  saving a game with cheat-modified stats and then loading it on
+  an un-patched ISO isn't something the shipping game tests for.
+  Keep a backup of your save directory.
+- **Category is ``experimental``** — ship quality isn't promised;
+  this is a developer tool the team happened to leave compiled
+  into the binary.
+
+## Why the previous patch (selector.xbr) was wrong
+
+Before April 2026 this feature patched two ``JZ`` instructions in
+``FUN_00052F50`` to force ``levels/selector`` (a dev level-select
+hub level) to load at game start.  That's a SEPARATE feature from
+the in-game cheat UI and didn't give us magic-level editing or any
+runtime cheats — it just swapped "New Game" for "Load Selector
+Level".  The user report "doesn't do anything" was correct: the
+selector loads, but only on the New Game flow, so casual testing
+(boot + explore) never saw the change.  The new patch lands where
+the user expects.
 
 ## Verifying the patch applied
-
-After building, run:
 
 .. code-block:: bash
 
     azurik-mod verify-patches --xbe patched.xbe --original vanilla.xbe --strict
 
-Expected output: exactly 8 byte differences, all at file offsets
-``0x42F7E..0x42F83`` + ``0x42F95..0x42F96``, and all matching
-``0x90``.  Any other diff means something else ran.
+Expected diff: exactly **6 bytes** differ, all at file offsets
+``va_to_file(0x000FFFC0)..va_to_file(0x000FFFC5)``.  Any other
+diff means something else ran.
 """
 
 from __future__ import annotations
@@ -114,48 +123,55 @@ from azurik_mod.patching.registry import Feature, register_feature
 from azurik_mod.patching.spec import PatchSpec
 
 
-# Dev-menu gate — two nested JZ instructions in FUN_00052F50.
-# Patching them to NOP forces the selector path regardless of
-# what the vtable calls return.
+# ---------------------------------------------------------------------------
+# Byte patch: short-circuit the "enable cheat buttons" cvar getter
+# so it unconditionally returns 1.
+# ---------------------------------------------------------------------------
 #
-# VAs (for reference / test pinning):
-#   0x00052F7E  outer JZ  (6 bytes)  → skips if vtable[+8]() == 0
-#   0x00052F95  inner JZ  (2 bytes)  → skips if vtable[+4]() == 0
+# The getter stub lives at VA 0x000FFFC0 and is 11 bytes long
+# (plus 5 bytes of NOP padding to align the next function):
 #
-# File offsets (what PatchSpec actually rewrites):
-#   0x00042F7E = 0x00052F7E - base_addr(0x10000) + file_offset_of_text
-#     Computed below via VA → file math in ``azurik_mod.patching.xbe``.
+#   68 20 AF 37 00  PUSH  0x0037AF20   ; &enable_cheat_buttons
+#   E8 86 E1 FC FF  CALL  cvar_read
+#   C3              RET
+#   90 x 5          NOP padding
 #
-# We declare these as two separate PatchSpec sites so verify-patches
-# reports them individually.
+# We replace the first 6 bytes with `MOV EAX, 1; RET`, leaving the
+# last 5 bytes of code (CALL tail + RET) as effectively unused
+# padding that the RET above never reaches.
+#
+# Replacement:
+#   B8 01 00 00 00  MOV EAX, 1
+#   C3              RET
+#
+# 6 bytes, entirely in .text.  Keeps the same function size so no
+# call-site offsets shift.
 
-OUTER_JZ_SPEC = PatchSpec(
-    label="Dev-menu outer gate (NOP out JZ far)",
-    va=0x00052F7E,
-    original=bytes.fromhex("0f84fb000000"),   # JZ rel32 → +0xFB
-    patch=b"\x90" * 6,
+CHEAT_GETTER_SPEC = PatchSpec(
+    label="enable_cheat_buttons getter (short-circuit to true)",
+    va=0x000FFFC0,
+    original=bytes.fromhex("6820af3700e8"),   # PUSH 0x37AF20 ; CALL (first byte)
+    patch=bytes.fromhex("b801000000c3"),      # MOV EAX, 1 ; RET
     is_data=False,
     safety_critical=False,
 )
-
-INNER_JZ_SPEC = PatchSpec(
-    label="Dev-menu inner gate (NOP out JZ short)",
-    va=0x00052F95,
-    original=bytes.fromhex("741c"),           # JZ rel8 → +0x1C
-    patch=b"\x90" * 2,
-    is_data=False,
-    safety_critical=False,
-)
+# Replacement layout: 6 bytes total.  After the RET at offset 5, the
+# original CALL's trailing 4 bytes (`86 E1 FC FF`) and the original
+# RET byte (`C3`) become unreachable tail — they're never executed,
+# and the stub's only external xref is to 0xFFFC0 (function start),
+# so no other code jumps mid-function.  Bytes 6..15 are left alone
+# (original CALL tail + original RET + 5 NOPs of alignment padding).
 
 
-DEV_MENU_SITES: list[PatchSpec] = [OUTER_JZ_SPEC, INNER_JZ_SPEC]
+DEV_MENU_SITES: list[PatchSpec] = [CHEAT_GETTER_SPEC]
 
 
 def apply_enable_dev_menu_patch(xbe_data: bytearray) -> None:
-    """Patch both JZs in ``FUN_00052F50``'s selector gate.
+    """Unlock the in-game cheat UI by forcing the
+    ``"enable cheat buttons"`` cvar getter to always return 1.
 
     Idempotent — re-applying to an already-patched XBE is a no-op
-    thanks to the ``replaced_bytes`` check in ``apply_patch_spec``.
+    thanks to the ``original``-bytes check in ``apply_patch_spec``.
     """
     from azurik_mod.patching.apply import apply_patch_spec
     for spec in DEV_MENU_SITES:
@@ -164,11 +180,13 @@ def apply_enable_dev_menu_patch(xbe_data: bytearray) -> None:
 
 FEATURE = register_feature(Feature(
     name="enable_dev_menu",
-    description=("Forces the developer cheat-menu level "
-                 "(``selector.xbr``) to load at game start — "
-                 "portals to every level and cutscene.  "
-                 "Experimental: bypasses the vanilla 'New Game' "
-                 "bootstrap, can corrupt new saves."),
+    description=(
+        "Unlocks Azurik's built-in cheat UI (magic-level editor, "
+        "level picker, game-state tools).  Hold LEFT TRIGGER + "
+        "press A/B/X/Y in-game to open the menu.  "
+        "Experimental: bypasses runtime stat checks, may leave "
+        "save files in odd states."
+    ),
     sites=DEV_MENU_SITES,
     apply=apply_enable_dev_menu_patch,
     default_on=False,
@@ -179,8 +197,7 @@ FEATURE = register_feature(Feature(
 
 
 __all__ = [
+    "CHEAT_GETTER_SPEC",
     "DEV_MENU_SITES",
-    "INNER_JZ_SPEC",
-    "OUTER_JZ_SPEC",
     "apply_enable_dev_menu_patch",
 ]

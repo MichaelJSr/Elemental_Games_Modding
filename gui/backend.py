@@ -257,20 +257,29 @@ def run_randomizer(
         # namespace becomes `None` via a default factory since the code
         # uses getattr(args, 'x', default).
         # Unpack parametric slider values from pack_params.  The player
-        # physics pack exposes `gravity`, `walk_speed_scale`, and
-        # `run_speed_scale`; we only forward non-default values so the
-        # CLI keeps `--gravity` etc. unset when the slider is at default.
+        # physics pack exposes `gravity`, `walk_speed_scale`,
+        # `roll_speed_scale`, and `swim_speed_scale`; we only forward
+        # non-default values so the CLI keeps `--gravity` etc. unset
+        # when the slider is at its default.  Back-compat: still
+        # accepts the old `run_speed_scale` key as an alias for
+        # `roll_speed_scale` so pre-April-2026 serialized param dicts
+        # from older GUI sessions keep working.
         physics = (pack_params or {}).get("player_physics", {})
         gravity = physics.get("gravity")
         walk_scale = physics.get("walk_speed_scale")
-        run_scale = physics.get("run_speed_scale")
+        roll_scale = (physics.get("roll_speed_scale")
+                      if physics.get("roll_speed_scale") is not None
+                      else physics.get("run_speed_scale"))
+        swim_scale = physics.get("swim_speed_scale")
         # Only forward when clearly non-default to preserve byte-identity.
         if gravity is not None and abs(gravity - 9.8) < 1e-6:
             gravity = None
         if walk_scale is not None and abs(walk_scale - 1.0) < 1e-6:
             walk_scale = None
-        if run_scale is not None and abs(run_scale - 1.0) < 1e-6:
-            run_scale = None
+        if roll_scale is not None and abs(roll_scale - 1.0) < 1e-6:
+            roll_scale = None
+        if swim_scale is not None and abs(swim_scale - 1.0) < 1e-6:
+            swim_scale = None
 
         args = argparse.Namespace(
             command="randomize-full",
@@ -302,10 +311,14 @@ def run_randomizer(
             force=force_unsolvable,
             player_character=None,
             config_mod=json.dumps(config_edits) if config_edits else None,
-            # Parametric slider values for player_physics.
+            # Parametric slider values for player_physics.  Use the
+            # new (roll) names; cmd_randomize_full still accepts
+            # legacy `player_run_scale` for pinned external callers
+            # but the GUI has no reason to emit both.
             gravity=gravity,
             player_walk_scale=walk_scale,
-            player_run_scale=run_scale,
+            player_roll_scale=roll_scale,
+            player_swim_scale=swim_scale,
         )
 
         result: BuildResult

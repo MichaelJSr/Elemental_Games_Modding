@@ -65,10 +65,11 @@ the fastest way to label a movement-state function.
 ### Vanilla base-speed value + independence math (April 2026)
 
 `CritterData.run_speed` at offset `+0x40` feeds BOTH walking and
-running in the player tick.  Earlier docs claimed "always 1.0"
-because `critters_critter_data` has no `runSpeed` row for
-`garret4` — that was wrong: the field inherits from the struct's
-default initialiser, and the vanilla runtime value is **`7.0`**.
+the WHITE-button boost in the player tick.  Earlier docs claimed
+"always 1.0" because `critters_critter_data` has no `runSpeed`
+row for `garret4` — that was wrong: the field inherits from the
+struct's default initialiser, and the vanilla runtime value is
+**`7.0`**.
 
 How it was pinned:
 
@@ -79,20 +80,21 @@ How it was pinned:
 The movement formula simplifies to:
 
 ```
-walking = 7.0 × raw_stick
-running = 7.0 × raw_stick × 3.0   # 3.0 comes from FMUL [0x001A25BC]
-                                  # in FUN_00084940 (gated on
-                                  # PlayerInputState.flags & 0x40)
+walking  = 7.0 × raw_stick
+rolling  = 7.0 × raw_stick × 3.0   # 3.0 comes from FMUL [0x001A25BC]
+                                   # in FUN_00084940 (gated on
+                                   # PlayerInputState.flags & 0x40,
+                                   # set by the WHITE/BACK button)
 ```
 
 **Independence math** — the `player_physics` pack exposes two
-sliders (`walk_scale`, `run_scale`) that must each scale only
+sliders (`walk_scale`, `roll_scale`) that must each scale only
 their own baseline.  Since a single field feeds both paths, we
 solve for the pair of injected constants:
 
 ```
-inject_base = 7 × walk_scale
-inject_mult = 3 × run_scale / walk_scale
+inject_base      = 7 × walk_scale
+inject_roll_mult = 3 × roll_scale / walk_scale
 ```
 
 so the engine produces:
@@ -101,16 +103,16 @@ so the engine produces:
 walking = inject_base × raw_stick
         = 7 × walk_scale × raw_stick
         = walk_scale × vanilla_walking            ← indep
-running = inject_base × inject_mult × raw_stick
-        = 7 × walk_scale × 3 × run_scale/walk_scale × raw_stick
-        = 21 × run_scale × raw_stick
-        = run_scale × vanilla_running             ← indep
+rolling = inject_base × inject_roll_mult × raw_stick
+        = 7 × walk_scale × 3 × roll_scale/walk_scale × raw_stick
+        = 21 × roll_scale × raw_stick
+        = roll_scale × vanilla_rolling            ← indep
 ```
 
-The `walk_scale` cancels cleanly in the running path, so each
+The `walk_scale` cancels cleanly in the rolling path, so each
 slider affects only its own baseline.  Regression coverage:
 `tests/test_player_speed.py::IndependenceSemantics` sweeps 6
-slider combinations + verifies walking/running speeds stay pinned
+slider combinations + verifies walking/rolling speeds stay pinned
 to their expected vanilla multiples for every case.
 
 ⚠️ **Trap**: the pre-April-2026 code injected the literal value
@@ -121,6 +123,72 @@ with the walk-site rewriting the base to a raw literal).  Future
 patches that layer on top of `CritterData.run_speed` must either
 preserve vanilla at scale=1 or clearly document the non-identity
 semantics.
+
+### Roll, not run — the 3.0 at VA 0x001A25BC is WHITE-button only
+
+The slider that shipped as `run_speed_scale` until April 2026
+was actually controlling **rolling / diving / dodging speed**,
+not a "run" speed.  Azurik has **no separate run**: walking is
+simply `CritterData.run_speed × stick_magnitude` (the "run_speed"
+field name is a Azurik-internal misnomer — it's the baseline
+movement coefficient, consumed as walking speed).
+
+How the roll gate actually works:
+
+1. Per-frame input tick (`FUN_00084f90`) calls `FUN_00084940`.
+2. Inside `FUN_00084940`, bit `0x40` of `PlayerInputState.flags +
+   0x20` is set when the **WHITE** or **BACK** button is held:
+   ```c
+   if ((*(byte *)(param_1 + 0x20) & 0x40) != 0) {
+     *(float *)(param_1 + 0x124) = *(float *)(param_1 + 0x124)
+                                    * 3.0;   // ← VA 0x849E4
+   }
+   ```
+3. The WHITE button in Azurik is the roll / dive button — never
+   a sprint button.  That's why earlier users reported *"rolling
+   got faster when I set run_scale=3, but walking stayed slow"*:
+   the 3.0 multiplier only fires during the roll state.
+4. The controller-table slot that drives this (`piVar7[0xb]` in
+   the decomp) maps to Xbox `XINPUT_GAMEPAD_WHITE` (the 6th
+   analog button byte after A / B / X / Y / BLACK).
+   `piVar7[0xf]` maps to BACK (digital bit `0x80`).  Either
+   held = 3.0× boost active.
+
+The slider is therefore now labelled **`roll_speed_scale`**.
+The old `run_*` kwargs / attr names remain as transparent
+aliases so pinned callers don't break, but all documentation
+and tests use the new name.
+
+### Swim speed lives in FUN_0008b700 (April 2026)
+
+The player has a dedicated swim state handler, `FUN_0008b700`,
+entered when `entity->flags_at_+0x135 & 1` is set (the "in
+water" gate, triggered after 4 seconds submerged — which also
+fires the `"loc/english/popups/swim"` popup).  The speed
+calculation is:
+
+```asm
+0008b7b9  D98624010000  FLD  [ESI + 0x124]        ; magnitude
+0008b7bf  D80DB4251A00  FMUL float [0x001A25B4]   ; × 10.0
+0008b7c5  D95C244C      FSTP [ESP + 0x4c]         ; stroke vel
+```
+
+The shared `10.0` at VA `0x001A25B4` has 8 readers; most are
+unrelated to player movement, so we patch only the player
+site (VA `0x0008B7BF`) by rewriting the `FMUL [abs32]` to
+point at an injected `10.0 × swim_scale`.
+
+Because swim is a separate state + separate constant, it has
+**no coupling** with walk or roll — the independence math is
+trivial: `inject_swim_mult = 10 × swim_scale` and you're done.
+
+Note the second-order coupling: the magnitude read by
+`FUN_0008b700` at `+0x124` is still the output of
+`FUN_00084940`, so WHITE-button-held underwater triggers the
+3.0 boost BEFORE the swim 10.0 stroke.  Vanilla swim stroke =
+`10 × raw_stick`; WHITE-hold swim stroke = `30 × raw_stick`.
+The `swim_speed_scale` slider multiplies BOTH, which is
+usually what the user wants.
 
 ---
 
@@ -1000,6 +1068,137 @@ Two cut levels are now documented as ``KNOWN_CUT_LEVELS``:
 
 Both are useful flags for a future "randomizer finds all known
 dead portals" audit pass.
+
+## Native cheat UI — cheats.cpp (April 2026)
+
+Separate from selector.xbr, Azurik has an **in-game cheat UI**
+compiled from `\Elemental\src\game\cheats.cpp`.  It lives
+behind the `enable cheat buttons` cvar and provides:
+
+- `"Game state..."` submenu (save / restore / dump)
+- `"magic level: %d"` editor for Fire / Water / Air / Earth /
+  Chromatic magic levels
+- `"Change level..."` + `"startspot"` level picker
+- `"foc cam"` floating-camera toggle
+- `"cheatsave"` / `"srcSpecies"` developer hooks
+- Two companion toggles: `"enable debug camera"` + `"enable
+  snapshot"`
+
+### CVar layout
+
+All three cheat cvars follow the same pattern:
+
+| CVar                    | Storage VA | Getter VA    |
+|-------------------------|-----------:|-------------:|
+| `enable cheat buttons`  | `0x37AF20` | `0x000FFFC0` |
+| `enable debug camera`   | `0x37B148` | `0x000FFFD0` |
+| `enable snapshot`       | `0x37AFA0` | `0x000FFFE0` |
+
+Each storage byte is in BSS (zero-initialised, so the cvar is
+`false` by default).  Each getter is an 11-byte stub of the form:
+
+```asm
+PUSH  <storage_va>         ; 5 bytes  (68 xx xx xx xx)
+CALL  cvar_read_generic    ; 5 bytes  (E8 rel32)
+RET                        ; 1 byte   (C3)
+(padding)                  ; 5 bytes  (90 NOPs)
+```
+
+The storage-to-getter binding is 1:1 — each cvar has its own
+stub because the cvar system dispatches via a table of
+(name, storage, getter) triples registered by `FUN_000721b0`
+(the cheat-registration block at VAs 0xFE0D0..0xFE340).
+
+### Why we short-circuit the getter, not the storage
+
+Since the storage lives in BSS, there are no stored bytes in
+the XBE to flip.  We'd need either (a) a C-shim that pokes the
+BSS byte to 1 at startup, or (b) a byte patch somewhere that
+forces the reads to return 1 regardless of the BSS value.
+
+Option (b) is simpler and smaller: replace the first 6 bytes
+of the getter with `MOV EAX, 1 ; RET`.  The function now
+unconditionally returns 1, and callers don't care whether the
+cvar system was even queried.  That's the `qol_enable_dev_menu`
+patch.
+
+### Activation (in-game)
+
+Once the cvar returns 1, the cheat dispatcher in `FUN_00083d80`
+lights up.  Gate:
+
+```c
+if ((float)puVar5[0xc] != 0.0) {   // LT analog > 0
+  // poll the four face buttons (A/B/X/Y)
+  // each dispatches to FUN_00083410(0..3)
+}
+```
+
+`puVar5[0xc]` is the LEFT TRIGGER analog value at offset
+`0x30` in the per-controller state table.  So the activation
+combo is **hold LT + press a face button**.  FUN_00083410
+then dispatches to one of the four registered cheat actions
+(indices 0..3 map to the entries registered at
+`FUN_000721b0`'s first four `(&DAT_001bcde4)[iVar1 * 2]`
+writes — typically Game-state, magic-level, change-level,
+snapshot or foc-cam depending on build).
+
+### Why we previously patched selector.xbr instead
+
+The pre-April-2026 `qol_enable_dev_menu` patched two `JZ`
+instructions in `FUN_00052F50` to force `levels/selector`
+(the selector.xbr level-loader hub) to load at game start.
+That's a DIFFERENT feature: selector.xbr is a static level
+room with portal plaques to every level + cutscene, loaded by
+the engine's standard level loader once the JZ checks are
+bypassed.  It does NOT enable any runtime cheats — no
+magic-level editing, no game-state tools.  Users reported the
+patch as *"doesn't do anything"* because:
+
+1. The selector.xbr load only triggers on the New-Game flow.
+2. Without actually pressing "New Game", the JZ NOPs are
+   invisible.
+3. Even when you do reach selector.xbr, it's a ONE-WAY trip
+   to a level — none of the UI overlay cheats are accessible.
+
+The cvar-getter patch delivers what users actually expect:
+real cheats live from boot.
+
+### Controller-table offsets (Azurik convention)
+
+Reverse-engineering the cheat-activation combo required
+mapping `&DAT_0037be98 + ctrl_idx * 0x54` to XInput slots.
+Layout per-controller (as populated by `FUN_000a2880` using
+`XAPILIB::XInputGetState`):
+
+| Offset | Slot | Meaning                    |
+|-------:|-----:|:---------------------------|
+| +0x00  | 0    | LX-axis (signed -1..1)     |
+| +0x04  | 1    | LY-axis                    |
+| +0x08  | 2    | RX-axis                    |
+| +0x0C  | 3    | RY-axis                    |
+| +0x10  | 4    | D-Pad L/R (-1, 0, +1)      |
+| +0x14  | 5    | D-Pad U/D                  |
+| +0x18  | 6    | A (analog 0..1)            |
+| +0x1C  | 7    | B                          |
+| +0x20  | 8    | X                          |
+| +0x24  | 9    | Y                          |
+| +0x28  | 10   | BLACK                      |
+| +0x2C  | 11   | **WHITE** (roll)           |
+| +0x30  | 12   | **LEFT TRIGGER** (cheat)   |
+| +0x34  | 13   | RIGHT TRIGGER              |
+| +0x38  | 14   | START (digital 0 or 1)     |
+| +0x3C  | 15   | **BACK** (alt. roll gate)  |
+| +0x40  | 16   | L-thumb click              |
+| +0x44  | 17   | R-thumb click              |
+
+✅ **Learning**: Azurik's button semantics are non-standard.
+Any speed/cheat/etc. patch that gates on a controller-table
+slot MUST be named after its physical button (WHITE, LT,
+BACK), not its Azurik-internal label (`piVar7[0xf]`).  Both
+the roll-rename and cheat-UI discoveries came from reading
+`FUN_000a2880` side-by-side with the consuming state
+handlers.
 
 ## index.xbr — the global asset-path index
 

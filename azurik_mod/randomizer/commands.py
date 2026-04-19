@@ -1286,7 +1286,14 @@ def cmd_randomize_full(args):
 
         gravity_val = getattr(args, 'gravity', None)
         walk_scale = float(getattr(args, 'player_walk_scale', None) or 1.0)
-        run_scale = float(getattr(args, 'player_run_scale', None) or 1.0)
+        # Back-compat: accept legacy `player_run_scale` namespace
+        # attr as an alias for the new `player_roll_scale`.  Explicit
+        # roll wins if both are set.
+        roll_scale = float(
+            getattr(args, 'player_roll_scale', None)
+            or getattr(args, 'player_run_scale', None)
+            or 1.0)
+        swim_scale = float(getattr(args, 'player_swim_scale', None) or 1.0)
         player_char = getattr(args, 'player_character', None)
         xbe_path = extract_dir / "default.xbe"
 
@@ -1301,7 +1308,8 @@ def cmd_randomize_full(args):
             "fps_unlock": bool(getattr(args, 'fps_unlock', False)),
             "player_physics": (gravity_val is not None
                                or walk_scale != 1.0
-                               or run_scale != 1.0),
+                               or roll_scale != 1.0
+                               or swim_scale != 1.0),
         }
 
         needs_xbe = any(_FLAG_PACKS.values()) or bool(player_char)
@@ -1317,7 +1325,8 @@ def cmd_randomize_full(args):
                 "player_physics": {
                     "gravity": (gravity_val if gravity_val is not None else 9.8),
                     "walk_speed_scale": walk_scale,
-                    "run_speed_scale": run_scale,
+                    "roll_speed_scale": roll_scale,
+                    "swim_speed_scale": swim_scale,
                 },
             }
 
@@ -1721,20 +1730,34 @@ def cmd_verify_patches(args):
 def cmd_apply_physics(args):
     """Apply the player_physics pack to an XBE / ISO in-place.
 
-    Supports any combination of --gravity, --walk-speed, --run-speed.
-    All three target ``default.xbe`` directly (Phase 2 C1 moved speed
-    sliders from config.xbr — dead data — to direct XBE code-site
-    patches; see azurik_mod/patches/player_physics.py).  When --iso is
-    given, the ISO is unpacked, patched, and repacked.  --xbe accepts
-    a raw XBE and applies everything in-place.
+    Supports any combination of ``--gravity``, ``--walk-speed``,
+    ``--roll-speed`` (alias ``--run-speed`` for back-compat), and
+    ``--swim-speed``.  All four target ``default.xbe`` directly
+    (Phase 2 C1 moved speed sliders from config.xbr — dead data —
+    to direct XBE code-site patches; see
+    azurik_mod/patches/player_physics/__init__.py).  When --iso is
+    given, the ISO is unpacked, patched, and repacked.  ``--xbe``
+    accepts a raw XBE and applies everything in-place.
     """
     gravity = getattr(args, "gravity", None)
     walk_scale = float(getattr(args, "walk_speed", None) or 1.0)
-    run_scale = float(getattr(args, "run_speed", None) or 1.0)
+    # Back-compat: --run-speed still works, but --roll-speed wins if
+    # both are passed.  The 3.0 multiplier at VA 0x001A25BC is the
+    # WHITE-button roll/dive boost, not a run modifier (see
+    # docs/LEARNINGS.md § "Roll, not run").
+    roll_scale = float(
+        getattr(args, "roll_speed", None)
+        or getattr(args, "run_speed", None)
+        or 1.0)
+    swim_scale = float(getattr(args, "swim_speed", None) or 1.0)
 
-    if gravity is None and walk_scale == 1.0 and run_scale == 1.0:
+    if (gravity is None
+            and walk_scale == 1.0
+            and roll_scale == 1.0
+            and swim_scale == 1.0):
         print("No physics changes requested.  "
-              "Pass --gravity, --walk-speed, and/or --run-speed.")
+              "Pass --gravity, --walk-speed, --roll-speed (or "
+              "legacy --run-speed), and/or --swim-speed.")
         return
 
     def _patch_xbe_in_place(xbe_path: Path) -> None:
@@ -1743,7 +1766,8 @@ def cmd_apply_physics(args):
             data,
             gravity=float(gravity) if gravity is not None else None,
             walk_scale=walk_scale if walk_scale != 1.0 else None,
-            run_scale=run_scale if run_scale != 1.0 else None,
+            roll_scale=roll_scale if roll_scale != 1.0 else None,
+            swim_scale=swim_scale if swim_scale != 1.0 else None,
         )
         xbe_path.write_bytes(data)
 

@@ -1,12 +1,11 @@
 # enable_dev_menu
 
-Forces Azurik's built-in developer cheat menu (`selector.xbr`)
-to load at game start.  The menu contains direct portals to every
-level in the game plus one-click triggers for every cutscene.
+Unlocks Azurik's built-in **in-game developer cheat UI** —
+magic-level editing, level picker, game-state tools, etc.
 
-> **Category**: experimental.  Keep a backup of your save
-> directory — the dev menu bypasses the vanilla "New Game"
-> bootstrap and may leave new save files in odd states.
+> **Category**: experimental.  The cheat UI bypasses runtime stat
+> checks, so save files made after using it may behave oddly if
+> later loaded on an un-patched ISO.  Keep a backup.
 
 ## How to activate it
 
@@ -27,8 +26,8 @@ azurik-mod patch \
     -o 'Azurik_devmenu.iso'
 ```
 
-Pair with `qol_skip_logo` if you want to skip the Adrenium
-intro each run:
+Pair with `qol_skip_logo` if you want to skip the Adrenium intro
+each run:
 
 ```bash
 azurik-mod patch \
@@ -37,21 +36,60 @@ azurik-mod patch \
     -o 'Azurik_dev.iso'
 ```
 
-## What you'll see
+## Using the cheat UI in-game
 
-After intro logos (or instantly with `qol_skip_logo`), the
-game's "Start New Game" flow drops you directly into
-`levels/selector` — a small room where each plaque is a portal:
+After the patch lands, the cheat buttons are live from the first
+frame — no special boot combo.
 
-- 22 level portals — one per live level (`a1`..`w4`, `town`,
-  `life`, `training_room`, etc.)
-- 10 cutscene portals — Prophecy, Training 1+2, Possessed,
-  DisksDestroyed, Catalisks, Airship2, Death 1, DeathMeeting 2,
-  DisksRestoredAll, NewDeath.
-- A self-portal back to the selector itself.
+**In-game**, **hold LEFT TRIGGER** and press one of the face
+buttons (A / B / X / Y) to trigger a developer action.  The four
+slots are registered by `FUN_000721b0` in the shipping XBE and
+typically cover:
 
-Touch a plaque, load the target, play around, reload the
-selector via its self-portal, repeat.
+- Game state menu (save / restore / dump)
+- Magic level editor (Fire / Water / Air / Earth / Chromatic)
+- Level picker with `startspot` selection
+- Snapshot or floating-camera toggle (build-dependent)
+
+If a cheat enters a modal menu (magic-level editor, level picker),
+the D-Pad / analog stick navigates it and A / B confirm or cancel.
+
+## What it actually patches
+
+Azurik's `cheats.cpp` registers three boolean cvars, all defaulting
+to `false`:
+
+| CVar                    | Storage VA | Getter VA |
+|-------------------------|-----------:|----------:|
+| `enable cheat buttons`  | `0x0037AF20` | `0x000FFFC0` |
+| `enable debug camera`   | `0x0037B148` | `0x000FFFD0` |
+| `enable snapshot`       | `0x0037AFA0` | `0x000FFFE0` |
+
+The storage lives in BSS (zero-initialised at load), so there are
+no stored bytes in the XBE to flip.  Instead, we patch the
+**getter function** at `0x000FFFC0` to unconditionally return
+`1`:
+
+Vanilla getter (16 bytes, 11 code + 5 NOP padding):
+
+```
+68 20 AF 37 00   PUSH  0x0037AF20        ; &enable_cheat_buttons
+E8 86 E1 FC FF   CALL  cvar_read
+C3               RET
+90 90 90 90 90   NOP padding
+```
+
+Patched getter:
+
+```
+B8 01 00 00 00   MOV   EAX, 1
+C3               RET
+86 E1 FC FF C3   (unreachable tail — unchanged)
+90 90 90 90 90   NOP padding (unchanged)
+```
+
+Diff: exactly **6 bytes** in `.text` at file offset
+`va_to_file(0x000FFFC0)`.  No trampoline, no shim.
 
 ## Verifying the patch applied
 
@@ -60,46 +98,44 @@ azurik-mod verify-patches \
     --xbe patched.xbe --original vanilla.xbe --strict
 ```
 
-Expected diff: exactly **8 bytes** differ, all in `.text` at
-file offsets `0x42F7E..0x42F83` and `0x42F95..0x42F96`, all
-flipped to `0x90` (NOP).
-
-## How it works
-
-`FUN_00052F50` in Azurik's XBE (documented Python-side as
-`dev_menu_flag_check`) contains two nested `JZ` branches that
-together gate the selector path:
-
-```
-0x52F7E  JZ far  — skips if vtable[+8]() == 0  (outer gate)
-0x52F95  JZ short — skips if vtable[+4]() == 0  (inner gate)
-```
-
-Both vtables return 0 in the shipping XBE (dev flags stripped
-at release).  We NOP out both jumps so neither skip fires —
-the selector path becomes unconditional.
-
-No trampoline, no shim, no runtime code.  8 bytes of NOPs in
-`.text`, full stop.
+Expected diff: exactly **6 bytes** differ, all at file offset
+`va_to_file(0x000FFFC0)..+5`.
 
 ## Known caveats
 
-- **`levels/earth/e4` plaque soft-locks.**  Selector references
-  a cut level that isn't on the ISO (see `KNOWN_CUT_LEVELS` in
-  `azurik_mod.assets`).  Touch it and the game hangs waiting
-  for a level XBR that never loads.
-- **May corrupt save files.**  Some per-character init state
-  that the vanilla New Game ceremony sets up is skipped when
-  the selector loads first.  Saves made in a dev-menu build
-  may behave oddly if later loaded with this patch OFF.
-- **Intended for level tours / speedrun practice** — not
-  regular playthroughs.  Hence the `experimental` category.
+- **`enable debug camera` + `enable snapshot` are still off.**
+  Their getters live at VA `0x000FFFD0` and `0x000FFFE0` with the
+  same 6-byte layout — duplicating this patch there would unlock
+  them too, but we don't ship that by default because the snapshot
+  hook has been reported to crash in some emulator configurations.
+- **Save files may behave oddly** if stat-edited saves are loaded
+  on an un-patched ISO (the vanilla "New Game" ceremony sets up
+  some per-character init state that the cheat UI doesn't touch).
+- **Intended for developers / speedrunners / level tours** —
+  hence the `experimental` category.
+
+## History
+
+Before April 2026, this feature patched two `JZ` instructions in
+`FUN_00052F50` to force `levels/selector` (a developer level-select
+hub) to load at game start.  That's a SEPARATE feature — it
+swapped "New Game" for "Load Selector Level" but didn't enable
+any in-game cheats.  The user report *"doesn't do anything"* was
+correct: the selector level loads, but only on the New Game flow
+and only if you actually start a new game, so casual testing
+(boot + explore the main menu) never saw the change.
+
+The current patch targets the cvar getter instead — the cheat
+buttons light up immediately, which is what users expect from a
+patch named "enable dev menu".  The previous JZ-NOP approach
+could be revived as a separate `qol_force_selector_menu` feature
+if it ever becomes useful again (documented in
+`docs/LEARNINGS.md` § selector.xbr).
 
 ## Further reading
 
-- **LEARNINGS.md § selector.xbr** — full decode of
-  `selector.xbr`'s structure + the gate discovery trail.
+- **docs/LEARNINGS.md § "Native cheat UI"** — full decode of the
+  `cheats.cpp` registration + button-dispatch chain.
+- **docs/LEARNINGS.md § selector.xbr** — the alternate dev menu
+  this patch used to target.
 - **PATCHES.md** — catalog entry with the byte-level pin.
-- **TOOLING_ROADMAP.md** — the `plan-trampoline` /
-  `azurik-mod xbe find-refs` tools that shortened this
-  investigation from hours to minutes.

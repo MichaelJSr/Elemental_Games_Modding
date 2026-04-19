@@ -15,7 +15,9 @@ if _REPO_ROOT not in sys.path:
 from azurik_mod.patches.player_physics import (  # noqa: E402
     GRAVITY_BASELINE,
     GRAVITY_PATCH,
-    RUN_SPEED_SCALE,
+    ROLL_SPEED_SCALE,
+    RUN_SPEED_SCALE,   # back-compat alias -> ROLL_SPEED_SCALE
+    SWIM_SPEED_SCALE,
     WALK_SPEED_SCALE,
     apply_player_physics,
 )
@@ -99,12 +101,15 @@ class ApplyRejectsOutOfRange(unittest.TestCase):
 
 
 class VirtualSlidersAreHandled(unittest.TestCase):
-    """Walk/run speed sliders are virtual — apply_parametric_patch must no-op,
-    and verify returns 'virtual'."""
+    """Walk / roll / swim speed sliders are virtual — apply_parametric_patch
+    must no-op, and verify returns 'virtual'."""
 
     def test_walk_scale_is_virtual(self):
         self.assertTrue(WALK_SPEED_SCALE.is_virtual)
-        self.assertTrue(RUN_SPEED_SCALE.is_virtual)
+        self.assertTrue(ROLL_SPEED_SCALE.is_virtual)
+        self.assertTrue(SWIM_SPEED_SCALE.is_virtual)
+        # Back-compat alias points at the same descriptor as roll.
+        self.assertIs(RUN_SPEED_SCALE, ROLL_SPEED_SCALE)
 
     def test_apply_on_virtual_is_noop_success(self):
         buf = bytearray(8)
@@ -139,16 +144,25 @@ class ApplyPlayerPhysicsKwargs(unittest.TestCase):
             read_parametric_value(buf, GRAVITY_PATCH), 4.9, places=3)
 
     def test_speed_kwargs_do_not_touch_gravity_cell(self):
-        """Phase 2 C1 made walk/run scales XBE-targeting too, so
-        apply_player_physics now mutates default.xbe for all three
-        sliders.  What it must NOT do is mutate the gravity site as a
-        side effect of a speed-only call."""
+        """Phase 2 C1 made walk / roll / swim scales XBE-targeting,
+        so apply_player_physics now mutates default.xbe for all
+        four sliders.  What it must NOT do is mutate the gravity
+        site as a side effect of a speed-only call."""
         buf = self._make_xbe()
-        apply_player_physics(buf, walk_scale=2.0, run_scale=2.0)
+        apply_player_physics(buf, walk_scale=2.0, roll_scale=2.0,
+                             swim_scale=2.0)
         self.assertEqual(verify_parametric_patch(buf, GRAVITY_PATCH),
                          "default",
             msg="speed-only apply must not rewrite the gravity "
                 "ParametricPatch's bytes.")
+
+    def test_legacy_run_scale_still_accepted(self):
+        """Back-compat: apply_player_physics(run_scale=...) must
+        not crash — it's routed to roll_scale internally."""
+        buf = self._make_xbe()
+        apply_player_physics(buf, run_scale=2.0)  # legacy kwarg
+        self.assertEqual(verify_parametric_patch(buf, GRAVITY_PATCH),
+                         "default")
 
 
 if __name__ == "__main__":

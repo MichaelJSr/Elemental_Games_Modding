@@ -24,10 +24,13 @@ from azurik_mod.patches.fps_unlock import (
 from azurik_mod.patches.player_physics import (
     GRAVITY_PATCH,
     PLAYER_PHYSICS_SITES,
-    RUN_SPEED_SCALE,
+    ROLL_SPEED_SCALE,
+    RUN_SPEED_SCALE,           # back-compat alias -> ROLL_SPEED_SCALE
+    SWIM_SPEED_SCALE,
     WALK_SPEED_SCALE,
     apply_player_physics,
     apply_player_speed,
+    apply_swim_speed,
 )
 from azurik_mod.patches.qol_gem_popups import (
     GEM_POPUP_OFFSETS,
@@ -108,11 +111,13 @@ __all__ = [
     "PICKUP_ANIM_SPEC",
     "PLAYER_PHYSICS_SITES",
     "QOL_PATCH_SITES",
+    "ROLL_SPEED_SCALE",
     "RUN_SPEED_SCALE",
     "SKIP_LOGO_LEGACY_SPEC",
     "SKIP_LOGO_SPEC",
     "SKIP_LOGO_TRAMPOLINE",
     "SKIP_SAVE_SIG_SITES",
+    "SWIM_SPEED_SCALE",
     "WALK_SPEED_SCALE",
     "apply_fps_patches",
     "apply_gem_popups_patch",
@@ -124,4 +129,5 @@ __all__ = [
     "apply_qol_patches",
     "apply_skip_logo_patch",
     "apply_skip_save_signature_patch",
+    "apply_swim_speed",
 ]

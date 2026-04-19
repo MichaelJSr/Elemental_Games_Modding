@@ -286,9 +286,16 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         self.assertEqual(titles[5], "Experimental")
 
     def test_parametric_sliders_rendered_inside_their_tab(self):
-        """``player_physics`` lives in the Player tab AND exposes 3
-        sliders.  The browser must create one ParametricSlider per
-        site and register it under the (pack, param) key."""
+        """``player_physics`` lives in the Player tab AND exposes 4
+        sliders (gravity, walk, roll, swim).  The browser must
+        create one ParametricSlider per site and register it under
+        the (pack, param) key.
+
+        The 3.0 multiplier that the ``roll`` slider targets was
+        previously labelled ``run`` but that was a documentation
+        mistake — see docs/LEARNINGS.md § "Roll, not run".  Swim
+        was added April 2026 after we found the dedicated 10.0
+        FMUL in FUN_0008b700."""
         from azurik_mod.patching.registry import all_packs
         from gui.widgets import PackBrowser
         params: dict = {}
@@ -298,11 +305,12 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         self.assertEqual(
             slider_keys,
             [("player_physics", "gravity"),
-             ("player_physics", "run_speed_scale"),
+             ("player_physics", "roll_speed_scale"),
+             ("player_physics", "swim_speed_scale"),
              ("player_physics", "walk_speed_scale")])
         # Initial values mirrored into pack_params.
         self.assertIn("player_physics", params)
-        self.assertEqual(len(params["player_physics"]), 3)
+        self.assertEqual(len(params["player_physics"]), 4)
 
     def test_plugin_category_gets_its_own_tab(self):
         """Simulate a plugin: register a category + a pack referencing

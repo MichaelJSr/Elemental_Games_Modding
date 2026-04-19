@@ -185,7 +185,10 @@ def main() -> None:
             "  --skip-logo     Skip the unskippable Adrenium logo boot movie.\n"
             "  --fps-unlock    Run the game at 60 FPS (experimental).\n"
             "  --gravity N     World gravity in m/s^2 (default 9.8, range 0.98-29.4).\n"
-            "  --player-walk-scale N / --player-run-scale N   Player speed multipliers."
+            "  --player-walk-scale N / --player-roll-scale N / "
+            "--player-swim-scale N   Player speed multipliers.\n"
+            "  (--player-run-scale is still accepted as an alias for "
+            "--player-roll-scale.)"
         ),
     )
     p_full.add_argument("--iso", required=True, help="Original game .iso")
@@ -254,10 +257,25 @@ def main() -> None:
                              "too — it's one global value.")
     p_full.add_argument("--player-walk-scale", type=float, metavar="X",
                         help="Player walk-speed multiplier (default 1.0, "
-                             "range 0.25-3.0).")
+                             "range 0.1-10.0).")
+    p_full.add_argument("--player-roll-scale", type=float, metavar="X",
+                        help="Player roll / WHITE-button boost multiplier "
+                             "(default 1.0, range 0.1-10.0).  This scales "
+                             "the 3.0 multiplier on FMUL [0x001A25BC] in "
+                             "FUN_00084940; the same gate feeds diving / "
+                             "rolling.")
     p_full.add_argument("--player-run-scale", type=float, metavar="X",
-                        help="Player run-speed multiplier (default 1.0, "
-                             "range 0.25-3.0).")
+                        dest="player_run_scale",
+                        help="Deprecated alias for --player-roll-scale.  "
+                             "(The 3.0 constant it patches is the roll/"
+                             "dive boost, not a run modifier — Azurik "
+                             "has no separate run speed; walking is just "
+                             "stick magnitude.)")
+    p_full.add_argument("--player-swim-scale", type=float, metavar="X",
+                        help="Player swim-speed multiplier (default 1.0, "
+                             "range 0.1-10.0).  Scales the 10.0 FMUL at "
+                             "VA 0x8B7BF inside FUN_0008b700 (swim "
+                             "state).  Independent of walk/roll.")
 
     # apply-physics (standalone physics slider runner)
     p_physics = sub.add_parser(
@@ -267,11 +285,12 @@ def main() -> None:
             "Apply the player_physics pack.\n"
             "\n"
             "Gravity rewrites the world gravity float in default.xbe\n"
-            "(affects enemies too).  Walk / run speed edit only the\n"
-            "player's cells in characters.xbr.\n"
+            "(affects enemies too).  Walk / roll / swim speed sliders\n"
+            "rewrite per-player FLD/FMUL instructions in default.xbe\n"
+            "— they don't touch any shared constants.\n"
             "\n"
-            "Either pass --iso (unpack, patch, repack) or the raw files\n"
-            "--xbe (for gravity) and --config (for walk/run speed)."
+            "Either pass --iso (unpack, patch, repack) or a raw\n"
+            "--xbe path for in-place patching."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -280,15 +299,22 @@ def main() -> None:
     p_physics.add_argument("--output", "-o",
         help="Output ISO path (defaults to overwriting --iso)")
     p_physics.add_argument("--xbe",
-        help="Patch this raw default.xbe in place (for --gravity)")
-    p_physics.add_argument("--config",
-        help="Patch this raw config.xbr in place (for --walk-speed/--run-speed)")
+        help="Patch this raw default.xbe in place")
     p_physics.add_argument("--gravity", type=float, metavar="M_PER_S2",
-        help="World gravity (default 9.8 m/s^2; range 0.98-29.4).")
+        help="World gravity (default 9.8 m/s^2; range 0.0-100.0).")
     p_physics.add_argument("--walk-speed", type=float, metavar="X",
-        help="Player walk speed multiplier (default 1.0; range 0.25-3.0).")
+        help="Player walk speed multiplier (default 1.0; range 0.1-10.0).")
+    p_physics.add_argument("--roll-speed", type=float, metavar="X",
+        help="Player roll / WHITE-button boost multiplier "
+             "(default 1.0; range 0.1-10.0).  Scales the 3.0 "
+             "multiplier at VA 0x001A25BC for the player only.")
     p_physics.add_argument("--run-speed", type=float, metavar="X",
-        help="Player run speed multiplier (default 1.0; range 0.25-3.0).")
+        dest="run_speed",
+        help="Deprecated alias for --roll-speed.  The 3.0 multiplier "
+             "is the roll/dive boost, not a run modifier.")
+    p_physics.add_argument("--swim-speed", type=float, metavar="X",
+        help="Player swim speed multiplier (default 1.0; range 0.1-10.0).  "
+             "Scales the 10.0 FMUL at VA 0x8B7BF inside FUN_0008b700.")
 
     # save (inspect / introspect save directories)
     p_save = sub.add_parser(

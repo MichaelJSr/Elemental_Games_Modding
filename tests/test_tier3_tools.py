@@ -54,6 +54,13 @@ _VANILLA_MOVIES = (_REPO.parent /
 @unittest.skipUnless(_VANILLA_XBE.exists(),
                      "vanilla default.xbe required")
 class EnableDevMenuFeature(unittest.TestCase):
+    """April 2026 rewrite: the feature now short-circuits the
+    ``"enable cheat buttons"`` cvar getter at VA 0x000FFFC0 so the
+    native in-game cheat UI (magic-level editor, level picker)
+    lights up.  The previous selector.xbr JZ NOPs didn't actually
+    enable any in-game cheats — they just swapped New-Game for
+    Load-Selector, which is why users reported the patch as
+    ineffective."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -65,41 +72,66 @@ class EnableDevMenuFeature(unittest.TestCase):
     def test_category_is_experimental(self):
         self.assertEqual(self.pack.category, "experimental")
 
-    def test_two_patch_sites(self):
-        self.assertEqual(len(self.pack.sites), 2)
+    def test_exactly_one_patch_site(self):
+        """One 6-byte patch at the cvar getter.  Anything more
+        suggests stale selector-JZ sites have crept back in."""
+        self.assertEqual(len(self.pack.sites), 1)
 
-    def test_outer_jz_bytes_at_vanilla_va(self):
-        """Outer gate must be a 6-byte JZ rel32 (0F 84 ...) at
-        VA 0x52F7E in the vanilla XBE.  Drift catches re-dumped
-        XBEs or a shifted ``FUN_00052F50``."""
+    def test_getter_bytes_at_vanilla_va(self):
+        """Vanilla getter must be `PUSH 0x37AF20 ; CALL cvar_read`
+        (6-byte prefix 68 20 AF 37 00 E8) at VA 0x000FFFC0.  Drift
+        catches re-dumped XBEs or compiler-layout shifts."""
         from azurik_mod.patching.xbe import va_to_file
-        site = next(s for s in self.pack.sites if s.va == 0x52F7E)
+        site = self.pack.sites[0]
+        self.assertEqual(site.va, 0x000FFFC0,
+            msg="feature must target the cvar getter, not the "
+                "old selector.xbr JZ NOPs")
         off = va_to_file(site.va)
         self.assertEqual(
             self.xbe[off:off + 6],
-            bytes.fromhex("0f84fb000000"),
-            msg="Outer JZ bytes drifted from expectation")
+            bytes.fromhex("6820af3700e8"),
+            msg="getter prefix drifted from vanilla — the cheat "
+                "UI cvar layout may have changed")
 
-    def test_inner_jz_bytes_at_vanilla_va(self):
-        """Inner gate must be a 2-byte JZ rel8 (74 1C) at
-        VA 0x52F95."""
-        from azurik_mod.patching.xbe import va_to_file
-        site = next(s for s in self.pack.sites if s.va == 0x52F95)
-        off = va_to_file(site.va)
+    def test_patch_bytes_short_circuit_to_true(self):
+        """Replacement must be `MOV EAX, 1 ; RET` (6 bytes).
+        Ensures every caller of the getter sees ``1`` without
+        touching the real cvar in BSS."""
+        site = self.pack.sites[0]
         self.assertEqual(
-            self.xbe[off:off + 2],
-            bytes.fromhex("741c"),
-            msg="Inner JZ bytes drifted from expectation")
+            site.patch, bytes.fromhex("b801000000c3"),
+            msg="patch must be MOV EAX,1 + RET (b801000000c3)")
+        # First 5 bytes = MOV EAX, 1 (B8 imm32); byte 5 = C3 (RET)
+        self.assertEqual(site.patch[0], 0xB8)
+        self.assertEqual(site.patch[5], 0xC3)
 
-    def test_patched_output_is_eight_nops(self):
-        """The combined patch replaces exactly 8 bytes, all
-        ``0x90``.  Confirms no other bytes sneak into the diff."""
-        total = sum(len(s.patch) for s in self.pack.sites)
-        self.assertEqual(total, 8)
-        for s in self.pack.sites:
-            self.assertTrue(all(b == 0x90 for b in s.patch),
-                msg=f"site at VA 0x{s.va:X} has non-NOP in patch: "
-                    f"{s.patch.hex()}")
+    def test_apply_lands_six_byte_write(self):
+        """Applying the patch must rewrite exactly 6 bytes at the
+        getter address.  One of those bytes happens to stay 0x00
+        (the high byte of both the vanilla PUSH imm32 and our MOV
+        EAX, 1 imm32), so the byte-diff count is 5 — the WRITTEN
+        range is still 6 contiguous bytes at offset va_to_file
+        (0x000FFFC0).  Catches accidental over-writes outside that
+        window."""
+        from azurik_mod.patches.enable_dev_menu import (
+            apply_enable_dev_menu_patch)
+        from azurik_mod.patching.xbe import va_to_file
+        buf = bytearray(self.xbe)
+        apply_enable_dev_menu_patch(buf)
+        diffs = [i for i, (a, b) in enumerate(zip(self.xbe, buf))
+                 if a != b]
+        # Between 5 and 6 actual byte flips (one high-byte collision
+        # is possible because 0x00 == 0x00 on purpose).
+        self.assertIn(len(diffs), (5, 6),
+            msg=f"unexpected byte-flip count {len(diffs)}")
+        # Every flipped byte must live inside the 6-byte getter
+        # window.  Any flip outside the window = collateral damage.
+        getter_start = va_to_file(0x000FFFC0)
+        getter_end = getter_start + 6
+        for d in diffs:
+            self.assertTrue(getter_start <= d < getter_end,
+                msg=f"diff at {d} is outside the 6-byte getter "
+                    f"window [{getter_start}..{getter_end})")
 
     def test_apply_is_idempotent(self):
         """Running apply twice produces identical bytes + doesn't
@@ -112,6 +144,23 @@ class EnableDevMenuFeature(unittest.TestCase):
         first_run = bytes(buf)
         apply_enable_dev_menu_patch(buf)
         self.assertEqual(bytes(buf), first_run)
+
+    def test_patched_getter_returns_one_at_runtime(self):
+        """Semantic check: if we disassemble the patched getter,
+        it must be `MOV EAX, 1 ; RET` — anything else means the
+        cvar will still be read from BSS (== false)."""
+        from azurik_mod.patches.enable_dev_menu import (
+            apply_enable_dev_menu_patch)
+        from azurik_mod.patching.xbe import va_to_file
+        buf = bytearray(self.xbe)
+        apply_enable_dev_menu_patch(buf)
+        off = va_to_file(0x000FFFC0)
+        patched = bytes(buf[off:off + 6])
+        # B8 01 00 00 00 = MOV EAX, 1
+        self.assertEqual(patched[0], 0xB8)
+        self.assertEqual(patched[1:5], b"\x01\x00\x00\x00")
+        # C3 = RET
+        self.assertEqual(patched[5], 0xC3)
 
 
 # ---------------------------------------------------------------------------

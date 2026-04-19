@@ -2,6 +2,96 @@
 
 ## Unreleased
 
+### player_physics — rename run→roll, add swim slider
+
+Two semantic fixes triggered by user testing ("run speed seems to
+do nothing; rolling got faster; swim speed is unaffected").
+
+**#1. `run_speed_scale` is actually roll speed.**  The 3.0
+multiplier at VA `0x001A25BC` is applied when
+`PlayerInputState.flags & 0x40` is set, and that flag is set by
+the **WHITE** (or **BACK**) controller button — which in Azurik
+is the roll / dive / dodge button, not a sprint button.  Azurik
+has no separate run speed; walking is simply
+`CritterData.run_speed × stick_magnitude`.  All renames:
+
+- `RUN_SPEED_SCALE` → `ROLL_SPEED_SCALE` (back-compat alias kept)
+- `run_scale` kwarg → `roll_scale` (back-compat alias kept)
+- CLI: `--player-run-scale` → `--player-roll-scale`
+  (`--player-run-scale` stays as a deprecated alias)
+- CLI: `--run-speed` → `--roll-speed` (both accepted)
+- GUI label "Player run speed" → "Player roll speed"
+- Module constants: `_RUN_SITE_VA` → `_ROLL_SITE_VA`,
+  `_VANILLA_RUN_MULTIPLIER` → `_VANILLA_ROLL_MULTIPLIER`, etc.
+
+Existing configs / ISOs built with the old names keep working —
+the Python module re-exports every old name as an alias and
+`apply_player_physics(run_scale=...)` still routes correctly.
+
+**#2. New swim-speed slider.**  Reverse-engineered
+`FUN_0008b700` (swim state handler).  Swim velocity = magnitude
+× `10.0` (shared constant at `VA 0x001A25B4`, 8 readers
+globally).  Patch the player-site FMUL at `VA 0x8B7BF` to
+reference an injected `10.0 × swim_scale` float.  Fully
+independent of walk / roll (different site, different constant,
+no cross-coupling).
+
+New slider: `swim_speed_scale`, default 1.0, range 0.1–10.0,
+exposed as `--player-swim-scale` (CLI full) / `--swim-speed`
+(CLI physics-only).
+
+**Docs updated**:
+
+- `docs/LEARNINGS.md` § "Vanilla base-speed value + independence
+  math": renamed to match new terminology + reworked the
+  derivation for roll.  Added two sub-sections: "Roll, not run"
+  (explains the WHITE/BACK gate + why previous docs were wrong)
+  and "Swim speed lives in FUN_0008b700" (records the
+  FUN_0008b700 decode + the 10.0 constant + the second-order
+  coupling with roll).
+
+**Tests**: 734 passing (up from 719, +15 new): new
+`ApplySwimSpeedBehaviour` and extended `IndependenceSemantics`
+test classes exercise the full walk×roll×swim slider surface +
+back-compat kwargs + `_WALK_SCALE_MIN` divide-by-zero defense.
+
+### enable_dev_menu — actually enable the native cheat UI
+
+The previous `qol_enable_dev_menu` patched two `JZ` instructions
+in `FUN_00052F50` to force `levels/selector` (a dev level-select
+hub LEVEL, not a UI overlay) to load at game start.  That did
+nothing for users who didn't start a new game and never enabled
+the real cheat UI that `\Elemental\src\game\cheats.cpp` ships.
+
+**New target**: the `"enable cheat buttons"` cvar getter at
+`VA 0x000FFFC0`.  Replace the first 6 bytes (`PUSH 0x37AF20 ;
+CALL cvar_read`) with `MOV EAX, 1 ; RET` so every caller sees
+"cheats enabled" without touching the BSS storage.  Total diff:
+6 bytes.  No trampoline, no shim.
+
+**Activation** (no boot-time combo needed): hold **LEFT
+TRIGGER** in-game and press **A / B / X / Y** to open the four
+registered cheat slots — magic-level editor, game-state menu,
+level picker, and snapshot/foc-cam toggle.
+
+**Docs updated**:
+
+- `azurik_mod/patches/enable_dev_menu/__init__.py` docstring +
+  `README.md` fully rewritten to reflect the new target.
+- `docs/LEARNINGS.md` § "Native cheat UI" added — full decode
+  of the cvar layout, getter-stub pattern, and activation combo,
+  plus a history note explaining why the previous selector.xbr
+  JZ NOPs didn't deliver what users expected.
+- `docs/LEARNINGS.md` § "Controller-table offsets (Azurik
+  convention)" — pinned the XInput → `DAT_0037be98` slot mapping
+  once and for all so future cheat/movement patches don't have
+  to re-derive it.
+
+**Tests**: 6 new tests in `EnableDevMenuFeature` pin the new
+target VA, the getter prefix bytes, the replacement bytes, the
+6-byte diff window, idempotency, and the semantic "getter
+returns 1 after patch" check.
+
 ### player_physics — walk/run sliders now independent multipliers
 
 Fix two coupled bugs in the `player_physics` pack.
