@@ -687,14 +687,16 @@ def cmd_xbr_diff(args) -> None:
 
 
 def cmd_audio_dump(args) -> None:
-    """``azurik-mod audio dump FX.XBR --output DIR``"""
+    """``azurik-mod audio dump FX.XBR --output DIR [--index-xbr ... --no-wav]``"""
     from .audio_dump import dump_waves, format_report
 
     try:
         report = dump_waves(
             args.fx_xbr, args.output,
             entropy_min=args.entropy_min,
-            only_audio=args.only_audio)
+            only_audio=args.only_audio,
+            emit_wav=not getattr(args, "no_wav", False),
+            index_xbr=getattr(args, "index_xbr", None))
     except (FileNotFoundError, ValueError) as exc:
         print(f"audio dump: {exc}", file=sys.stderr)
         sys.exit(1)

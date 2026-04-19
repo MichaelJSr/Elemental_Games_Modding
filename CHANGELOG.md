@@ -2,6 +2,81 @@
 
 ## Unreleased
 
+### Audio extractor now decodes headers + wraps WAV; roadmap cleanup
+
+**`audio dump` — xbox-adpcm header decoding + WAV wrapping shipped**
+
+During the April 2026 audio pass we identified the 20-byte header
+that 100 of 700 ``fx.xbr`` wave entries carry:
+
+    +0x00  u32  sample_rate    (8000 / 11025 / 22050 / 32000 / 44100)
+    +0x04  u32  sample_count   (duration = count / rate)
+    +0x08  u32  format_magic   (0x01000401 = mono 4-bit Xbox ADPCM)
+    +0x0C  u32  reserved (0)
+    +0x10  u32  reserved (0)
+    +0x14  ...  codec payload
+
+The ``format_magic`` dword decomposes byte-for-byte as
+``channels = byte[0]``, ``bits_per_sample = byte[1]``,
+``codec_id = byte[3]`` — matching what the new ``parse_wave_header``
+helper returns in ``WaveHeader``.  For every recognised header
+the tool now emits a proper RIFF/WAVE file using
+``WAVE_FORMAT_XBOX_ADPCM`` (0x0069) or ``WAVE_FORMAT_PCM``
+alongside the raw ``.bin``, so vgmstream / Audacity / ffmpeg can
+pick them up directly.
+
+**Other new capabilities**:
+
+- ``--index-xbr path/to/index.xbr`` pulls symbolic asset names
+  (``fx/sound/<entity>/<key>``) from the index.xbr string pool
+  into every recognised-codec manifest entry as
+  ``probable_name``.
+- ``--no-wav`` to suppress the RIFF wrapping for users who want
+  raw bytes only.
+- Two new manifest classifications: ``xbox-adpcm`` and
+  ``pcm-raw`` (on top of the existing ``likely-audio`` /
+  ``likely-animation`` / ``too-small`` labels).
+- Richer manifest: every xbox-adpcm entry now ships with
+  decoded ``{sample_rate, sample_count, duration_ms, channels,
+  bits_per_sample, codec_id, format_magic}``.
+
+**Vanilla ``fx.xbr`` breakdown** (700 entries):
+
+- 103 **xbox-adpcm** (header-decoded, ``.wav`` written)
+-   0 pcm-raw
+- 448 likely-audio (no header, raw bytes only)
+- 118 likely-animation (Maya particle-system data)
+-  31 too-small
+
+Regression coverage: 10 new tests in
+``tests/test_audio_and_plugins.py`` (``WaveHeaderParser`` +
+``AudioDumpWithHeader`` classes) pin the header parse, the
+byte-for-byte format-magic decomposition, and the WAV wrapper's
+RIFF shape.  The ``AudioDumpVanilla`` end-to-end test now
+verifies the 103-entry xbox-adpcm count against the real
+``fx.xbr``.
+
+**Roadmap cleanup**
+
+- Deleted the duplicate "Tier 2 — Planned (high ROI, remaining)"
+  section in ``docs/TOOLING_ROADMAP.md``.  Every entry (4, 5, 6,
+  7, 8, 9, 10) was already documented as shipped in the "Tier 2
+  — Shipped" block above it — the "Planned" block was stale
+  since the Tier 2 batch landed.  Roadmap lost ~150 lines of
+  duplication.
+- "Tier 3 — Shipped (mostly)" renamed to "Tier 3 — Shipped"
+  now that the audio codec gap is closed.
+- Scoring table bumps #14 from ROI=3 (shipped partial) → ROI=4
+  (shipped).
+- Entry #17 (Save-file editor) reworded: the "signature
+  re-hashing TODO" dangler was superseded by
+  ``qol_skip_save_signature``; the doc now points to
+  ``docs/PATCHES.md`` for the unblock.
+- ``docs/TOOLS.md`` ``audio dump`` section rewritten with the
+  new flag surface + usage examples.
+
+**Drift guards**: 708 passed / 1 skipped (up from 698).
+
 ### Entity Editor mouse-wheel bug fix + registry memoisation
 
 **Bug fixes**

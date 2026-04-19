@@ -166,14 +166,137 @@ class AudioDumpSynthetic(unittest.TestCase):
         manifest = json.loads(
             (self.output / "manifest.json").read_text())
         for key in ("source", "output_dir", "total_waves",
-                    "written", "likely_audio",
-                    "likely_animation", "too_small", "entries"):
+                    "written", "wav_written", "classification_counts",
+                    "entries"):
             self.assertIn(key, manifest)
         for entry in manifest["entries"]:
             for key in ("index", "file_offset", "size",
                         "classification", "entropy",
                         "first_bytes_hex", "output"):
                 self.assertIn(key, entry)
+
+
+class WaveHeaderParser(unittest.TestCase):
+    """Audio-header recognition — the 20-byte prefix that 100 of 700
+    fx.xbr wave entries carry (pinned from the April 2026 RE pass)."""
+
+    def test_rejects_too_short_payload(self):
+        from azurik_mod.xbe_tools.audio_dump import parse_wave_header
+        self.assertIsNone(parse_wave_header(b"\x00" * 19))
+
+    def test_rejects_implausible_sample_rate(self):
+        """A random u32 prefix (not in the allow-list of standard
+        audio rates) is rejected — keeps false positives at zero."""
+        from azurik_mod.xbe_tools.audio_dump import parse_wave_header
+        # 0xDEADBEEF = 3735928559 — obviously not a sample rate.
+        payload = struct.pack("<III", 0xDEADBEEF, 1000, 0x01000401) + b"\x00" * 8
+        self.assertIsNone(parse_wave_header(payload))
+
+    def test_decodes_22050_hz_mono_xbox_adpcm(self):
+        """The 74-entry bucket in vanilla fx.xbr — sample_rate 22050,
+        format_magic 0x01000401 → channels=1, bits=4, codec=1."""
+        from azurik_mod.xbe_tools.audio_dump import parse_wave_header
+        payload = (struct.pack("<III", 22050, 22016, 0x01000401)
+                   + b"\x00" * 8)
+        h = parse_wave_header(payload)
+        self.assertIsNotNone(h)
+        self.assertEqual(h.sample_rate, 22050)
+        self.assertEqual(h.sample_count, 22016)
+        self.assertEqual(h.channels, 1)
+        self.assertEqual(h.bits_per_sample, 4)
+        self.assertEqual(h.codec_id, 1)
+        # 22016 samples at 22050 Hz ≈ 998 ms.
+        self.assertAlmostEqual(h.duration_ms, 998, delta=2)
+
+    def test_decodes_44100_hz(self):
+        from azurik_mod.xbe_tools.audio_dump import parse_wave_header
+        payload = (struct.pack("<III", 44100, 88200, 0x01000401)
+                   + b"\x00" * 8)
+        h = parse_wave_header(payload)
+        self.assertIsNotNone(h)
+        self.assertEqual(h.sample_rate, 44100)
+        self.assertEqual(h.duration_ms, 2000)
+
+    def test_rejects_insane_sample_count(self):
+        """sample_count > 10 min of audio means we mis-parsed noise
+        bytes — bail out instead of emitting garbage durations."""
+        from azurik_mod.xbe_tools.audio_dump import parse_wave_header
+        # 22050 * 601 = 13253450 is 10-minutes-plus of audio
+        payload = (struct.pack("<III", 22050, 22050 * 601, 0x01000401)
+                   + b"\x00" * 8)
+        self.assertIsNone(parse_wave_header(payload))
+
+    def test_format_magic_byte_decomposition(self):
+        """The 0x01000401 dword splits into channels/bits/codec as
+        described in the module docstring — unit-test that pinning
+        so a future refactor can't silently flip the byte order."""
+        from azurik_mod.xbe_tools.audio_dump import parse_wave_header
+        payload = (struct.pack("<III", 22050, 22016, 0x01000401)
+                   + b"\x00" * 8)
+        h = parse_wave_header(payload)
+        # 0x01000401 little-endian bytes: 01 04 00 01
+        #   byte[0] = 01 → channels = 1
+        #   byte[1] = 04 → bits_per_sample = 4
+        #   byte[3] = 01 → codec_id = 1
+        self.assertEqual(h.channels, 0x01000401 & 0xFF)
+        self.assertEqual(h.bits_per_sample,
+                         (0x01000401 >> 8) & 0xFF)
+        self.assertEqual(h.codec_id, (0x01000401 >> 24) & 0xFF)
+
+
+class AudioDumpWithHeader(unittest.TestCase):
+    """End-to-end dump on a synthetic fx.xbr that includes an
+    xbox-adpcm entry — verify header decoding + WAV wrapping."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="azurik-audio-hdr-"))
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+        # One xbox-adpcm entry: 20-byte header + 180 bytes of payload
+        # (5 ADPCM blocks × 36 bytes).  Sample_rate 22050, sample_count
+        # 320 (= 5 blocks × 64 samples/block) → ~14.5 ms duration.
+        header = struct.pack("<III", 22050, 320, 0x01000401)
+        header += b"\x00" * 8       # 8 reserved bytes
+        payload = header + b"\xaa" * 180
+        self.fx_path = self.tmp / "synthetic_fx.xbr"
+        self.fx_path.write_bytes(_make_fake_fx_xbr(waves=[payload]))
+        self.output = self.tmp / "out"
+
+    def test_classification_is_xbox_adpcm(self):
+        from azurik_mod.xbe_tools.audio_dump import dump_waves
+        report = dump_waves(self.fx_path, self.output)
+        self.assertEqual(report.total_waves, 1)
+        self.assertEqual(report.xbox_adpcm, 1)
+        self.assertEqual(report.wav_written, 1)
+
+    def test_wav_file_has_riff_header(self):
+        from azurik_mod.xbe_tools.audio_dump import dump_waves
+        dump_waves(self.fx_path, self.output)
+        wav = (self.output / "waves" / "wave_0000.wav").read_bytes()
+        self.assertEqual(wav[:4], b"RIFF")
+        self.assertEqual(wav[8:12], b"WAVE")
+        self.assertIn(b"fmt ", wav[:64])
+        self.assertIn(b"data", wav)
+
+    def test_manifest_has_decoded_header(self):
+        from azurik_mod.xbe_tools.audio_dump import dump_waves
+        dump_waves(self.fx_path, self.output)
+        manifest = json.loads(
+            (self.output / "manifest.json").read_text())
+        entry = manifest["entries"][0]
+        self.assertIn("header", entry)
+        self.assertIn("wav_output", entry)
+        self.assertEqual(entry["header"]["sample_rate"], 22050)
+        self.assertEqual(entry["header"]["channels"], 1)
+        self.assertEqual(entry["header"]["bits_per_sample"], 4)
+
+    def test_no_wav_flag_suppresses_wrapping(self):
+        from azurik_mod.xbe_tools.audio_dump import dump_waves
+        report = dump_waves(self.fx_path, self.output,
+                            emit_wav=False)
+        self.assertEqual(report.wav_written, 0)
+        self.assertFalse(
+            (self.output / "waves" / "wave_0000.wav").exists())
 
     def test_missing_file_raises(self):
         from azurik_mod.xbe_tools.audio_dump import dump_waves

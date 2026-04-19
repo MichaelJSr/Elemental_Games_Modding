@@ -260,12 +260,32 @@ azurik-mod movies frames movies/Title.bik --out frames/
 azurik-mod movies frames movies/Title.bik --info
 ```
 
-### `audio dump` — extract wave blobs from fx.xbr
-Partial extractor — format still being reversed.
+### `audio dump` — extract + decode wave blobs from fx.xbr
+
+Bulk-extracts every ``wave`` TOC entry from ``fx.xbr``, decodes
+the 20-byte audio header when present, and wraps recognised
+codecs in RIFF/WAV so vgmstream / Audacity / ffmpeg can play
+them directly.  Pass ``--index-xbr`` to also pull symbolic
+asset names (``fx/sound/<entity>/<key>``) from the index.
 
 ```bash
+# Basic: 700 .bin files + manifest.json + 103 .wav wrappers
 azurik-mod audio dump gamedata/fx.xbr -o audio_out/
+
+# With symbolic names (recommended)
+azurik-mod audio dump gamedata/fx.xbr \
+    --index-xbr gamedata/index/index.xbr \
+    -o audio_out/
+
+# Skip animation / tiny blobs + only write high-entropy audio
+azurik-mod audio dump gamedata/fx.xbr -o audio_out/ \
+    --only-audio --entropy-min 0.5
 ```
+
+Manifest entries surface the decoded ``sample_rate`` /
+``sample_count`` / ``duration_ms`` / ``channels`` /
+``bits_per_sample`` / ``codec_id`` for every recognised entry,
+so downstream tools can consume the JSON directly.
 
 ### `assets fingerprint` — sha1-index a file tree
 ```bash

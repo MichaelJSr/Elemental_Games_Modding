@@ -174,156 +174,7 @@ classes.
 
 ---
 
-## Tier 2 — Planned (high ROI, remaining)
-
-### 4. Ghidra knowledge-sync — push Python-side annotations to Ghidra
-
-Status: **shipped** (see
-`azurik_mod/xbe_tools/ghidra_client.py`,
-`azurik_mod/xbe_tools/ghidra_sync.py`,
-`azurik_mod/xbe_tools/mock_ghidra.py`).
-
-Takes every named VA we track in Python (``azurik.h`` anchors,
-``vanilla_symbols.py``, patch-site registry) and writes them
-back into a live Ghidra project as renamed functions + plate
-comments — so the next time a human opens those addresses they
-see our Python-side understanding instead of ``FUN_00085700``.
-
-Built on a fresh zero-dependency HTTP client
-(:class:`GhidraClient`) that speaks directly to the GhydraMCP
-plugin's REST API, bypassing the ``mcp`` / ``fastmcp`` stack
-that makes the bridge CI-hostile.  Tests drive the same client
-against a :class:`MockGhidraServer` that re-implements just
-enough of the Ghidra endpoint contract for unit testing:
-
-- ``GET /program``, ``GET /functions``, ``GET /functions/{addr}``
-- ``PATCH /functions/{addr}`` (rename + signature)
-- ``POST /memory/{addr}/comments/{kind}``
-- ``GET /symbols/labels``
-
-Dry-run is the default.  ``--apply`` actually mutates Ghidra;
-``--force`` allows overwriting functions that ALREADY have a
-human-meaningful name (default: skip).
-
-```bash
-azurik-mod ghidra-sync               # dry-run plan
-azurik-mod ghidra-sync --apply       # apply to :8193
-azurik-mod ghidra-sync --apply --force --port 8193
-```
-
-Typical first-run plan against the default.xbe instance:
-
-    === rename  (9) ===
-      0x00018980  'FUN_00018980' → 'play_movie_fn'
-      0x00085700  'FUN_00085700' → 'gravity_integrate_raw'
-      ...
-    === comment  (33) ===
-      0x0005F6E5  'FUN_0005f620'  annotate: [azurik_mod.patch_site]
-                                  qol_skip_logo:Skip AdreniumLogo ...
-      ...
-
-**Bonus**: ``ghidra-coverage --live`` now uses the same client
-to pull a fresh function list out of the running instance in
-~3 seconds, removing the need for snapshot JSON files for the
-common "I'm working right now with Ghidra open" workflow.
-
-### 5. Trampoline planner
-
-Given a patch-site VA, produce an authoring report:
-
-- How many bytes need to be replaced (walks instruction
-  boundaries via Capstone, so you can't accidentally split a
-  multi-byte insn)
-- Current bytes shown as asm + hex
-- Registers live at the site (from Ghidra decompilation)
-- Expected return type / calling convention
-- A pre-filled trampoline site declaration ready to paste into
-  a `patches/<name>/__init__.py`
-
-```bash
-azurik-mod plan-trampoline 0x5F6E5
-# → "Replace 5 bytes (CALL rel32); preserves AL, stdcall N=8,
-#    registers clobbered by callee:  EAX, ECX, EDX"
-```
-
-**Why it matters**: I've mis-sized trampolines twice.  The
-`_Static_assert(sizeof(trampoline_bytes) == 5)` catches it at
-compile time but the rebuild cycle is still 30+ seconds.
-
-### 6. Shim scaffolder with ABI picker
-
-Status: **shipped** (see
-`azurik_mod/xbe_tools/shim_scaffolder.py`).
-
-CLI command: ``azurik-mod new-shim NAME``.  Replaces the
-shell-based ``shims/toolchain/new_shim.sh`` with a Python-
-testable scaffolder that can:
-
-- Pull the hook site's calling convention from a live Ghidra
-  instance via :class:`GhidraClient` — classifies
-  ``__stdcall`` / ``__fastcall`` / ``__thiscall`` from the
-  function's parameter-storage metadata.
-- Pre-fill ``replaced_bytes`` from the vanilla XBE + run
-  :func:`plan_trampoline` to verify the hook lands on a clean
-  instruction boundary.
-- Emit a complete feature folder (``__init__.py``, ``shim.c``,
-  ``README.md``) with the correct ``__attribute__(())`` on the
-  generated C prototype + the full parameter list translated
-  from Ghidra types.
-- Fall back gracefully when Ghidra / XBE aren't supplied —
-  behaviour matches the legacy shell scaffolder with TODOs
-  everywhere for manual fill-in.
-
-Typical full-pickup invocation:
-
-```bash
-azurik-mod new-shim my_shim \
-    --hook 0x5F6E5 --iso Azurik.iso --ghidra
-```
-
-Produces a feature folder ready to compile + test.  Run
-``--dry-run`` first to preview the rendered files.
-
-### 7. XBR record-layout inspector
-
-Given an XBR file + a TOC entry tag (e.g. `surf`), dump the
-first N records with guessed field types based on byte-level
-heuristics (is this 4 bytes a plausible float? int? pointer?).
-Speeds up RE of per-level record layouts (critical for the
-randomizer's deeper passes).
-
-```bash
-azurik-mod xbr inspect w1.xbr --tag surf --entries 3
-```
-
-### 8. Entity descriptor diff
-
-`azurik-mod entity diff garret4 critter_spider` — side-by-side
-field compare across two `characters.xbr` or `config.xbr`
-entries.  Use case: "why does this enemy have 5× the HP of
-that one?" answered in one command.
-
-### 9. Test selector by VA / pack / shim
-
-`azurik-mod test-for-va 0x85F62` — runs only the pytest cases
-whose source mentions this VA.  Helps when iterating on a
-single patch without blowing through the full 429-test suite
-every time.
-
-Implementation: scan test files, grep for VA hex, run matching
-tests.
-
-### 10. VA-drift pin helper
-
-A `@pin_va(0x85F62, "d9 05 08 00 1f 00")` pytest decorator that
-reads the vanilla XBE at test time and asserts the bytes at the
-given VA match the expected pattern.  Already implemented
-ad-hoc in several tests — centralise it into one helper with
-nice failure messages.
-
----
-
-## Tier 3 — Shipped (mostly)
+## Tier 3 — Shipped
 
 ### 11. RE session recorder
 
@@ -373,35 +224,63 @@ Vanilla ISO: 14 Bink files, all 640×480 @ 30 fps, totalling
 
 ### 14. Audio asset dump (from `wave` tags in `fx.xbr`)
 
-Status: **shipped (partial)** (see
+Status: **shipped** (see
 `azurik_mod/xbe_tools/audio_dump.py`).
 
-``azurik-mod audio dump FX_XBR --output DIR`` bulk-extracts
-every ``wave`` TOC entry from ``fx.xbr`` + writes a
-``manifest.json`` classifying each blob as ``likely-audio``
-(high-entropy raw bytes), ``likely-animation`` (Maya particle-
-system curve data with embedded 4-byte TOC tags), or
-``too-small`` (< 64 bytes).
+``azurik-mod audio dump FX_XBR --output DIR [--index-xbr IDX]``
+bulk-extracts every ``wave`` TOC entry from ``fx.xbr``,
+decodes the 20-byte audio header when present, wraps
+recognised codecs in RIFF/WAVE so external tools can consume
+them, and writes a ``manifest.json`` indexing every blob with
+its decoded metadata.
 
-**Format status**: partially decoded.  We confirmed:
+**Format — pinned in the April 2026 RE pass**:
 
-- ``fx.xbr`` has 700 ``wave`` entries.
-- Audio is referenced by SYMBOLIC NAME (``fx/sound/player/jump``
-  etc.) via ``index.xbr``.
-- NO standard audio magic (RIFF / XMA / xWMA / OggS / FSB) in
-  fx.xbr anywhere.
-- ~70% of blobs classify as likely-audio, ~25% as
-  likely-animation.
+The 20-byte header that 100 of 700 wave entries carry
+decomposes as::
 
-Full codec decoding is NOT implemented — the wave payload
-appears to be raw DSOUND samples or a proprietary container
-Azurik layered itself.  Shipped so the RE work can proceed on
-plain files; a future decoder can consume ``waves/*.bin``
-directly.
+    +0x00  u32  sample_rate    (8000 / 11025 / 22050 / 32000 / 44100)
+    +0x04  u32  sample_count   (duration = count / rate)
+    +0x08  u32  format_magic   (0x01000401 = mono 4-bit Xbox ADPCM)
+    +0x0C  u32  reserved (0)
+    +0x10  u32  reserved (0)
+    +0x14  ...  codec payload
 
-Filters: ``--entropy-min 0.5`` skips low-entropy (likely-
-animation) blobs; ``--only-audio`` writes only the audio-
-classified ones.
+The ``format_magic`` dword splits byte-for-byte into
+``channels = byte[0]``, ``bits_per_sample = byte[1]``,
+``codec_id = byte[3]`` — matching what ``dump_waves`` surfaces
+in the manifest + what the WAV wrapper uses to pick
+``WAVE_FORMAT_XBOX_ADPCM`` (0x0069) vs ``WAVE_FORMAT_PCM``.
+
+**Classification labels** (output in the manifest):
+
+- ``xbox-adpcm``       — 20-byte header recognised; ``.wav``
+                          wrapper emitted via RIFF ``WAVE_FORMAT_XBOX_ADPCM``
+- ``pcm-raw``          — 8/16-bit linear PCM header; ``.wav``
+                          wrapper emitted with ``WAVE_FORMAT_PCM``
+- ``likely-audio``     — entropy ≥ 0.5, no recognised header;
+                          raw ``.bin`` only
+- ``likely-animation`` — Maya-particle-system curve data
+                          (animation TOC tags in first 64 bytes
+                          or low entropy)
+- ``too-small``        — < 64 bytes of payload
+
+**Naming** — pass ``--index-xbr path/to/index.xbr`` and the
+manifest's recognised-codec entries pick up their symbolic
+``fx/sound/<entity>/<key>`` names from the index.xbr string
+pool, so RE sessions don't have to open both files side-by-side.
+
+Vanilla ``fx.xbr`` breakdown (700 wave entries):
+
+- 103 **xbox-adpcm** (header-decoded, .wav written)
+- 448 likely-audio (no header, raw bytes only)
+- 118 likely-animation (Maya particle-system data)
+-  31 too-small
+
+Filters: ``--entropy-min 0.5`` skips low-entropy blobs;
+``--only-audio`` writes only audio-classified entries;
+``--no-wav`` suppresses RIFF wrapping when you want raw
+``.bin`` files only.
 
 ### 15. Ghidra snapshot exporter
 
@@ -478,7 +357,7 @@ brand-new categories — using only the public
 |11 | RE session recorder         | 5     | 4    | 5   | **shipped** |
 |12 | Level XBR diff              | 3     | 2    | 5   | **shipped** |
 |13 | Bink metadata               | 2     | 1    | 4   | **shipped** |
-|14 | Audio asset dump            | 3     | 4    | 3   | **shipped (partial)** |
+|14 | Audio asset dump            | 4     | 4    | 4   | **shipped** |
 |15 | Ghidra snapshot exporter    | 5     | 2    | 6   | **shipped** |
 |16 | Plugin pack distribution    | 4     | 3    | 5   | **shipped** |
 
@@ -503,8 +382,14 @@ to the build-out.
 driven by :mod:`azurik_mod.save_format.editor`.  Applies
 declarative edits to text saves (``magic.sav`` / ``loc.sav`` /
 ``options.sav``) and copies the rest of the slot through
-unchanged.  Binary saves + signature re-hashing still TODO —
-tracked in ``docs/SAVE_FORMAT.md`` § 7.
+unchanged.  The signature-verification blocker from the April
+2026 pass landed as the ``qol_skip_save_signature`` patch pack
+(3-byte ``MOV AL, 1 ; RET`` at VA ``0x0005C990``) — edited
+saves now load on a patched XBE without any key-recovery
+ceremony; see ``docs/PATCHES.md`` for the full writeup.
+Binary-save editing (inventory / position blobs with non-text
+keys) still requires deeper RE and is tracked in
+``docs/SAVE_FORMAT.md``.
 
 **#18 XBR write-back support** — **SHIPPED**
 `azurik-mod xbr edit <in> <out> --set-string 'old=new' --tag <T>`
@@ -585,12 +470,17 @@ run and surface *"ffmpeg not installed"* cleanly.
 
 ### Deferred from prior passes
 
-**#4** ghidra-sync extensions — struct application + variable
-renaming via ``PATCH /variables/...`` endpoints.
+**#4** ghidra-sync extensions — variable renaming via
+``PATCH /variables/...`` endpoints.  Struct push + recreate
+shipped in the April 2026 pass; the variable-rename side is
+still open.
 
-**#14** Audio codec decoder — the extraction tool is shipped,
-but the actual wave / PCM / ADPCM decoder still needs RE work.
-Extracted blobs (``waves/*.bin``) are the starting point.
+(The April 2026 audio pass closed out the original
+``#14`` deferred item — ``xbox-adpcm`` header decoding + WAV
+wrapping ship directly from ``audio dump`` now.  Decoding the
+remaining 448 ``likely-audio`` entries that don't carry the
+20-byte header is still open and tracked as a future RE
+pass, not a tooling gap.)
 
 ---
 

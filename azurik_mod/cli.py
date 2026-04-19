@@ -780,18 +780,21 @@ def main() -> None:
     # ------------------------------------------------------------------
     p_audio = sub.add_parser(
         "audio",
-        help="Extract audio blobs from fx.xbr (partial — format "
-             "only partially decoded)",
+        help="Extract audio blobs from fx.xbr + emit WAV wrappers "
+             "when the header decodes",
         description=(
             "Bulk-extract every ``wave`` TOC entry from fx.xbr,\n"
-            "classifying each as 'likely-audio' (high-entropy raw\n"
-            "bytes) vs 'likely-animation' (Maya-particle-system\n"
-            "curve data).  Produces one file per blob + a\n"
-            "manifest.json.\n\n"
-            "Full codec decoding is NOT implemented — the wave\n"
-            "payload has no RIFF/XMA/etc. header.  Shipped so RE\n"
-            "work can proceed on plain files; see the module\n"
-            "docstring for format status."
+            "decode the 20-byte audio header when present, classify\n"
+            "each entry, and wrap recognised codecs in RIFF/WAVE\n"
+            "so vgmstream / Audacity / ffmpeg can play them back.\n\n"
+            "Classification labels:\n"
+            "  * xbox-adpcm        — 20-byte header decoded, .wav emitted\n"
+            "  * pcm-raw           — 8/16-bit linear PCM, .wav emitted\n"
+            "  * likely-audio      — no header but high-entropy bytes\n"
+            "  * likely-animation  — structured Maya particle-system data\n"
+            "  * too-small         — < 64 bytes\n\n"
+            "Pass --index-xbr to pull symbolic names (fx/sound/...) from\n"
+            "index.xbr into the manifest as ``probable_name`` fields."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -799,7 +802,7 @@ def main() -> None:
         dest="audio_command", required=True)
     p_ad = _audio_sub.add_parser(
         "dump",
-        help="Bulk-extract wave blobs + write a manifest")
+        help="Bulk-extract wave blobs + emit .wav wrappers + write a manifest")
     p_ad.add_argument("fx_xbr",
         help="Path to gamedata/fx.xbr")
     p_ad.add_argument("--output", "-o", required=True,
@@ -809,6 +812,14 @@ def main() -> None:
              "Higher = more-likely-audio; 0 writes everything.")
     p_ad.add_argument("--only-audio", action="store_true",
         help="Skip blobs classified as likely-animation / too-small")
+    p_ad.add_argument("--no-wav", action="store_true",
+        help="Do NOT emit .wav RIFF wrappers alongside recognised "
+             "blobs (default: emit one .wav per xbox-adpcm / pcm-raw "
+             "entry so external audio tools can play them directly).")
+    p_ad.add_argument("--index-xbr",
+        help="Optional path to gamedata/index/index.xbr; when "
+             "provided, the manifest's recognised-codec entries get "
+             "their symbolic asset names (fx/sound/...) attached.")
     p_ad.add_argument("--preview", type=int, default=0,
         help="Show the first N manifest entries inline")
     p_ad.add_argument("--json", action="store_true")

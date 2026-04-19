@@ -1,82 +1,127 @@
-"""Audio asset dump — extract ``wave`` blobs from ``fx.xbr``.
+"""Audio asset dump — extract + classify + wrap ``wave`` blobs from
+Azurik's ``fx.xbr``.
 
 Tool #14 on the roadmap.  Bulk-extracts every ``wave`` TOC entry
-from a fx-style XBR file, writes each as a standalone ``.bin``,
-and emits a manifest mapping each blob to entropy + size
-statistics so downstream RE work (eventual decoder) starts from
-something greppable.
+from a fx-style XBR file; classifies each blob by payload header;
+for blobs whose 20-byte prefix matches Azurik's Xbox-ADPCM header,
+wraps the payload in a RIFF/WAV so external tools (vgmstream,
+Audacity, ffmpeg) can consume it directly; and emits a manifest
+mapping every blob to its decoded metadata.
 
-## Format status
+## Format — pinned in the April 2026 RE pass
 
-**Partially decoded.**  During the April 2026 pass we confirmed:
+**100 of 700** ``wave`` entries open with a 20-byte header we
+decoded from multi-entry comparison (see
+``tests/test_audio_and_plugins.py`` for the exact regression
+fixtures):
 
-- ``fx.xbr`` contains 700 ``wave`` TOC entries.
-- Azurik's XBE references audio by symbolic NAME (e.g.
-  ``fx/sound/player/jump``) — looked up via ``index.xbr``.
-- **No standard audio magic** (RIFF / OggS / xWMA / XMA2 / etc.)
-  appears anywhere in fx.xbr — the wave payload is either
-  raw DSOUND samples (PCM / ADPCM) OR a proprietary container
-  Azurik layered on top.
-- Some wave entries clearly aren't audio at all (they carry
-  embedded 4-byte tags like ``gshd`` / ``ndbg`` / ``node`` /
-  ``rdms`` — animation-curve metadata, not PCM).
-- High-entropy wave entries (ratio > 0.9 unique-byte / total)
-  look like compressed audio.  Low-entropy entries look like
-  structured animation data.
+    offset 0x00  u32  sample_rate    (22050 / 32000 / 44100 etc.)
+    offset 0x04  u32  sample_count   (frame_count when ADPCM; duration
+                                      = sample_count / sample_rate)
+    offset 0x08  u32  format_magic   (0x01000401 in 97 entries,
+                                      0x01000402 + 0x01010401 elsewhere)
+    offset 0x0C  u32  reserved       (observed 0 in every entry)
+    offset 0x10  u32  reserved       (observed 0 or a small flag)
+    offset 0x14  ...  payload        (ADPCM samples, mono 4-bit)
 
-Full decoding is deferred until someone pins the exact header /
-codec layout.  In the meantime this tool gets the blobs out of
-fx.xbr so the RE work can proceed on plain files.
+The format-magic dword decomposes byte-for-byte as:
+
+    byte[0] = channels (1 = mono)
+    byte[1] = bits_per_sample (4 = ADPCM, 8/16 = PCM)
+    byte[2] = reserved (0 in observed samples)
+    byte[3] = codec_id (1 = Xbox ADPCM, 2 = PCM-ish variant)
+
+**Distribution** (vanilla ``fx.xbr``):
+
+- 74  sample_rate=22050
+- 13  sample_rate=32000
+-  7  sample_rate=44100
+-  4  sample_rate=11025
+-  2  sample_rate=8000
+- 97  format_magic=0x01000401  (channels=1, bits=4, codec=1)
+
+The remaining 600 entries either have a different header layout
+(60 with ``u32[2]==0``, looked like simpler PCM frames) or aren't
+audio (animation-curve metadata with embedded 4-byte TOC tags like
+``gshd``, ``ndbg``, ``rdms``).
+
+## Cross-referencing with ``index.xbr``
+
+The game looks up every wave entry by symbolic name (``fx/sound/
+<entity>/<key>``).  ``index.xbr`` stores 816 ``wave`` records +
+3,000+ asset-path strings; calling ``dump_waves(..., index_xbr=...)``
+emits those names alongside the raw blobs in ``manifest.json`` so
+RE sessions don't have to open both files side-by-side.
 
 ## CLI
 
-    azurik-mod audio dump FX_XBR --output DIR [--entropy-min 0.5]
+    azurik-mod audio dump FX_XBR --output DIR \\
+        [--entropy-min 0.5] [--only-audio] \\
+        [--index-xbr path/to/index.xbr]
 
-Produces:
+Produces::
 
     DIR/
-      manifest.json              — one-line summary per blob
-      waves/wave_0000.bin        — raw payload from TOC entry [0]
-      waves/wave_0001.bin
-      ...
+      manifest.json           — decoded header + classification per blob
+      waves/wave_0000.bin     — raw payload for any entry (always written)
+      waves/wave_0000.wav     — RIFF/WAV wrapper for recognised codecs
 
-## What's in manifest.json
+## What's in the manifest
 
-Each entry looks like::
+::
 
     {
       "index": 127,
       "file_offset": 15466496,
       "size": 17584,
       "entropy": 0.92,
-      "first_bytes_hex": "05000000 6f000000 01000000 ...",
-      "classification": "likely-audio",
-      "output": "waves/wave_0127.bin"
+      "first_bytes_hex": "44ac0000 53c00000 01040001 ...",
+      "classification": "xbox-adpcm",
+      "header": {
+        "sample_rate": 44100,
+        "sample_count": 21440,
+        "duration_ms": 486,
+        "channels": 1,
+        "bits_per_sample": 4,
+        "codec_id": 1,
+        "format_magic": "0x01000401"
+      },
+      "probable_name": "fx/sound/player/jump",
+      "output": "waves/wave_0127.bin",
+      "wav_output": "waves/wave_0127.wav"
     }
 
-``classification`` is a heuristic label:
+Classification values:
 
-- ``likely-audio`` — entropy >= 0.5, no embedded 4-byte TOC tags
-- ``likely-animation`` — entropy < 0.5 OR embedded TOC tags
-- ``too-small`` — payload shorter than 64 bytes
+- ``xbox-adpcm``      — 20-byte header recognised; WAV wrapper emitted
+- ``pcm-raw``         — 20-byte header with bits_per_sample ∈ {8, 16};
+                         WAV wrapper emitted with WAVE_FORMAT_PCM
+- ``likely-audio``    — entropy ≥ 0.5, no recognised header, no
+                         animation tags → raw bytes only
+- ``likely-animation`` — animation-curve metadata (TOC tags in first
+                         64 bytes, or low entropy)
+- ``too-small``       — < 64 bytes of payload
 """
 
 from __future__ import annotations
 
 import json
 import math
+import re
 import struct
 import sys
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 
 __all__ = [
     "WaveEntry",
+    "WaveHeader",
     "DumpReport",
     "classify_entry",
     "dump_waves",
     "entropy_ratio",
+    "parse_wave_header",
 ]
 
 
@@ -89,6 +134,56 @@ _ANIMATION_TAGS = (
     b"pbrw", b"pbrc", b"wave", b"surf",
 )
 
+# Standard audio sample rates we accept as "plausible enough to
+# be a real sample_rate field" during header detection.  Every
+# wave entry in vanilla fx.xbr that carried the 20-byte header
+# used one of these; an unexpected value means the bytes at
+# offset 0 aren't a sample rate.
+_PLAUSIBLE_SAMPLE_RATES = frozenset({
+    8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000,
+})
+
+
+# RIFF/WAVE format tag constants (for the WAV wrapper).
+_WAVE_FORMAT_PCM = 0x0001
+_WAVE_FORMAT_XBOX_ADPCM = 0x0069  # vgmstream + ffmpeg both accept this
+
+
+@dataclass(frozen=True)
+class WaveHeader:
+    """The 20-byte audio header some ``fx.xbr`` wave entries carry.
+
+    Only populated when :func:`parse_wave_header` successfully
+    identifies the pattern; ``None`` otherwise (the blob is
+    animation data or a codec we haven't decoded yet).
+    """
+
+    sample_rate: int
+    sample_count: int
+    channels: int
+    bits_per_sample: int
+    codec_id: int
+    format_magic: int
+
+    @property
+    def duration_ms(self) -> int:
+        """Clip length in milliseconds (ADPCM sample_count is decoded-
+        sample count, which converts cleanly to ms)."""
+        if self.sample_rate <= 0:
+            return 0
+        return int(self.sample_count * 1000 // self.sample_rate)
+
+    def to_dict(self) -> dict:
+        return {
+            "sample_rate": self.sample_rate,
+            "sample_count": self.sample_count,
+            "duration_ms": self.duration_ms,
+            "channels": self.channels,
+            "bits_per_sample": self.bits_per_sample,
+            "codec_id": self.codec_id,
+            "format_magic": f"0x{self.format_magic:08x}",
+        }
+
 
 @dataclass(frozen=True)
 class WaveEntry:
@@ -97,13 +192,16 @@ class WaveEntry:
     index: int                  # 0-based index within the wave list
     file_offset: int            # byte offset in the source file
     size: int                   # payload size (from TOC)
-    classification: str         # "likely-audio" | "likely-animation" | "too-small"
+    classification: str         # see module doc for the label set
     entropy: float              # Shannon ratio (0.0..1.0)
     first_bytes_hex: str        # first 32 bytes hex
     output_rel: str             # destination path relative to output dir
+    header: WaveHeader | None = None
+    wav_output_rel: str = ""    # "" if no WAV wrapper emitted
+    probable_name: str = ""     # from index.xbr cross-reference
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "index": self.index,
             "file_offset": self.file_offset,
             "size": self.size,
@@ -112,6 +210,13 @@ class WaveEntry:
             "first_bytes_hex": self.first_bytes_hex,
             "output": self.output_rel,
         }
+        if self.header is not None:
+            d["header"] = self.header.to_dict()
+        if self.probable_name:
+            d["probable_name"] = self.probable_name
+        if self.wav_output_rel:
+            d["wav_output"] = self.wav_output_rel
+        return d
 
 
 @dataclass
@@ -122,6 +227,9 @@ class DumpReport:
     output_dir: str
     total_waves: int = 0
     written: int = 0
+    wav_written: int = 0
+    xbox_adpcm: int = 0
+    pcm_raw: int = 0
     likely_audio: int = 0
     likely_animation: int = 0
     too_small: int = 0
@@ -133,15 +241,20 @@ class DumpReport:
             "output_dir": self.output_dir,
             "total_waves": self.total_waves,
             "written": self.written,
-            "likely_audio": self.likely_audio,
-            "likely_animation": self.likely_animation,
-            "too_small": self.too_small,
+            "wav_written": self.wav_written,
+            "classification_counts": {
+                "xbox-adpcm":        self.xbox_adpcm,
+                "pcm-raw":           self.pcm_raw,
+                "likely-audio":      self.likely_audio,
+                "likely-animation":  self.likely_animation,
+                "too-small":         self.too_small,
+            },
             "entries": [e.to_dict() for e in self.entries],
         }
 
 
 # ---------------------------------------------------------------------------
-# Heuristics
+# Heuristics + header parsing
 # ---------------------------------------------------------------------------
 
 
@@ -166,19 +279,64 @@ def entropy_ratio(data: bytes) -> float:
     return h / 8.0
 
 
-def classify_entry(size: int, head: bytes) -> str:
-    """Label a wave entry as ``likely-audio`` / ``likely-animation``
-    / ``too-small``.
+def parse_wave_header(payload: bytes) -> WaveHeader | None:
+    """Return the decoded 20-byte audio header, or ``None`` if the
+    prefix doesn't match Azurik's wave layout.
 
-    Heuristic:
-    - < 64 bytes → ``too-small`` (unlikely to be useful audio).
-    - Any of :data:`_ANIMATION_TAGS` appears in the first 64
-      bytes → ``likely-animation`` (structured metadata, not PCM).
-    - Entropy >= 0.5 on first 256 bytes → ``likely-audio``.
-    - Otherwise → ``likely-animation``.
+    The header is considered valid when:
+
+    - ``u32[0]`` is in :data:`_PLAUSIBLE_SAMPLE_RATES`;
+    - ``u32[2]`` decomposes into ``channels ∈ {1, 2}``, ``bits ∈
+      {4, 8, 16}``, ``codec_id ∈ {1, 2}`` when read byte-by-byte.
+
+    The double-guard (plausible rate AND sane format_magic) costs
+    nothing to evaluate and rules out the ~60% of wave entries
+    whose first bytes aren't audio headers at all.
+    """
+    if len(payload) < 20:
+        return None
+    sample_rate, sample_count, format_magic = struct.unpack_from(
+        "<III", payload, 0)
+    if sample_rate not in _PLAUSIBLE_SAMPLE_RATES:
+        return None
+    channels = format_magic & 0xFF
+    bits_per_sample = (format_magic >> 8) & 0xFF
+    codec_id = (format_magic >> 24) & 0xFF
+    # Shape guards — reject obviously-wrong decompositions.
+    if channels not in (1, 2):
+        return None
+    if bits_per_sample not in (4, 8, 16):
+        return None
+    if codec_id not in (1, 2):
+        return None
+    # Sanity: sample_count must correspond to a non-insane duration.
+    # Anything over 10 minutes of audio in a single fx.xbr blob is
+    # almost certainly a bogus reinterpretation of noise bytes.
+    if sample_count > sample_rate * 600:
+        return None
+    return WaveHeader(
+        sample_rate=sample_rate,
+        sample_count=sample_count,
+        channels=channels,
+        bits_per_sample=bits_per_sample,
+        codec_id=codec_id,
+        format_magic=format_magic,
+    )
+
+
+def classify_entry(size: int, head: bytes,
+                   header: WaveHeader | None = None) -> str:
+    """Label a wave entry.
+
+    Priority order: too-small → recognised codec → animation tag →
+    entropy-based fallback.
     """
     if size < 64:
         return "too-small"
+    if header is not None:
+        if header.bits_per_sample == 4:
+            return "xbox-adpcm"
+        return "pcm-raw"
     for tag in _ANIMATION_TAGS:
         if tag in head[:64]:
             return "likely-animation"
@@ -188,13 +346,124 @@ def classify_entry(size: int, head: bytes) -> str:
 
 
 # ---------------------------------------------------------------------------
+# WAV wrapping — emit a RIFF container around the decoded payload so
+# external tools can consume the audio without knowing about XBR.
+# ---------------------------------------------------------------------------
+
+
+def _build_wav_container(header: WaveHeader, payload: bytes) -> bytes:
+    """Wrap ``payload`` in a RIFF/WAVE file using ``header``'s fields.
+
+    For ADPCM we emit ``WAVE_FORMAT_XBOX_ADPCM`` (0x0069) with a
+    typical 36-byte mono block (or 72-byte stereo block), matching
+    what vgmstream / ffmpeg / Audacity all recognise.  For PCM we
+    emit ``WAVE_FORMAT_PCM``.
+
+    The header we can compute without knowing the exact codec:
+
+    - For ADPCM at 4 bits/sample: block_align = 36 * channels,
+      samples_per_block = (block_align - 7 * channels) * 2 + 2 = 64
+      for mono, 128 for stereo.  These are the standard Microsoft
+      ADPCM values that Xbox ADPCM inherited.
+    - byte_rate = block_align * sample_rate / samples_per_block.
+
+    When the codec is not decoded (4-bit but not IMA-style), the
+    WAV file may still play through Audacity's raw-import path
+    because of the correct sample_rate + channels metadata.
+    """
+    ch = header.channels
+    sr = header.sample_rate
+    bps = header.bits_per_sample
+
+    if bps == 4:
+        fmt_tag = _WAVE_FORMAT_XBOX_ADPCM
+        block_align = 36 * ch
+        samples_per_block = 64 if ch == 1 else 128
+        byte_rate = int(block_align * sr / samples_per_block)
+        # Xbox ADPCM fmt chunk: standard WAVEFORMATEX + cbSize=2 +
+        # wSamplesPerBlock (u16) trailing extension.
+        fmt_chunk = struct.pack(
+            "<HHIIHHHH",
+            fmt_tag,            # wFormatTag
+            ch,                 # nChannels
+            sr,                 # nSamplesPerSec
+            byte_rate,          # nAvgBytesPerSec
+            block_align,        # nBlockAlign
+            bps,                # wBitsPerSample
+            2,                  # cbSize (WAVEFORMATEX extension)
+            samples_per_block,  # wSamplesPerBlock
+        )
+    else:
+        fmt_tag = _WAVE_FORMAT_PCM
+        block_align = ch * (bps // 8)
+        byte_rate = sr * block_align
+        fmt_chunk = struct.pack(
+            "<HHIIHH",
+            fmt_tag, ch, sr, byte_rate, block_align, bps)
+
+    # Build the RIFF container.
+    data_chunk = b"data" + struct.pack("<I", len(payload)) + payload
+    fmt_payload = b"fmt " + struct.pack("<I", len(fmt_chunk)) + fmt_chunk
+    body = b"WAVE" + fmt_payload + data_chunk
+    return b"RIFF" + struct.pack("<I", len(body)) + body
+
+
+# ---------------------------------------------------------------------------
+# Index.xbr cross-reference — map wave entries to their symbolic names
+# ---------------------------------------------------------------------------
+
+
+def _collect_wave_names(index_xbr_path: str | Path) -> list[str]:
+    """Return every plausible ``fx/sound/…`` or ``fx/…`` asset path
+    from ``index.xbr``'s string pool, in pool order.
+
+    Returns an empty list on any parse failure — the caller just
+    skips naming.  Best-effort because we haven't fully pinned the
+    record → pool mapping (see ``docs/LEARNINGS.md`` § index.xbr).
+    """
+    try:
+        # Late import — ``azurik_mod.assets.index_xbr`` is a heavier
+        # module than this file, keeping the import lazy so basic
+        # ``dump_waves(..., index_xbr=None)`` calls don't pay for it.
+        from azurik_mod.assets.index_xbr import load_index_xbr
+        idx = load_index_xbr(index_xbr_path)
+    except Exception:  # noqa: BLE001
+        return []
+
+    names: list[str] = []
+    # ``iter_asset_paths`` returns every NUL-terminated printable
+    # string in the pool.  We narrow to ``fx/…`` paths (sound fx
+    # layer) + drop obvious duplicates while preserving order.
+    seen: set[str] = set()
+    for p in idx.iter_asset_paths():
+        if not p.startswith("fx/"):
+            continue
+        # Further filter: drop file-extension refs (bar-wave01.tif)
+        # + clearly-descriptive-but-not-asset strings.
+        if "." in p.split("/")[-1] and not p.endswith((
+                ".adpcm", ".wav", ".raw")):
+            continue
+        if p in seen:
+            continue
+        seen.add(p)
+        names.append(p)
+    return names
+
+
+# ---------------------------------------------------------------------------
 # Main entry points
 # ---------------------------------------------------------------------------
 
 
-def dump_waves(fx_xbr: str | Path, output_dir: str | Path, *,
-               entropy_min: float = 0.0,
-               only_audio: bool = False) -> DumpReport:
+def dump_waves(
+    fx_xbr: str | Path,
+    output_dir: str | Path,
+    *,
+    entropy_min: float = 0.0,
+    only_audio: bool = False,
+    emit_wav: bool = True,
+    index_xbr: str | Path | None = None,
+) -> DumpReport:
     """Extract every ``wave`` TOC entry from ``fx_xbr``.
 
     Parameters
@@ -203,22 +472,28 @@ def dump_waves(fx_xbr: str | Path, output_dir: str | Path, *,
         Path to a fx-style XBR (usually ``gamedata/fx.xbr``).
     output_dir
         Destination directory (created if missing).  A ``waves/``
-        subdirectory holds one file per extracted blob; a
-        ``manifest.json`` at the top of ``output_dir`` indexes
-        them.
+        subdirectory holds one ``.bin`` per extracted blob (plus an
+        optional ``.wav`` alongside when ``emit_wav=True`` and the
+        header decodes cleanly); a ``manifest.json`` at the top of
+        ``output_dir`` indexes them.
     entropy_min
         Minimum entropy to skip writing a blob (0.0 = write all).
-        Handy for "give me only the high-entropy / likely-audio
-        entries".
     only_audio
         When ``True`` skips every entry classified as
         ``likely-animation`` / ``too-small``.
+    emit_wav
+        When ``True`` (default) emit a RIFF/WAVE wrapper alongside
+        each ``xbox-adpcm`` / ``pcm-raw`` entry so external tools
+        (vgmstream, Audacity, ffmpeg) can pick them up directly.
+    index_xbr
+        Optional path to ``index.xbr`` — when provided, the
+        manifest gets a best-effort ``probable_name`` field per
+        entry pulled from the string pool.
 
     Returns a :class:`DumpReport`.
     """
     src = Path(fx_xbr).expanduser().resolve()
     data = src.read_bytes()
-    # Re-use the shipping XBR parser.
     sys.path.insert(0, str(
         Path(__file__).resolve().parents[2] / "scripts"))
     import xbr_parser as xp  # type: ignore
@@ -230,6 +505,13 @@ def dump_waves(fx_xbr: str | Path, output_dir: str | Path, *,
     waves_dir = out / "waves"
     waves_dir.mkdir(parents=True, exist_ok=True)
 
+    # Optional asset names, in pool order.  We align them
+    # 1-to-1 with the recognised-codec entries (the naming isn't
+    # fully pinned; see _collect_wave_names docstring).
+    pool_names: list[str] = (
+        _collect_wave_names(index_xbr) if index_xbr else [])
+    audio_name_iter = iter(pool_names)
+
     report = DumpReport(source=str(src), output_dir=str(out),
                         total_waves=len(waves))
 
@@ -238,12 +520,17 @@ def dump_waves(fx_xbr: str | Path, output_dir: str | Path, *,
     for i, e in enumerate(waves):
         payload = data[e.file_offset:e.file_offset + e.size]
         head = payload[:64]
-        classification = classify_entry(e.size, head)
+        header = parse_wave_header(payload)
+        classification = classify_entry(e.size, head, header)
         ratio = entropy_ratio(payload[:256]) if payload else 0.0
         output_rel = f"waves/wave_{i:0{width}d}.bin"
 
         if classification == "too-small":
             report.too_small += 1
+        elif classification == "xbox-adpcm":
+            report.xbox_adpcm += 1
+        elif classification == "pcm-raw":
+            report.pcm_raw += 1
         elif classification == "likely-audio":
             report.likely_audio += 1
         else:
@@ -252,12 +539,28 @@ def dump_waves(fx_xbr: str | Path, output_dir: str | Path, *,
         should_write = True
         if entropy_min > 0.0 and ratio < entropy_min:
             should_write = False
-        if only_audio and classification != "likely-audio":
+        if only_audio and classification not in (
+                "xbox-adpcm", "pcm-raw", "likely-audio"):
             should_write = False
 
         if should_write:
             (out / output_rel).write_bytes(payload)
             report.written += 1
+
+        wav_output_rel = ""
+        if should_write and emit_wav and header is not None:
+            # Strip the 20-byte header before wrapping so the WAV
+            # ``data`` chunk is pure codec payload.
+            wav_bytes = _build_wav_container(header, payload[20:])
+            wav_output_rel = output_rel[:-4] + ".wav"
+            (out / wav_output_rel).write_bytes(wav_bytes)
+            report.wav_written += 1
+
+        # Opportunistic naming — only for codec-recognised entries
+        # (the pool order aligns with those, not with animation data).
+        probable_name = ""
+        if classification in ("xbox-adpcm", "pcm-raw"):
+            probable_name = next(audio_name_iter, "")
 
         report.entries.append(WaveEntry(
             index=i,
@@ -267,9 +570,11 @@ def dump_waves(fx_xbr: str | Path, output_dir: str | Path, *,
             entropy=ratio,
             first_bytes_hex=head[:32].hex(),
             output_rel=output_rel if should_write else "",
+            header=header,
+            wav_output_rel=wav_output_rel,
+            probable_name=probable_name,
         ))
 
-    # Manifest always written regardless of --only-audio filter.
     (out / "manifest.json").write_text(
         json.dumps(report.to_dict(), indent=2),
         encoding="utf-8")
@@ -283,10 +588,13 @@ def format_report(report: DumpReport, *, preview: int = 0) -> str:
     lines = [
         f"Audio dump from {report.source}",
         f"  → {report.output_dir}",
-        f"",
+        "",
         f"  total wave entries:      {report.total_waves}",
-        f"  written to disk:         {report.written}",
-        f"  classification:",
+        f"  blobs written to disk:   {report.written}",
+        f"  WAV wrappers emitted:    {report.wav_written}",
+        "  classification:",
+        f"     xbox-adpcm:           {report.xbox_adpcm}",
+        f"     pcm-raw:              {report.pcm_raw}",
         f"     likely-audio:         {report.likely_audio}",
         f"     likely-animation:     {report.likely_animation}",
         f"     too-small:            {report.too_small}",
@@ -295,8 +603,11 @@ def format_report(report: DumpReport, *, preview: int = 0) -> str:
         lines.append("")
         lines.append(f"  Preview (first {preview}):")
         for e in report.entries[:preview]:
+            dur = (f" {e.header.duration_ms}ms"
+                   if e.header is not None else "")
+            name = f"  [{e.probable_name}]" if e.probable_name else ""
             lines.append(
                 f"    [{e.index:4d}] {e.classification:<18s} "
-                f"size={e.size:>6} B  entropy={e.entropy:.2f}  "
-                f"→ {e.output_rel or '(skipped)'}")
+                f"size={e.size:>6} B  entropy={e.entropy:.2f}"
+                f"{dur}{name}  → {e.output_rel or '(skipped)'}")
     return "\n".join(lines)
