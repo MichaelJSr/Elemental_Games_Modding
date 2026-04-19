@@ -62,6 +62,66 @@ path strings:
 ✅ **Learning**: embedded sound-path or animation-ref strings are
 the fastest way to label a movement-state function.
 
+### Vanilla base-speed value + independence math (April 2026)
+
+`CritterData.run_speed` at offset `+0x40` feeds BOTH walking and
+running in the player tick.  Earlier docs claimed "always 1.0"
+because `critters_critter_data` has no `runSpeed` row for
+`garret4` — that was wrong: the field inherits from the struct's
+default initialiser, and the vanilla runtime value is **`7.0`**.
+
+How it was pinned:
+
+1. lldb breakpoint at VA `0x00085F65` (the `FLD [EAX+0x40]` right
+   after `MOV EAX, [EBP+0x34]` in `FUN_00085F50`).
+2. `p/f *(float *)($eax + 0x40)` returned `7.0`.
+
+The movement formula simplifies to:
+
+```
+walking = 7.0 × raw_stick
+running = 7.0 × raw_stick × 3.0   # 3.0 comes from FMUL [0x001A25BC]
+                                  # in FUN_00084940 (gated on
+                                  # PlayerInputState.flags & 0x40)
+```
+
+**Independence math** — the `player_physics` pack exposes two
+sliders (`walk_scale`, `run_scale`) that must each scale only
+their own baseline.  Since a single field feeds both paths, we
+solve for the pair of injected constants:
+
+```
+inject_base = 7 × walk_scale
+inject_mult = 3 × run_scale / walk_scale
+```
+
+so the engine produces:
+
+```
+walking = inject_base × raw_stick
+        = 7 × walk_scale × raw_stick
+        = walk_scale × vanilla_walking            ← indep
+running = inject_base × inject_mult × raw_stick
+        = 7 × walk_scale × 3 × run_scale/walk_scale × raw_stick
+        = 21 × run_scale × raw_stick
+        = run_scale × vanilla_running             ← indep
+```
+
+The `walk_scale` cancels cleanly in the running path, so each
+slider affects only its own baseline.  Regression coverage:
+`tests/test_player_speed.py::IndependenceSemantics` sweeps 6
+slider combinations + verifies walking/running speeds stay pinned
+to their expected vanilla multiples for every case.
+
+⚠️ **Trap**: the pre-April-2026 code injected the literal value
+directly (not `vanilla × slider`).  That made `walk_scale=3` drop
+the player to `3.0/7.0 ≈ 43%` of vanilla speed and silently
+coupled the two sliders (any non-default triggered both patches,
+with the walk-site rewriting the base to a raw literal).  Future
+patches that layer on top of `CritterData.run_speed` must either
+preserve vanilla at scale=1 or clearly document the non-identity
+semantics.
+
 ---
 
 ## Boot state machine

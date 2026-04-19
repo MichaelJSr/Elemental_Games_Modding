@@ -6,47 +6,77 @@
   it scales world gravity for everything that falls (player, enemies,
   projectiles).
 
-- **Walk / run speed**  (Phase 2 C1).  The Ghidra investigation on
-  main's earlier attempt showed the ``attacks_transitions.walkSpeed``
-  cells are dead data.  The REAL player-movement formula lives at
-  ``FUN_00085f50`` (called per-frame from the player tick
-  ``FUN_0008c230``):
+- **Walk / run speed** (Phase 2 C1; v2 April 2026 — independence).
+  The REAL player-movement formula is in ``FUN_00085F50`` (called
+  per-frame from the player tick) + ``FUN_00084940`` (per-frame input
+  normaliser):
 
-  - ``VA 0x85F62``: ``MOV EAX,[EBP+0x34]; FLD [EAX+0x40]`` — loads the
-    player's "base speed" from the runtime critter struct.  That
-    field is always ``1.0`` because ``critters_critter_data`` has no
-    ``runSpeed`` row.
-  - ``VA 0x85F69``: ``FMUL [EBP+0x124]`` — multiplies by the stick
-    magnitude, which was itself multiplied by ``3.0`` in
-    ``FUN_00084940`` when the running button is held
-    (``FMUL float ptr [0x001A25BC]`` at VA 0x849E4).
+  - ``VA 0x85F62``: ``MOV EAX,[EBP+0x34]; FLD [EAX+0x40]`` — loads
+    ``CritterData.run_speed`` (+0x40).  Vanilla runtime value is
+    ``7.0`` for the player entity (confirmed via lldb — the earlier
+    docstring claim of ``always 1.0`` was wrong).  NOT populated from
+    ``config.xbr``; comes from the struct's default initialiser.
+  - ``VA 0x85F69``: ``FMUL [EBP+0x124]`` — multiplies by
+    ``PlayerInputState.magnitude`` (+0x124), populated by
+    ``FUN_00084940`` from raw controller input (range 0..1).
+  - ``VA 0x849E4`` (inside ``FUN_00084940``): ``FMUL [0x001A25BC]``
+    multiplies the magnitude by ``3.0`` when the running-button gate
+    ``PlayerInputState.flags & 0x40`` is set.
 
-  The shared ``3.0`` constant has **45** read sites across the engine
-  (AI, collision, audio — everything unrelated to movement), so
-  patching it globally is not an option.
+  Resulting vanilla speeds: walking = ``7 × raw_stick``, running =
+  ``21 × raw_stick``.
 
-  Our approach: inject two per-player 4-byte floats into the XBE's
-  appended SHIMS section, then rewrite the two player-site instructions
-  to reference those instead of the shared constants:
+  The shared ``3.0`` constant at ``0x001A25BC`` has **45** readers
+  across AI / collision / audio / etc., so patching it globally is
+  not an option.
+
+  **Our approach** — inject two per-player 4-byte floats into the
+  XBE's appended SHIMS section, rewrite the two player-site
+  instructions to reference those constants:
 
   - ``0x85F62``: ``8B 45 34 D9 40 40`` (6 B) ->
-    ``D9 05 <va of g_walk_speed>`` (6 B).  Loads our injected float.
+    ``D9 05 <va of inject_base>`` (6 B).  Loads our injected base.
   - ``0x849E4``: ``D8 0D BC 25 1A 00`` (6 B) ->
-    ``D8 0D <va of g_run_multiplier>`` (6 B).  Multiplies by our
-    per-player constant instead of the shared one.
+    ``D8 0D <va of inject_mult>`` (6 B).  Multiplies by our per-
+    player multiplier instead of the shared 3.0.
 
-  Defaults ``walk_scale = 1.0`` and ``run_scale = 1.0`` produce
-  injected floats of ``1.0`` and ``3.0`` respectively — byte-identical
-  behaviour to vanilla under the new code path.  Sliders change the
-  injected values.
+  **Independence math** — one base feeds both code paths, so making
+  the two sliders independent requires solving for both injected
+  values simultaneously.  With slider semantics
+
+  - ``walk_scale`` = multiplier on vanilla walking
+  - ``run_scale``  = multiplier on vanilla running
+
+  we set
+
+  - ``inject_base = 7 × walk_scale``
+  - ``inject_mult = 3 × run_scale / walk_scale``
+
+  so that the engine computes
+
+  - walking  = ``inject_base × raw_stick``
+             = ``7 × walk_scale × raw_stick``
+             = ``walk_scale × vanilla_walking``
+  - running  = ``inject_base × inject_mult × raw_stick``
+             = ``(7 × walk_scale) × (3 × run_scale / walk_scale) × raw_stick``
+             = ``21 × run_scale × raw_stick``
+             = ``run_scale × vanilla_running``
+
+  The ``walk_scale`` cancels cleanly in the running path, making
+  each slider scale only its own vanilla baseline.
+
+  ``walk_scale=1 AND run_scale=1`` short-circuits the apply (no
+  patch bytes touched — vanilla preserved byte-for-byte).  Any
+  other combination is a true independent multiplier.
 
   Fields exposed:
 
-  - ``walk_speed_scale``: scales the base walking speed.  1.0 =
-    vanilla; 2.0 = walking and running both become 2x faster (same
-    walk-to-run ratio).
-  - ``run_speed_scale``: scales the run-vs-walk multiplier.  1.0 =
-    vanilla 3x running; 2.0 = running becomes 6x walking speed.
+  - ``walk_speed_scale``: multiplier on vanilla walking speed.
+    1.0 = vanilla, 2.0 = 2× vanilla walking, 0.5 = half speed.
+    Does NOT affect running.
+  - ``run_speed_scale``: multiplier on vanilla running speed.
+    1.0 = vanilla running (which is 3× walking), 2.0 = 2× vanilla
+    running.  Does NOT affect walking.
 """
 
 from __future__ import annotations
@@ -88,14 +118,16 @@ GRAVITY_PATCH = ParametricPatch(
 
 
 # ---------------------------------------------------------------------------
-# Player-speed sliders (Phase 2 C1 — live)
+# Player-speed sliders (Phase 2 C1 — v2 April 2026, independent semantics)
 # ---------------------------------------------------------------------------
 #
-# Both sliders are "virtual" ParametricPatches (va=0 / size=0) that
-# the GUI still renders as numeric inputs.  The real patch happens in
-# apply_player_speed() below, which injects two 4-byte floats into an
-# appended XBE section and rewrites two player-specific instructions
-# to reference them.
+# Both sliders are "virtual" ParametricPatches (va=0 / size=0) — the
+# GUI still renders them as numeric inputs, but the actual patch math
+# derives the two injected floats from BOTH sliders together (see
+# apply_player_speed below).  walk_scale multiplies vanilla walking
+# only; run_scale multiplies vanilla running only.  The cross-term
+# cancels cleanly because one slider appears as a divisor in the
+# other's injected value.
 
 WALK_SPEED_SCALE = ParametricPatch(
     name="walk_speed_scale",
@@ -142,8 +174,23 @@ _RUN_SITE_VANILLA = bytes([
     0xBC, 0x25, 0x1A, 0x00,   # FMUL dword [0x001A25BC]
 ])
 # Baseline run-multiplier in the vanilla code path (the `3.0` at
-# 0x001A25BC).  Our injected constant starts at 3.0 * run_scale.
+# 0x001A25BC).  Our injected constant starts at 3.0 * run_scale /
+# walk_scale (see apply_player_speed for the independence math).
 _VANILLA_RUN_MULTIPLIER = 3.0
+
+# Vanilla runtime value of CritterData.run_speed (+0x40) for the
+# player entity.  Confirmed via lldb at VA 0x00085F65 — the FLD
+# [EAX+0x40] immediately after MOV EAX, [EBP+0x34] in FUN_00085F50.
+# NOT populated from config.xbr (critters_critter_data has no
+# runSpeed row for garret4); comes from the CritterData struct's
+# default initialiser.  This is the identity baseline so
+# walk_speed=1.0 preserves vanilla exactly.
+_VANILLA_PLAYER_BASE_SPEED = 7.0
+
+# Lower bound on walk_scale when it appears as a DIVISOR in the run
+# multiplier formula.  UI min is 0.1, but defend against future
+# changes (or direct Python callers) that could pass 0.
+_WALK_SCALE_MIN = 0.01
 
 
 # ---------------------------------------------------------------------------
@@ -181,25 +228,38 @@ def apply_player_speed(
 ) -> bool:
     """Patch ``default.xbe`` so the player walks / runs at custom speeds.
 
-    How it works (see module docstring for the full story):
+    ``walk_scale`` and ``run_scale`` are INDEPENDENT multipliers on
+    vanilla walking and vanilla running respectively (see module
+    docstring for the derivation).  ``1.0 / 1.0`` is a byte-identity
+    no-op; anything else rewrites both player-specific instruction
+    sites.
 
-    1. Injects two 4-byte floats into the XBE via the shim landing
-       infrastructure (``_carve_shim_landing`` — the same mechanism
-       C-shim trampolines use for their code).  The floats are
-       ``walk_scale`` (default 1.0) and ``3.0 * run_scale`` (default
-       3.0, preserving vanilla's hardcoded run multiplier).
-    2. Rewrites the ``FLD dword [EAX+0x40]`` at VA 0x85F65 (plus the
-       preceding 3-byte ``MOV EAX,[EBP+0x34]``) into a 6-byte
-       ``FLD dword [abs walk_va]``.  The player's base speed now
-       comes from our injected constant instead of the always-1.0
-       ``entity->runSpeed`` slot.
-    3. Rewrites the ``FMUL dword [0x001A25BC]`` at VA 0x849E4 into
-       ``FMUL dword [abs run_va]``.  The shared 3.0 constant is left
-       alone — all 45 other readers (collision, AI, audio, etc.)
-       keep their vanilla behaviour.
+    How it works:
+
+    1. Derives two injected floats from BOTH sliders:
+
+         inject_base = _VANILLA_PLAYER_BASE_SPEED × walk_scale
+         inject_mult = _VANILLA_RUN_MULTIPLIER × run_scale / walk_scale
+
+       so the game formula ``base × stick_mag`` (walking) and
+       ``base × mult × stick_mag`` (running) yield
+       ``walk_scale × vanilla_walking`` and ``run_scale ×
+       vanilla_running`` respectively — each slider scales only its
+       own vanilla baseline.
+    2. Injects both floats into the XBE via the shim-landing
+       infrastructure (``_carve_shim_landing`` — same mechanism C-shim
+       trampolines use).
+    3. Rewrites ``MOV EAX,[EBP+0x34]; FLD [EAX+0x40]`` at VA 0x85F62
+       into ``FLD dword [abs walk_va]`` (6 bytes).  The base now
+       comes from ``inject_base`` instead of ``CritterData.run_speed``
+       (which is 7.0 at runtime for the player).
+    4. Rewrites ``FMUL dword [0x001A25BC]`` at VA 0x849E4 into
+       ``FMUL dword [abs run_va]``.  The shared 3.0 constant at
+       0x001A25BC is left untouched — all 45 other readers keep
+       vanilla behaviour.
 
     Returns True when the patch was applied, False if both scales are
-    at their default of 1.0 (no-op) or if the patch sites have drifted
+    at the default of 1.0 (no-op) or if the patch sites have drifted
     from vanilla (already patched / game update / etc.) — in the drift
     case a warning is printed and the buffer is left untouched.
     """
@@ -228,9 +288,26 @@ def apply_player_speed(
         return False
 
     # --- Inject our two per-player floats -----------------------------
-    walk_value_bytes = struct.pack("<f", 1.0 * walk_scale)
-    run_value_bytes = struct.pack(
-        "<f", _VANILLA_RUN_MULTIPLIER * run_scale)
+    # Independence math (derivation in the module docstring).  With
+    # the game formula
+    #     walking_speed = inject_base × raw_stick
+    #     running_speed = inject_base × inject_mult × raw_stick
+    # and our slider semantics
+    #     walk_scale    = multiplier on vanilla walking
+    #     run_scale     = multiplier on vanilla running
+    # we solve for:
+    #     inject_base   = _VANILLA_PLAYER_BASE_SPEED × walk_scale
+    #     inject_mult   = _VANILLA_RUN_MULTIPLIER × run_scale / walk_scale
+    # The division makes the sliders INDEPENDENT: walk_scale affects
+    # only walking, run_scale affects only running.  Clamp the
+    # denominator to _WALK_SCALE_MIN so no slider extreme can produce
+    # a divide-by-zero NaN float in the XBE.
+    safe_walk_scale = max(_WALK_SCALE_MIN, float(walk_scale))
+    inject_base = _VANILLA_PLAYER_BASE_SPEED * safe_walk_scale
+    inject_mult = (_VANILLA_RUN_MULTIPLIER * float(run_scale)
+                   / safe_walk_scale)
+    walk_value_bytes = struct.pack("<f", inject_base)
+    run_value_bytes = struct.pack("<f", inject_mult)
     _, walk_va = _carve_shim_landing(xbe_data, walk_value_bytes)
     _, run_va = _carve_shim_landing(xbe_data, run_value_bytes)
 
@@ -242,11 +319,10 @@ def apply_player_speed(
     xbe_data[run_off:run_off + 6] = (
         b"\xD8\x0D" + struct.pack("<I", run_va))
 
-    print(f"  Player walk speed: {walk_scale:.3f}x  "
-          f"(base float at VA 0x{walk_va:X})")
-    print(f"  Player run speed:  {run_scale:.3f}x  "
-          f"(multiplier float at VA 0x{run_va:X}, "
-          f"= {_VANILLA_RUN_MULTIPLIER * run_scale:.2f})")
+    print(f"  Player walk speed: {walk_scale:.3f}x vanilla  "
+          f"(injected base = {inject_base:.3f}, VA 0x{walk_va:X})")
+    print(f"  Player run speed:  {run_scale:.3f}x vanilla  "
+          f"(injected run mult = {inject_mult:.3f}, VA 0x{run_va:X})")
     return True
 
 

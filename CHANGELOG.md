@@ -2,6 +2,83 @@
 
 ## Unreleased
 
+### player_physics — walk/run sliders now independent multipliers
+
+Fix two coupled bugs in the `player_physics` pack.
+
+**What was broken** (pre-April-2026):
+
+1. `walk_scale=3` made the player ~43% of vanilla speed, not 3×.
+   The patch injected a literal `3.0` into the XBE under the
+   docstring's claim that vanilla `CritterData.run_speed` was
+   always `1.0`.  lldb at VA `0x00085F65` proved vanilla is
+   actually `7.0` — so injecting `3.0` dropped the base below
+   vanilla instead of boosting it.
+2. `run_scale` had "no noticeable effect" because any non-default
+   slider triggered BOTH patch sites.  Setting `run_scale=3` alone
+   also silently rewrote the walk-site base to `1.0 × walk_scale
+   (=1.0) = 1.0`, dropping the base from 7.0 to 1.0 and masking
+   the run boost.
+
+**What the fix does**:
+
+Reinterpret the two injected floats as a derived PAIR rather than
+two independent literals.  With the engine formula:
+
+```
+walking = inject_base × raw_stick
+running = inject_base × inject_mult × raw_stick
+```
+
+and the slider semantics we want:
+
+- `walk_scale`  ≡ multiplier on vanilla walking
+- `run_scale`   ≡ multiplier on vanilla running
+
+we solve for:
+
+```
+inject_base = _VANILLA_PLAYER_BASE_SPEED × walk_scale   # = 7 × walk_scale
+inject_mult = _VANILLA_RUN_MULTIPLIER    × run_scale / walk_scale   # = 3 × run_scale / walk_scale
+```
+
+so that:
+
+- walking = `7 × walk_scale × raw_stick` = `walk_scale × vanilla_walking`
+- running = `7 × walk_scale × 3 × run_scale / walk_scale × raw_stick`
+         = `21 × run_scale × raw_stick` = `run_scale × vanilla_running`
+
+The `walk_scale` cancels cleanly in the running path — each
+slider now scales only its own baseline.
+
+**Verification** — new `IndependenceSemantics` test class in
+`tests/test_player_speed.py` sweeps 6 slider combinations
+including all the pre-fix failure modes
+(`(walk=3, run=1)` must NOT affect running;
+`(walk=1, run=3)` must NOT affect walking) and asserts the
+expected walking/running speeds for each combo.  Plus defensive
+`_WALK_SCALE_MIN = 0.01` clamp on the divide-by-zero edge of the
+independence math.
+
+**User impact** — if you already built an ISO with
+`walk_scale ≠ 1.0` or `run_scale ≠ 1.0`, rebuild with the new
+code to get the intended multiplier behavior.  The pre-fix
+behavior was consistently "silently slower + weird coupling"
+rather than what the slider label promised.
+
+**Docs updated**:
+
+- `shims/include/azurik.h` CritterData comments: the `(= 1.0)`
+  annotation on `walk_speed` / `run_speed` was a lie inherited
+  from the old patch's assumption; corrected to
+  `(vanilla=7.0 for player; see above)`.
+- `docs/LEARNINGS.md` § Player movement: new sub-section pinning
+  the `7.0` vanilla value + the independence math derivation so
+  future patches layering on top don't fall into the same trap.
+
+**Drift guards**: 719 passed / 1 skipped (up from 715 — 4 new
+IndependenceSemantics cases landed).
+
 ### Audio cleanup — unused imports out, gitignore for extraction dirs
 
 Small cleanup pass on the audio module after the codec-RE closed.

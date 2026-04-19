@@ -87,10 +87,13 @@ typedef struct ControllerState *ControllerStatePtr;
  *   2. ``critters_critter_data``  gameplay fields
  *   3. ``critters_sounds`` etc.   audio / drop tables (indices 0x17+)
  *
- * Note: ``walk_speed`` / ``run_speed`` come out as the default ``1.0``
- * because ``critters_critter_data`` doesn't actually carry those
- * rows — see azurik_mod/patches/player_physics.py for the full
- * dead-data story and the C1 fix that bypasses the slot.
+ * Note: ``walk_speed`` / ``run_speed`` are populated by the
+ * CritterData struct default initialiser, NOT from
+ * ``critters_critter_data`` (no such config rows for the player).
+ * Runtime vanilla value for the player entity is ``run_speed = 7.0``
+ * (confirmed via lldb at VA 0x00085F65).  See
+ * azurik_mod/patches/player_physics/__init__.py for the independence
+ * math that layers walk / run multipliers on top of this baseline.
  *
  * Offset column (hex) is BYTE offset from the struct base.  The
  * ``piVar9[N]`` column is the Ghidra decomp index — ``piVar9`` is
@@ -117,16 +120,18 @@ typedef struct CritterData {
 
     /* --- critters_critter_data: movement ---
      * The config values for walk_speed / run_speed are dead data (no
-     * matching rows in critters_critter_data); the engine falls back
-     * to the default 1.0 in both slots.  The player_physics C1 patch
-     * rewrites the FLD at VA 0x85F65 to reference a per-game float
-     * rather than reading this slot, but shims that DO NOT go through
-     * the C1 path and want to change the player's in-memory
-     * base-speed value can write here directly at game startup. */
-    f32 walk_speed;                   /* +0x38 piVar9[0xE] — "walkSpeed" (= 1.0)       */
-    f32 walk_anim_speed;              /* +0x3C piVar9[0xF] — "walkAnimSpeed"           */
-    f32 run_speed;                    /* +0x40 piVar9[0x10] — "runSpeed" (= 1.0)       */
-    f32 run_anim_speed;               /* +0x44 piVar9[0x11] — "runAnimSpeed"           */
+     * matching rows in critters_critter_data); the engine leaves
+     * these slots at whatever the struct default initialiser wrote
+     * (vanilla player: run_speed = 7.0, confirmed via lldb at VA
+     * 0x00085F65).  The player_physics C1 patch rewrites the FLD at
+     * VA 0x85F65 to reference a per-game float rather than reading
+     * this slot, but shims that DO NOT go through the C1 path and
+     * want to change the player's in-memory base-speed value can
+     * write here directly at game startup. */
+    f32 walk_speed;                   /* +0x38 piVar9[0xE]  — "walkSpeed" (runtime default; not from config) */
+    f32 walk_anim_speed;              /* +0x3C piVar9[0xF]  — "walkAnimSpeed"                                 */
+    f32 run_speed;                    /* +0x40 piVar9[0x10] — "runSpeed" (vanilla=7.0 for player; see above)  */
+    f32 run_anim_speed;               /* +0x44 piVar9[0x11] — "runAnimSpeed"                                  */
 
     /* --- critters_critter_data: damage thresholds / knockback ---
      * ouch1 is the low-damage threshold; the engine uses ouch2 and

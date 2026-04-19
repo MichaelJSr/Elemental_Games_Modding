@@ -42,6 +42,7 @@ if _REPO_ROOT not in sys.path:
 from azurik_mod.patches.player_physics import (  # noqa: E402
     _RUN_SITE_VA,
     _RUN_SITE_VANILLA,
+    _VANILLA_PLAYER_BASE_SPEED,
     _VANILLA_RUN_MULTIPLIER,
     _WALK_SITE_VA,
     _WALK_SITE_VANILLA,
@@ -111,6 +112,9 @@ class ApplyPlayerSpeedBehaviour(unittest.TestCase):
                 "--strict passes for unopted users.")
 
     def test_walk_scale_patches_fld_and_injects_walk_float(self):
+        """At walk_scale=2.5, run_scale=1.0 the injected base equals
+        vanilla × walk_scale (7.0 × 2.5 = 17.5) — that's what makes
+        the slider a true multiplier on vanilla walking."""
         data = bytearray(self.orig)
         self.assertTrue(apply_player_speed(data, walk_scale=2.5))
 
@@ -124,9 +128,20 @@ class ApplyPlayerSpeedBehaviour(unittest.TestCase):
         self.assertIsNotNone(value,
             msg="injected walk-speed VA must resolve to a mapped "
                 "section byte")
-        self.assertAlmostEqual(value, 2.5, places=5)
+        self.assertAlmostEqual(
+            value, _VANILLA_PLAYER_BASE_SPEED * 2.5, places=5,
+            msg="injected base must equal vanilla_base × walk_scale — "
+                "that's what makes walk_scale a true multiplier on "
+                "vanilla walking.  The pre-April-2026 code injected "
+                "a literal 2.5 here, which silently dropped the "
+                "base from vanilla's 7.0 down to 2.5 (35% of "
+                "vanilla) instead of the intended 2.5× boost.")
 
     def test_run_scale_patches_fmul_and_preserves_vanilla_constant(self):
+        """At walk_scale=1.0, run_scale=1.5 the injected multiplier
+        equals 3 × run_scale / walk_scale = 4.5.  The shared 3.0
+        constant at 0x001A25BC MUST stay untouched (45 other readers
+        depend on it)."""
         data = bytearray(self.orig)
         self.assertTrue(apply_player_speed(data, run_scale=1.5))
 
@@ -138,10 +153,12 @@ class ApplyPlayerSpeedBehaviour(unittest.TestCase):
         run_va = struct.unpack("<I", patch[2:6])[0]
         value = _read_float_at_va(bytes(data), run_va)
         self.assertIsNotNone(value)
-        self.assertAlmostEqual(value, _VANILLA_RUN_MULTIPLIER * 1.5,
-                               places=5,
-            msg="our injected run-multiplier must equal "
-                "(vanilla 3.0) * run_scale")
+        # Independence math: inject_mult = 3 × run_scale / walk_scale.
+        # With walk_scale=1.0 default, that's 3 × 1.5 / 1 = 4.5.
+        self.assertAlmostEqual(
+            value, _VANILLA_RUN_MULTIPLIER * 1.5 / 1.0, places=5,
+            msg="at walk_scale=1, injected run_mult equals "
+                "3 × run_scale / walk_scale = 3 × 1.5 = 4.5.")
 
         # The shared 0x001A25BC constant MUST still be 3.0 — we
         # deliberately do NOT mutate it (45 other readers depend on it).
@@ -152,7 +169,9 @@ class ApplyPlayerSpeedBehaviour(unittest.TestCase):
                 "be touched; 45 other systems read it.")
 
     def test_combined_walk_and_run_scales(self):
-        """Both sliders applied together land their own constants."""
+        """Both sliders applied together land their own derived
+        constants.  Independence math: inject_base = 7×0.5 = 3.5,
+        inject_mult = 3×2.0/0.5 = 12.0."""
         data = bytearray(self.orig)
         self.assertTrue(apply_player_speed(data,
                                            walk_scale=0.5, run_scale=2.0))
@@ -160,10 +179,15 @@ class ApplyPlayerSpeedBehaviour(unittest.TestCase):
         run_off = va_to_file(_RUN_SITE_VA)
         walk_va = struct.unpack("<I", bytes(data[walk_off + 2:walk_off + 6]))[0]
         run_va = struct.unpack("<I", bytes(data[run_off + 2:run_off + 6]))[0]
-        self.assertAlmostEqual(_read_float_at_va(bytes(data), walk_va), 0.5,
-                               places=5)
-        self.assertAlmostEqual(_read_float_at_va(bytes(data), run_va),
-                               _VANILLA_RUN_MULTIPLIER * 2.0, places=5)
+        self.assertAlmostEqual(
+            _read_float_at_va(bytes(data), walk_va),
+            _VANILLA_PLAYER_BASE_SPEED * 0.5, places=5,
+            msg="inject_base = vanilla_base × walk_scale = 7 × 0.5 = 3.5")
+        self.assertAlmostEqual(
+            _read_float_at_va(bytes(data), run_va),
+            _VANILLA_RUN_MULTIPLIER * 2.0 / 0.5, places=5,
+            msg="inject_mult = 3 × run_scale / walk_scale "
+                "= 3 × 2.0 / 0.5 = 12.0")
 
     def test_reapply_to_already_patched_is_rejected(self):
         """Running apply a second time on the same buffer must refuse —
@@ -276,6 +300,144 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         # empty list (or static ranges — either is acceptable, what
         # matters is no exception leaks).
         _ = _player_speed_dynamic_whitelist(b"\x00" * 0x1000)
+
+
+@unittest.skipUnless(_XBE_PATH,
+    "vanilla default.xbe fixture not available")
+class IndependenceSemantics(unittest.TestCase):
+    """Prove the sliders are TRULY INDEPENDENT: walk_scale scales
+    only vanilla walking, run_scale scales only vanilla running.
+
+    This is the April 2026 independence rewrite of player_physics.
+    Before the fix, walk_scale incorrectly scaled both walking AND
+    running (because the engine multiplexes the same CritterData
+    field through both paths) and run_scale effects were masked by
+    the walk-site dropping to 1.0 on any slider change.  The new
+    math cancels the cross-term by dividing inject_mult by
+    walk_scale — this sweep verifies the algebra holds for every
+    slider combination that mattered in the earlier failure modes.
+
+    Each entry in CASES asserts:
+
+    - walking = walk_scale × vanilla_walking
+    - running = run_scale  × vanilla_running
+
+    WITHOUT any coupling between the two.
+    """
+
+    # (walk_scale, run_scale, expected_walking_x_vanilla,
+    #  expected_running_x_vanilla)
+    CASES = [
+        (2.0, 1.0, 2.0, 1.0),   # walk 2×, run unchanged
+        (1.0, 2.0, 1.0, 2.0),   # walk unchanged, run 2×
+        (2.0, 2.0, 2.0, 2.0),   # both 2×
+        (3.0, 1.0, 3.0, 1.0),   # walking as fast as vanilla running
+        (0.5, 2.0, 0.5, 2.0),   # walking half, running 2× vanilla
+        (1.0, 0.5, 1.0, 0.5),   # walking vanilla, running half-vanilla
+    ]
+
+    def test_each_slider_combination_is_independent(self):
+        for walk, run, want_walk_x, want_run_x in self.CASES:
+            with self.subTest(walk=walk, run=run):
+                data = bytearray(_XBE_PATH.read_bytes())
+                self.assertTrue(apply_player_speed(
+                    data, walk_scale=walk, run_scale=run))
+                walk_off = va_to_file(_WALK_SITE_VA)
+                run_off = va_to_file(_RUN_SITE_VA)
+                walk_va = struct.unpack(
+                    "<I",
+                    bytes(data[walk_off + 2:walk_off + 6]))[0]
+                run_va = struct.unpack(
+                    "<I",
+                    bytes(data[run_off + 2:run_off + 6]))[0]
+                base = _read_float_at_va(bytes(data), walk_va)
+                mult = _read_float_at_va(bytes(data), run_va)
+
+                # Engine formula (without run-flag): velocity = base
+                # × raw_stick.  We compare ``base`` directly against
+                # vanilla_base × walk_scale.
+                self.assertAlmostEqual(
+                    base,
+                    _VANILLA_PLAYER_BASE_SPEED * want_walk_x,
+                    places=3,
+                    msg=f"walking speed at walk={walk} run={run} — "
+                        f"injected base should equal "
+                        f"{_VANILLA_PLAYER_BASE_SPEED} × {want_walk_x}")
+
+                # Engine formula (with run-flag): velocity = base ×
+                # mult × raw_stick.  Expected running speed is
+                # vanilla_running × run_scale =
+                # (vanilla_base × vanilla_boost) × run_scale.
+                self.assertAlmostEqual(
+                    base * mult,
+                    _VANILLA_PLAYER_BASE_SPEED
+                    * _VANILLA_RUN_MULTIPLIER
+                    * want_run_x,
+                    places=3,
+                    msg=f"running speed at walk={walk} run={run} — "
+                        f"base × mult should equal "
+                        f"{_VANILLA_PLAYER_BASE_SPEED} × "
+                        f"{_VANILLA_RUN_MULTIPLIER} × {want_run_x}")
+
+    def test_walk_scale_alone_does_not_affect_running(self):
+        """Smoke: changing ONLY walk_scale must leave running at
+        exactly vanilla × 1.0.  Before the fix this was broken —
+        walk_scale=2 also doubled running."""
+        data = bytearray(_XBE_PATH.read_bytes())
+        self.assertTrue(apply_player_speed(data, walk_scale=3.0))
+        walk_off = va_to_file(_WALK_SITE_VA)
+        run_off = va_to_file(_RUN_SITE_VA)
+        walk_va = struct.unpack(
+            "<I", bytes(data[walk_off + 2:walk_off + 6]))[0]
+        run_va = struct.unpack(
+            "<I", bytes(data[run_off + 2:run_off + 6]))[0]
+        base = _read_float_at_va(bytes(data), walk_va)
+        mult = _read_float_at_va(bytes(data), run_va)
+        running = base * mult
+        vanilla_running = (_VANILLA_PLAYER_BASE_SPEED
+                           * _VANILLA_RUN_MULTIPLIER)
+        self.assertAlmostEqual(
+            running, vanilla_running, places=3,
+            msg="walk_scale=3 should NOT affect running — the "
+                "independence math cancels walk_scale out of the "
+                "running path.")
+
+    def test_run_scale_alone_does_not_affect_walking(self):
+        """Reverse smoke: changing ONLY run_scale must leave
+        walking at vanilla.  Before the fix, changing run_scale
+        silently dropped walking speed because the walk-site got
+        rewritten with a literal 1.0."""
+        data = bytearray(_XBE_PATH.read_bytes())
+        self.assertTrue(apply_player_speed(data, run_scale=3.0))
+        walk_off = va_to_file(_WALK_SITE_VA)
+        walk_va = struct.unpack(
+            "<I", bytes(data[walk_off + 2:walk_off + 6]))[0]
+        walking = _read_float_at_va(bytes(data), walk_va)
+        self.assertAlmostEqual(
+            walking, _VANILLA_PLAYER_BASE_SPEED, places=3,
+            msg="run_scale=3 should NOT affect walking — base must "
+                "stay at vanilla (7.0).")
+
+    def test_walk_scale_zero_does_not_produce_nan(self):
+        """Defense: if something ever passes walk_scale=0 (UI min
+        is 0.1 but a future refactor could change that), the
+        _WALK_SCALE_MIN clamp prevents the divide-by-zero from
+        emitting NaN/Inf into the XBE."""
+        import math
+        data = bytearray(_XBE_PATH.read_bytes())
+        # Passing 0 directly bypasses the slider; with the clamp
+        # the injected mult should be finite + positive.
+        self.assertTrue(apply_player_speed(
+            data, walk_scale=0.0, run_scale=1.0))
+        run_off = va_to_file(_RUN_SITE_VA)
+        run_va = struct.unpack(
+            "<I", bytes(data[run_off + 2:run_off + 6]))[0]
+        mult = _read_float_at_va(bytes(data), run_va)
+        self.assertIsNotNone(mult)
+        self.assertTrue(math.isfinite(mult),
+            msg="injected mult must be finite — a divide-by-zero "
+                "that leaked into the XBE would silently corrupt "
+                "every player-speed calc at runtime.")
 
 
 if __name__ == "__main__":
