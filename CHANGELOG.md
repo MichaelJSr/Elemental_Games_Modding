@@ -2,6 +2,85 @@
 
 ## Unreleased
 
+### Level-XBR parser — correctness fixes, 6× speedup, new features
+
+``scripts/xbr_parser.py`` verified against real Azurik level files
+(``a1.xbr``, ``w1.xbr``, ``town.xbr``) and overhauled for
+correctness + performance + ergonomics.  357 tests passing (+20
+new).
+
+**Fixes:**
+
+- **Default mode now useful on level XBRs.**  Running
+  ``xbr_parser.py a1.xbr`` with no flags used to print
+  ``Not a config.xbr file`` and exit 0.  It now shows a full
+  stats summary (tag distribution by total bytes + top-10
+  largest entries) like ``--stats``.
+- **Config-only flags fail loudly on level files.**
+  ``--sections`` / ``--find`` / ``--dump-json`` / ``--patch`` /
+  ``-s`` / ``-e`` on a level XBR now exits with code 2 and a
+  clear error pointing at ``--toc`` / ``--stats`` /
+  ``--strings``.  Previously they silently did nothing.
+- **``--strings`` noise reduction.**  The old byte-by-byte
+  scanner found any run of 4+ printable bytes — producing heaps
+  of false positives like ``$|._``, ``UUUU``, ``>!F-``.  The
+  new scanner:
+    - Requires a **NUL terminator** after the string (40× fewer
+      false positives on binary-heavy mesh / surf sections).
+    - Filters out candidates with **no alphabetic characters**
+      (cuts remaining punctuation chaff).
+    - Default ``--min-len`` bumped from 4 to **6** to match real
+      Azurik filename / path lengths.
+- **Unknown-tag errors.**  ``--strings no_such_tag`` used to
+  print an empty result + exit 0; now exits non-zero with the
+  list of tags actually present.
+
+**Performance:**
+
+- ``find_strings_in_region`` rewritten from a Python byte loop to
+  a compiled-regex ``re.finditer`` pass.  ~6× speedup on real
+  data (``town.xbr --strings surf``: **1.4s → 0.23s**).  Pattern
+  compilation is cached per min_len across calls.
+
+**New features:**
+
+- **``--stats``**: level-XBR overview mode.  Tag distribution
+  sorted by total bytes, % of file, plus top-10 largest individual
+  entries with their file offsets.  Answers "what's in this
+  level?" at a glance.
+- **``--min-len N``**: configurable string-length threshold.
+- **``--pattern REGEX``**: filter ``--strings`` output by Python
+  regex (e.g. ``'key_|power_|frag_'`` finds real Azurik
+  pickups).
+- **``--unique``**: dedupe ``--strings`` output; first occurrence
+  wins.  Useful for surveying distinct entity names in a level.
+- **``--count-only``**: skip per-string output, print only per-
+  entry counts + grand total.  Fast summary mode.
+- **``--json``**: machine-readable ``--strings`` output with
+  offset + value per hit, ready for downstream tooling.
+
+**Tests** (``tests/test_xbr_parser.py``, 20 new):
+
+- 6 cover ``find_strings_in_region`` semantics (NUL-termination,
+  min-len threshold, alpha filter, alpha-disable, pattern
+  caching).
+- 3 pin per-level tag-distribution invariants (every real level
+  has ``levl``, ``node``, ``ndbg``, ``surf``, ``rdms``, ``tern``,
+  ``wave``, etc.; ``town.xbr`` has 2 node entries as a hub).
+- 3 cover pickup-string recoverability from real level files
+  (``a1.xbr`` → ``key_air*``; ``town.xbr`` → ``levels/...``
+  transitions; ``w1.xbr`` → speech / loc references).
+- 7 CLI integration tests: default mode, config-only flag
+  rejection, ``--pattern``, ``--count-only``, ``--json``,
+  ``--stats`` on town, unknown-tag error surface.
+- 1 perf guard: ``town.xbr`` surf scan must complete in under 2s
+  (currently ~0.25s; catches any regression to byte-by-byte
+  scanning).
+
+All tests skip gracefully when the gamedata fixtures aren't
+present, so the suite still runs on hosts without a full Azurik
+game install.
+
 ### Save-format verified against a real xemu HDD + config-lookup wrappers
 
 Two substantial additions end-to-end: (a) extracted a real Azurik

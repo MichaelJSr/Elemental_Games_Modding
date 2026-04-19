@@ -179,20 +179,32 @@ Binary data begins at file offset `0x084090`. All values are 64-bit doubles.
 ## Usage: xbr_parser.py
 
 ```bash
-# Print all critters_walking values
-python xbr_parser.py --section critters_walking
+# List all config sections with entity/property counts
+python xbr_parser.py config.xbr --sections
 
-# Print just the player settings
-python xbr_parser.py --section settings_foo
+# Print all entities in a section
+python xbr_parser.py config.xbr -s critters_walking
 
-# Show one entity
-python xbr_parser.py --entity air_elemental
+# Show one entity's properties
+python xbr_parser.py config.xbr -s critters_walking -e air_elemental
 
-# Dump everything to JSON
-python xbr_parser.py --dump-json my_export.json
+# Search every section for an entity
+python xbr_parser.py config.xbr --find air_elemental
 
-# Default XBR path is game_files/gamedata/config.xbr
-# Override with --file path/to/config.xbr
+# Dump the whole config to JSON
+python xbr_parser.py config.xbr --dump-json my_export.json
+
+# Patch one value
+python xbr_parser.py config.xbr --patch -s damage -e norm_1 \
+    -p damage -v 30.0 -o patched.xbr
+
+# Level XBR files (a1.xbr, w1.xbr, town.xbr, etc.):
+python xbr_parser.py a1.xbr                         # stats summary (default)
+python xbr_parser.py a1.xbr --stats                  # detailed overview
+python xbr_parser.py a1.xbr --toc                    # raw TOC
+python xbr_parser.py a1.xbr --strings node            # strings in node tag
+python xbr_parser.py a1.xbr --strings node --pattern 'key_|power_'
+python xbr_parser.py a1.xbr --strings node --unique --json
 ```
 
 To **patch a value** use the `XBRParser.write_float()` method:
