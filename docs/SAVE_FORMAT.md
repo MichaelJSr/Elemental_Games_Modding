@@ -438,8 +438,6 @@ valid signature in-place.
 ## 8. Relationship to other docs
 
 - Code: [`azurik_mod/save_format/`](../azurik_mod/save_format/)
-- Legacy scaffold planning: [`docs/SAVE_PARSER_PLAN.md`](SAVE_PARSER_PLAN.md)
-  (partially superseded — this doc is now canonical).
 - Tests: [`tests/test_save_format.py`](../tests/test_save_format.py)
   with small scrubbed real-save fixtures in
   [`tests/fixtures/save/`](../tests/fixtures/save/).
