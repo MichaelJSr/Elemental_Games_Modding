@@ -66,13 +66,28 @@ class VanillaSymbol:
 
     @property
     def mangled(self) -> str:
-        """COFF symbol name emitted by clang for this function."""
+        """COFF symbol name emitted by clang for this function.
+
+        clang-i386-pe-win32 mangling cheat sheet:
+          cdecl     → ``_name``
+          stdcall   → ``_name@N``  (N = stack-arg bytes)
+          fastcall  → ``@name@N``  (N = stack-arg bytes, including
+                     the two register args ECX+EDX = 8 bytes of
+                     "virtual stack" space)
+          thiscall  → ``_name``    (NO @N suffix on this platform!
+                     The ``this`` pointer in ECX doesn't count for
+                     name decoration; stack args are caller-cleaned
+                     just like cdecl.  Confirmed empirically by
+                     compiling a probe; see ``tests/test_vanilla_thunks``).
+        """
         if self.calling_convention == "cdecl":
             return f"_{self.name}"
         if self.calling_convention == "stdcall":
             return f"_{self.name}@{self.arg_bytes}"
         if self.calling_convention == "fastcall":
             return f"@{self.name}@{self.arg_bytes}"
+        if self.calling_convention == "thiscall":
+            return f"_{self.name}"
         raise ValueError(
             f"unsupported calling convention: {self.calling_convention!r}")
 
@@ -180,6 +195,48 @@ register(VanillaSymbol(
         "Return type formally undefined4 in Ghidra, but the only "
         "observed caller treats it as a byte — ``unsigned char`` "
         "is a safe shim-side declaration."
+    ),
+))
+
+register(VanillaSymbol(
+    name="config_name_lookup",
+    va=0x000D1420,
+    calling_convention="thiscall",
+    arg_bytes=4,
+    doc=(
+        "Look up a named entry in a config table.  __thiscall: "
+        "``this`` (the config table object) in ECX, needle "
+        "(const char *) on the stack.  Callee does RET 4.\n\n"
+        "ABI pinned by: ``MOV EAX, [ECX]`` + ``MOV EDX, [ECX+4]`` "
+        "prologue (ECX is ``this``) + stack arg at [ESP+0x14] after "
+        "4 register pushes + return addr = first stack arg + "
+        "closing ``C2 04`` (RET 4).\n\n"
+        "Returns an int (probably row index or entry offset).  "
+        "The table is scanned byte-by-byte for a matching name — "
+        "O(N) in table entries.  Callable directly from shim C "
+        "via ``__attribute__((thiscall))``; no inline-asm wrapper "
+        "needed (unlike ``gravity_integrate_raw``) because this "
+        "is a pure thiscall without RVO / ESI context magic."
+    ),
+))
+
+register(VanillaSymbol(
+    name="config_cell_value",
+    va=0x000D1520,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "Look up a cell value in a 2-D config grid.  __cdecl: "
+        "``(int *grid, int row, int col, double *default_out)`` "
+        "on the stack; returns a ``float10`` (80-bit FPU value in "
+        "ST(0), which clang treats as a ``double`` return in "
+        "ordinary C code).\n\n"
+        "ABI pinned by: all 4 args read from [ESP+N] + bounds-check "
+        "JLs + fallback INT3 panic + closing ``C3`` (cdecl RET).\n\n"
+        "The function does bounds-checking on ``row`` and ``col`` "
+        "against the grid's size fields (read at [ECX+8] and "
+        "[ECX+0]) and panics via a logging call + INT3 if either "
+        "is out of range — shims MUST NOT pass invalid indices."
     ),
 ))
 

@@ -193,11 +193,15 @@ class SaveDirectory:
         title_meta_xbx:  Parsed ``TitleMeta.xbx`` (if present).
         save_image:      Raw bytes of ``SaveImage.xbx`` (if present).
         title_image:     Raw bytes of ``TitleImage.xbx`` (if present).
-        sav_files:       Map of ``<basename>.sav`` → Path for every
-                         ``.sav`` file directly in the directory
-                         (recursive walking is the caller's job).
+        sav_files:       Map of ``<relpath>.sav`` → Path for every
+                         ``.sav`` file in this directory AND its
+                         subdirectories.  Keys are forward-slash
+                         relative paths (e.g. ``levels/water/w1.sav``)
+                         so the caller can tell level saves apart
+                         from root saves at a glance.  Real Azurik
+                         saves nest level saves under ``levels/``.
         extra_files:     Any other files we don't know how to parse,
-                         by basename → Path.
+                         by relative path → Path.
     """
     path: Path
     meta_xbx: SaveMetaXbx | None = None
@@ -209,7 +213,13 @@ class SaveDirectory:
 
     @classmethod
     def from_directory(cls, path: str | Path) -> "SaveDirectory":
-        """Inspect a directory and parse every recognised file in it.
+        """Inspect a directory and parse every recognised file.
+
+        Recurses into subdirectories (Azurik nests level saves under
+        ``levels/<element>/<level>.sav``) so a single
+        ``SaveDirectory`` captures the entire save slot.  Keys in
+        ``sav_files`` / ``extra_files`` are relative paths with
+        forward slashes for stable cross-platform comparisons.
 
         Unknown files are kept in ``extra_files`` so callers can
         hex-dump or copy them without the parser pretending to know.
@@ -220,28 +230,42 @@ class SaveDirectory:
                 f"save directory {root} does not exist or is not a folder")
 
         inst = cls(path=root)
-        for entry in sorted(root.iterdir()):
+        for entry in sorted(root.rglob("*")):
             if not entry.is_file():
                 continue
+            rel = entry.relative_to(root).as_posix()
             name = entry.name
-            data = entry.read_bytes()
             lowered = name.lower()
-            if lowered == "savemeta.xbx":
-                inst.meta_xbx = SaveMetaXbx.from_bytes(data)
-            elif lowered == "titlemeta.xbx":
-                inst.title_meta_xbx = SaveMetaXbx.from_bytes(data)
-            elif lowered == "saveimage.xbx":
-                inst.save_image = data
-            elif lowered == "titleimage.xbx":
-                inst.title_image = data
-            elif lowered.endswith(".sav"):
-                inst.sav_files[name] = entry
+            # The Xbox-standard container files only ever sit at the
+            # ROOT of the save slot — detect by relative-path depth.
+            is_root_file = "/" not in rel
+            if is_root_file and lowered == "savemeta.xbx":
+                inst.meta_xbx = SaveMetaXbx.from_bytes(entry.read_bytes())
+                continue
+            if is_root_file and lowered == "titlemeta.xbx":
+                inst.title_meta_xbx = SaveMetaXbx.from_bytes(entry.read_bytes())
+                continue
+            if is_root_file and lowered == "saveimage.xbx":
+                inst.save_image = entry.read_bytes()
+                continue
+            if is_root_file and lowered == "titleimage.xbx":
+                inst.title_image = entry.read_bytes()
+                continue
+            if lowered.endswith(".sav"):
+                inst.sav_files[rel] = entry
             else:
-                inst.extra_files[name] = entry
+                inst.extra_files[rel] = entry
         return inst
 
     def summary(self) -> dict[str, object]:
         """Small dict with an overview — convenient for JSON / CLI."""
+        # Partition .sav files into root-level and level-nested for
+        # easier scanning at a glance.
+        root_savs = sorted(n for n in self.sav_files if "/" not in n)
+        level_savs = sorted(n for n in self.sav_files if n.startswith("levels/"))
+        other_nested = sorted(
+            n for n in self.sav_files
+            if "/" in n and not n.startswith("levels/"))
         return {
             "path": str(self.path),
             "save_name": self.meta_xbx.save_name if self.meta_xbx else None,
@@ -253,6 +277,9 @@ class SaveDirectory:
                 len(self.save_image) if self.save_image else 0),
             "title_image_bytes": (
                 len(self.title_image) if self.title_image else 0),
-            "sav_files": sorted(self.sav_files),
+            "sav_files": sorted(self.sav_files),  # full flat list
+            "root_sav_files": root_savs,
+            "level_sav_files": level_savs,
+            "other_nested_sav_files": other_nested,
             "extra_files": sorted(self.extra_files),
         }

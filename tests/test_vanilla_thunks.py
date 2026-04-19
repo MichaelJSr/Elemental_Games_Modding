@@ -60,6 +60,7 @@ _HEADER = _REPO_ROOT / "shims/include/azurik_vanilla.h"
 # declaration for a vanilla symbol.
 _COMPANION_HEADERS = [
     _REPO_ROOT / "shims/include/azurik_gravity.h",
+    _REPO_ROOT / "shims/include/azurik_config.h",
 ]
 
 

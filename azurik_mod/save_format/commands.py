@@ -11,7 +11,7 @@ import json
 import sys
 from pathlib import Path
 
-from .azurik import AzurikSaveFile
+from .azurik import AzurikSave
 from .container import SaveDirectory
 
 
@@ -36,18 +36,19 @@ def cmd_save_inspect(args) -> None:
     slot = SaveDirectory.from_directory(path)
     summary = slot.summary()
 
-    # Attach decoded per-file summaries for any .sav files.
+    # Attach decoded per-file summaries for every .sav file (root +
+    # nested under levels/).  Individual failures get surfaced per-
+    # entry so one malformed file doesn't abort the whole scan.
     sav_summaries: list[dict] = []
     for name, sav_path in sorted(slot.sav_files.items()):
         try:
-            sav = AzurikSaveFile.from_path(sav_path)
+            sav = AzurikSave.from_path(sav_path)
         except ValueError as e:
-            sav_summaries.append({
-                "file": name,
-                "error": str(e),
-            })
+            sav_summaries.append({"file": name, "error": str(e)})
             continue
-        sav_summaries.append(sav.summary())
+        entry = sav.summary()
+        entry["relpath"] = name
+        sav_summaries.append(entry)
     summary["sav_details"] = sav_summaries
 
     if args.json:
@@ -59,23 +60,27 @@ def cmd_save_inspect(args) -> None:
 
 def _inspect_single_sav(path: Path, *, as_json: bool) -> None:
     """Summarise a single ``.sav`` file (no surrounding container)."""
-    sav = AzurikSaveFile.from_path(path)
+    sav = AzurikSave.from_path(path)
     summary = sav.summary()
     if as_json:
         print(json.dumps(summary, indent=2, default=str))
         return
 
-    print(f"file:     {summary['path']}")
-    print(f"size:     {summary['size_bytes']} bytes")
-    print(f"header:")
-    for k, v in summary["header"].items():
-        print(f"  {k:18s} {v}")
-    print(f"payload:  {summary['payload_actual_bytes']} bytes")
-    status = (
-        "OK" if summary["payload_declared_matches_actual"]
-        else "MISMATCH (header.payload_len != actual)"
-    )
-    print(f"  payload_len check: {status}")
+    print(f"file:    {summary['path']}")
+    print(f"kind:    {summary['kind']}")
+    print(f"size:    {summary['size_bytes']} bytes")
+    if summary["kind"] == "text":
+        print(f"version: {summary.get('version')}")
+        print(f"lines:   {summary.get('lines')}")
+        print(f"binary_tail: {summary.get('binary_tail_bytes')} B")
+        for line in summary.get("preview", []):
+            print(f"  | {line}")
+    elif summary["kind"] == "binary":
+        print(f"version:      {summary.get('version')}")
+        print(f"record_count: {summary.get('record_count')}")
+        print(f"body:         {summary.get('body_bytes')} bytes")
+    elif summary["kind"] == "signature":
+        print(f"sha1_hex: {summary.get('sha1_hex')}")
 
 
 def _print_human_summary(summary: dict) -> None:
@@ -85,22 +90,51 @@ def _print_human_summary(summary: dict) -> None:
     print(f"  no-copy flag:     {summary['no_copy']}")
     print(f"  save image:       {summary['save_image_bytes']} bytes")
     print(f"  title image:      {summary['title_image_bytes']} bytes")
-    if summary["extra_files"]:
+    if summary.get("extra_files"):
         print(f"  extra files:      {summary['extra_files']}")
     print()
+
     details = summary.get("sav_details", [])
     if not details:
         print("  no .sav files found")
         return
-    print(f"  {len(details)} .sav file(s):")
-    for d in details:
+
+    # Split root vs level-nested for readability.
+    root = [d for d in details if "/" not in d.get("relpath", "")]
+    level = [d for d in details if d.get("relpath", "").startswith("levels/")]
+    other = [d for d in details
+             if "/" in d.get("relpath", "")
+             and not d.get("relpath", "").startswith("levels/")]
+
+    def _fmt_entry(d: dict) -> str:
         if "error" in d:
-            print(f"    {d['file']}: ERROR — {d['error']}")
-            continue
-        path = Path(d["path"])
-        h = d["header"]
-        print(f"    {path.name:24s}  "
-              f"magic={h['magic']} ({h['magic_ascii']!r})  "
-              f"ver={h['version']}  "
-              f"payload={d['payload_actual_bytes']}B  "
-              f"match={d['payload_declared_matches_actual']}")
+            return f"    {d['relpath']}: ERROR — {d['error']}"
+        kind = d.get("kind", "?")
+        size = d.get("size_bytes", "?")
+        extra = ""
+        if kind == "text":
+            extra = (f"  v{d.get('version')}  "
+                     f"{d.get('lines')} lines + "
+                     f"{d.get('binary_tail_bytes')} B tail")
+        elif kind == "binary":
+            extra = (f"  v{d.get('version')}  "
+                     f"{d.get('record_count')} records, "
+                     f"{d.get('body_bytes')} B body")
+        elif kind == "signature":
+            extra = f"  sha1={d.get('sha1_hex', '')[:16]}..."
+        return (f"    {Path(d.get('relpath','?')).name:24s} "
+                f"[{kind:9s}]  {size:>6} B{extra}")
+
+    print(f"  {len(details)} .sav file(s) — "
+          f"{len(root)} root / {len(level)} under levels/"
+          + (f" / {len(other)} other" if other else "") + ":")
+    for d in root:
+        print(_fmt_entry(d))
+    if level:
+        print(f"\n  Level saves:")
+        for d in level:
+            print(_fmt_entry(d))
+    if other:
+        print(f"\n  Other nested:")
+        for d in other:
+            print(_fmt_entry(d))

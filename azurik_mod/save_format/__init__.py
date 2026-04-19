@@ -98,17 +98,25 @@ from .container import (
     SaveMetaField,
 )
 from .azurik import (
-    AzurikSaveFile,
-    SaveHeader,
-    SignatureSav,
-    LevelSav,
+    AzurikSave,
+    AzurikSaveFile,    # legacy alias
+    BinarySave,
+    LevelSav,          # legacy alias
+    SaveHeader,        # legacy scaffold
+    SignatureSav,      # legacy alias
+    SignatureSave,
+    TextSave,
 )
 
 __all__ = [
     "SaveDirectory",
     "SaveMetaXbx",
     "SaveMetaField",
+    "AzurikSave",
     "AzurikSaveFile",
+    "BinarySave",
+    "TextSave",
+    "SignatureSave",
     "SaveHeader",
     "SignatureSav",
     "LevelSav",

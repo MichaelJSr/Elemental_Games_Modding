@@ -1,11 +1,11 @@
 # Azurik save-file format
 
-> **Status**: partial.  The Xbox-level container (SaveMeta.xbx /
-> SaveImage.xbx / TitleMeta.xbx / TitleImage.xbx) is fully decoded
-> and round-trips losslessly.  Azurik's own `.sav` files parse their
-> 20-byte fixed header but the body payload is currently exposed as
-> opaque bytes — field-level decoding of `signature.sav` and
-> `<level>.sav` is pending acquisition of real save samples.
+> **Status**: verified against a real save extracted from an
+> `xbox_hdd.qcow2` xemu HDD image.  Directory layout, Xbox container
+> files, and `.sav` file variants all decoded; per-file payload
+> field structure is partially decoded (TextSave lines, BinarySave
+> record counts) — full record-by-record decoders for `inv.sav`,
+> `shared.sav`, and level saves remain future work.
 >
 > **Python module**: [`azurik_mod.save_format`](../azurik_mod/save_format/)
 > **CLI**: `azurik-mod save inspect <path>`
@@ -14,59 +14,93 @@
 
 ## 1. Directory layout
 
-A single save slot lives in its own folder on the Xbox HDD:
+A single save slot lives in its own folder on the Xbox HDD.
+Example (extracted from a real xemu save):
 
 ```
-\Device\Harddisk0\partition1\UDATA\<title_id_hex>\<MU>\<save_id>\
-    SaveMeta.xbx         (Xbox-standard save metadata)
-    SaveImage.xbx        (per-save thumbnail)
-    TitleMeta.xbx        (title-level metadata, shared across saves)
-    TitleImage.xbx       (title icon)
-    signature.sav        (Azurik's profile-level state)
-    <level>.sav          (per-level world state, e.g. w4.sav)
-    (other level .sav files as the player visits them)
+UDATA\4d530007\<save_id>\
+    SaveMeta.xbx            76 B    Xbox-standard save metadata
+    TitleMeta.xbx           38 B    Title-level metadata
+    SaveImage.xbx         4096 B    64×64 ARGB thumbnail
+    TitleImage.xbx       10240 B    Title icon
+    signature.sav           20 B    SHA-1 digest (integrity check)
+
+    inv.sav              16384 B    Binary: inventory (v7 records)
+    loc.sav              16384 B    Text:   current location
+    magic.sav            16384 B    Text:   spell / power stats
+    shared.sav           16384 B    Binary: cross-level flags (24 records)
+
+    largeimage.xbx       34816 B    Bigger thumbnail (extra file)
+
+    levels/
+      air/
+        a1.sav           16384 B    One per visited air level
+        a3.sav  ...
+      death/
+        d1.sav  ...
+      earth/
+        e2.sav  ...
+      fire/
+        f1.sav  ...
+      water/
+        w1.sav           9316 B     Visited — non-zero
+        w2.sav ...
+      life.sav           16384 B
+      selector.sav       16384 B
+      town.sav           16384 B
+      training_room.sav    992 B
+
+TDATA\4d530007\
+    options.sav             23 B    Title-level settings (text)
 ```
 
-`<title_id_hex>` is Azurik's title ID as a lowercase hex string
-(8 chars).  `<MU>` is the memory-unit letter on retail Xbox
-(always `MU_MAIN` for HDD saves).  `<save_id>` is typically a UUID
-or slot index chosen by Azurik.
+`4d530007` is Azurik's title ID (hex).  The inner UUID-like folder
+(`5C0A938BD9AC` in the real save we inspected) is a random save-slot
+ID generated per-save.
 
-Retail path evidence from the XBE:
-- `\Device\Harddisk0\partition1\UDATA` (string at VA 0x18F959)
-- `\Device\Harddisk0\partition1\TDATA` (VA 0x18F985)
-- `z:\savegame` (VA 0x19E5F2 — the mapped save path at runtime)
-- `C:\Elemental\src\game\save.cpp` (VA 0x19E5C8 — source path leak
-  from a debug assert, confirms the save module's origin)
+### Retail Xbox vs xemu HDD addressing
 
-## 2. Extracting save data for analysis
+The runtime path is `\Device\Harddisk0\partition1\UDATA\<title>\...`
+which maps to the Xbox E:\ drive.  On xemu's `xbox_hdd.qcow2` this
+partition starts at a fixed byte offset inside the qcow2 image.
+Empirically (from one xemu-created 8 GB HDD image):
 
-xemu stores HDD state in `xbox_hdd.qcow2` under the user's Xemu home
-directory.  To inspect a save slot with the tools in this repo:
+| Partition offset | Size | Content |
+|------------------|------|---------|
+| `0x00080000` | 750 MB | CACHE0 (X:\) |
+| `0x2EE80000` | 750 MB | CACHE1 (Y:\) |
+| `0x5DC80000` | 750 MB | CACHE2 (Z:\) — game data cache |
+| `0x8CA80000` | 500 MB | SYSTEM / dashboard |
+| `0xABE80000` | 5.4 GB | **E:\ — retail save area** |
 
-### Option A — xemu's built-in export (easiest)
+Inside the E:\ FATX partition:
+- FAT starts at offset `0x1000` within the partition.
+- Data area starts at the first cluster boundary after the FAT.
+  On the xemu image we inspected this lands at partition offset
+  `0x133000`, where the ROOT directory lives (cluster 1).
+- Cluster size is 16 KB (32 × 512-byte sectors).
+- FAT entries are 32-bit.
 
-1. Run the game in xemu until it writes a save to the dashboard.
-2. In xemu's menu: **Machine → Settings → System → HDD → Browse**.
-3. Navigate to `UDATA\<azurik_title_id>\` and right-click the save
-   folder → **Export**.
-4. Pick a loose destination folder on your host; xemu drops the
-   SaveMeta.xbx / SaveImage.xbx / signature.sav / `<level>.sav`
-   files into it.
-5. Run `azurik-mod save inspect <exported_folder>` for a summary.
+## 2. Extracting save data
 
-### Option B — qcow2 + FATX (manual)
+xemu's built-in HDD export is the path of least resistance:
 
-1. Convert the disk image: `qemu-img convert -O raw xbox_hdd.qcow2 xbox_hdd.raw`.
-2. Mount partition 1 using a FATX toolchain (Cxbx-Reloaded's
-   `xfattools`, the `fatxfs` FUSE module, or similar).
-3. Copy `UDATA\<title_id>\...` out to a loose directory.
-4. Proceed as in Option A from step 5.
+1. Run the game in xemu until it writes a save.
+2. **Machine → Settings → System → HDD → Browse**.
+3. Navigate to `UDATA\<azurik_title_id>\` and right-click → **Export**.
+4. xemu drops the container files into a loose folder.
+5. `azurik-mod save inspect <exported_folder>` for a summary.
+
+For the adventurous, the repo ships a minimal pure-Python
+`qcow2_reader.py` + `fatx_reader.py` pair (not installed; see
+`/tmp/azurik_hdd_probe/` when reproducing the decode work) that
+can walk a qcow2 directly — no qemu-img or FATX tools needed.
+Not wired into the main CLI today; ask before depending on them.
 
 ## 3. Xbox-standard container files
 
-These are fully decoded.  The file layouts below are the same
-across every Xbox title — Azurik doesn't customise them.
+Fully decoded.  The file layouts below are the same across every
+Xbox title — Azurik doesn't customise them.
 
 ### 3a. SaveMeta.xbx / TitleMeta.xbx
 
@@ -81,188 +115,183 @@ NoCopy=1\r\n
 <optional binary tail>
 ```
 
-Field semantics:
-- **`Name`** — display name shown in the Xbox dashboard and in-
-  game save slots.  User-editable.
-- **`TitleName`** — stable across all saves for the title.
-- **`NoCopy=1`** — save is marked non-copyable (dashboards refuse
-  to duplicate it).  Omit the field to allow copying.
-
-Python API:
-
-```python
-from azurik_mod.save_format import SaveMetaXbx
-
-meta = SaveMetaXbx.from_bytes(Path("SaveMeta.xbx").read_bytes())
-print(meta.save_name)      # "My Hero's Journey"
-print(meta.title_name)     # "Azurik: Rise of Perathia"
-print(meta.no_copy)        # True
-
-meta.set("Name", "New Display Name")
-Path("SaveMeta.xbx").write_bytes(meta.to_bytes())
-```
-
-Round-trip is byte-identical when no fields are mutated — this is
-important because some Xbox-level validators fail on even a
-trailing-whitespace change.
+Python API (`SaveMetaXbx`): `from_bytes()`, `get()`, `set()`,
+`save_name`, `title_name`, `no_copy`, `to_bytes()`.  Round-trip is
+byte-identical when no fields are mutated.
 
 ### 3b. SaveImage.xbx / TitleImage.xbx
 
-Raw Xbox-swizzled ARGB raster data.  The save-format module
-exposes these as opaque bytes; decoding the image format is out of
-scope for this revision (standard Xbox texture swizzling — decoders
-exist in Cxbx-Reloaded, XGCore, and others if needed).
+Raw Xbox-swizzled ARGB raster data.  Exposed as opaque bytes;
+decoding Xbox texture swizzle is out of scope (standard routines
+exist in Cxbx-Reloaded, XGCore, etc.).
 
-## 4. Azurik `.sav` files
+## 4. Azurik `.sav` file variants
 
-Azurik writes its own state to two flavours of `.sav` file:
+Unlike the initial scaffold assumed, there is **no single 20-byte
+header** across all `.sav` files.  The format splits into four
+shapes, classified by `AzurikSave.kind`:
 
-| File | Purpose | Written when |
-|------|---------|-------------|
-| `signature.sav` | Profile-level state (inventory, stats, flags) | Save-game trigger; not level-specific |
-| `<level>.sav` | Per-level world state (entity positions, pickups, quest flags) | When leaving a level / saving mid-level |
+### 4a. Text saves (`loc.sav`, `magic.sav`, `options.sav`)
 
-Level names come from the game's ``levels\<element>\<N>.sav``
-directory hierarchy — e.g. `w4.sav` is the fourth water level,
-`earth2.sav` is the second earth level, etc.
+ASCII, line-delimited.  Header is literally the string
+`fileversion=<N>\n`, followed by value lines (`key=value` OR bare
+numeric/path tokens), optionally followed by a binary tail starting
+at the first `\x00` byte.
 
-### 4a. File I/O pattern (from Ghidra)
+Real example (first 80 bytes of `loc.sav`):
 
-Azurik's save code uses stdio (not raw `NtCreateFile`):
-
-```c
-// FUN_0005b250 — open_save_file(path, write)
-fp = fopen(path, write_flag ? "r+b" : "rb");
-
-// First operation on a freshly-opened save: read the 20-byte header
-fread(buffer, 0x14, 1, fp);   // call site at VA 0x5C95C
+```
+fileversion=1\nlevels/death/d2\n\x00\x6b\xe1\x1e\xbf\xc9\x5e\x73...
 ```
 
-Multiple callers then branch based on the header contents before
-consuming the rest of the file.
+Real `magic.sav`:
 
-### 4b. Fixed 20-byte header
+```
+fileversion=1\n1.000000\n1.000000\n1.000000\n0\n13\n1.000000\n...
+```
 
-Confirmed-size prologue on every `.sav` file.  Field layout is
-TENTATIVE (pinned from read pattern, not full field-level decode):
+Python API (`TextSave`): `version`, `lines`, `binary_tail`, `raw`,
+`to_bytes()`.  Editing `lines` then calling `to_bytes()`
+re-emits the file with the preserved binary tail intact — so a
+user can open `magic.sav` in a text editor and change `1.000000` →
+`99.000000` to buff a stat, then save (and re-sign: see § 4c).
 
-| Offset | Size | Name | Description (tentative) |
-|--------|------|------|-------------------------|
-| 0x00 | 4 | `magic` | 32-bit signature (likely ASCII like `"ASAV"`) |
-| 0x04 | 4 | `version` | Format revision (Azurik retail appears to be v1) |
-| 0x08 | 4 | `payload_len` | Bytes in the body following the header |
-| 0x0C | 4 | `checksum` | XOR or CRC32 over the payload |
-| 0x10 | 4 | `reserved` | Zero in every vanilla save observed so far |
+### 4b. Binary-record saves (`inv.sav`, `shared.sav`, level saves)
 
-Python API:
+8-byte header:
+
+| Offset | Size | Field |
+|--------|------|-------|
+| 0x00 | u32 | `version` |
+| 0x04 | u32 | `record_count` |
+
+Followed by `record_count` records of format TBD (varies per
+file).  We verify across real samples:
+
+| File | Version | Record count | Body size |
+|------|---------|---------------|-----------|
+| `inv.sav`         | 7 | 1057679148 (!) | 16376 B |
+| `shared.sav`      | 1 | 24 | 16376 B |
+| `d2.sav` (visited) | 2 | 201 | 12248 B |
+| `w1.sav` (visited) | 2 | 153 | 9308 B |
+| `a1.sav` (not visited) | 0 | 0 | 16376 B all zero |
+| `e5.sav` (not visited, large) | 0 | 0 | 32760 B all zero |
+
+The huge record_count for `inv.sav` suggests that file uses a
+different header shape — either a single u32 version followed by
+count-less packed records, or the u32 at +4 is actually a SEED /
+flags word.  Full decoding is future work.
+
+Python API (`BinarySave`): `version`, `record_count`, `body`,
+`raw`, `to_bytes()`.  Per-file record decoders (e.g. an
+`Inventory` class that walks `inv.sav`'s records and exposes
+items slots) are future work.
+
+### 4c. `signature.sav` — SHA-1 integrity digest
+
+Exactly 20 bytes — a SHA-1 digest that Azurik uses to validate
+every OTHER `.sav` file in the save slot.
+
+**Consequence for save editing**: modifying any of the other
+`.sav` files without recomputing `signature.sav` will make
+Azurik reject the save on load.  We haven't yet reverse-engineered
+the hash domain (what exact files are fed to SHA-1, in what order,
+with what salt) — that's tracked as the main TODO for save editing.
+
+Python API (`SignatureSave`): `digest`, `hex()`, `to_bytes()`.
+
+### 4d. Level saves (`levels/<element>/<level>.sav`)
+
+Same shape as (4b) binary saves.  Empirical taxonomy:
+
+- `version=0` + `record_count=0` + all-zero body → level never
+  visited.  About 20 of 29 sampled.
+- `version=2` + nonzero record_count + structured body → visited.
+
+Naming convention matches the engine's `levels/<element>/<N>`
+path format seen in Ghidra string constants.
+
+## 5. Python API
 
 ```python
-from azurik_mod.save_format import AzurikSaveFile
+from azurik_mod.save_format import AzurikSave, SaveDirectory
 
-sav = AzurikSaveFile.from_path("signature.sav")
-print(sav.header.magic_as_ascii())     # e.g. "VASA"
-print(sav.header.version)              # 1
-print(sav.header.payload_len, len(sav.payload))
-print(sav.summary()["payload_declared_matches_actual"])
+# Classify any .sav file automatically.
+sav = AzurikSave.from_path("signature.sav")
+assert sav.kind == "signature"
+print(sav.signature.hex())
+
+# Text saves — edit + round-trip.
+magic = AzurikSave.from_path("magic.sav")
+assert magic.kind == "text"
+magic.text.lines[0] = "99.000000"         # tweak first stat
+Path("magic_modded.sav").write_bytes(magic.to_bytes())
+
+# Walk a whole save slot (recurses into levels/).
+slot = SaveDirectory.from_directory("exported_save/")
+print(slot.summary()["level_sav_files"])  # list of levels/*.sav
 ```
 
-### 4c. Payload body — partial
-
-The body past the 20-byte header is currently exposed as raw
-bytes.  Future work: decode it into structured fields as concrete
-save samples become available.
-
-Until then, `AzurikSaveFile.iter_chunks()` yields a single opaque
-`SaveChunk(name="payload", ...)` — subclasses (`SignatureSav` /
-`LevelSav`) override this method to emit typed sub-chunks as
-decoders get written.
-
-Planned decoder targets (in rough priority order):
-1. Player inventory (weapons, gems, keys) — high value for save
-   editing.
-2. Element fragment / power-up collection state — used by the
-   existing randomiser.
-3. Current position + facing direction — useful for warp mods.
-4. Quest / trigger flags — needed for "skip to boss" mods.
-
-Contributors: when you decode a field, add a `SaveChunk` emission
-in the matching subclass of `AzurikSaveFile` and a round-trip
-test in `tests/test_save_format.py` that pins the byte offsets.
-
-## 5. CLI
+## 6. CLI
 
 ```
 $ azurik-mod save inspect ~/exports/my_save_slot/
 save directory: ~/exports/my_save_slot/
-  display name:     'My Hero's Journey'
+  display name:     'Hero'
   title name:       'Azurik: Rise of Perathia'
-  no-copy flag:     True
+  no-copy flag:     False
   save image:       4096 bytes
-  title image:      4096 bytes
 
-  2 .sav file(s):
-    signature.sav             magic=0x41534156 ('VASA')  ver=1  payload=8192B  match=True
-    w4.sav                    magic=0x41534156 ('VASA')  ver=1  payload=4096B  match=True
+  29 .sav file(s) — 5 root / 24 under levels/:
+    inv.sav        [binary]  16384 B  v7 ...
+    loc.sav        [text]    16384 B  v1  2 lines + 16346 B tail
+    magic.sav      [text]    16384 B  v1  5 lines + 16338 B tail
+    signature.sav  [signature] 20 B   sha1=aff04da2...
+
+  Level saves:
+    w1.sav         [binary]  9316 B   v2  153 records, 9308 B body
+    d2.sav         [binary]  12256 B  v2  201 records, 12248 B body
+    ...
 ```
 
-JSON output for downstream tooling:
+Single-file mode (pipe-friendly JSON):
 
 ```
-$ azurik-mod save inspect ~/exports/my_save_slot/ --json
+$ azurik-mod save inspect loc.sav --json
 {
-  "path": "...",
-  "save_name": "My Hero's Journey",
-  "title_name": "Azurik: Rise of Perathia",
-  "no_copy": true,
-  "sav_details": [ ... ]
+  "kind": "text",
+  "version": 1,
+  "lines": 2,
+  "preview": ["levels/death/d2"],
+  "binary_tail_bytes": 16346
 }
 ```
 
-Single-file inspection:
-
-```
-$ azurik-mod save inspect signature.sav
-file:     signature.sav
-size:     4116 bytes
-header:
-  magic              0x41534156
-  magic_ascii        VASA
-  version            1
-  payload_len        4096
-  checksum           0xDEADBEEF
-  reserved           0
-payload:  4096 bytes
-  payload_len check: OK
-```
-
-## 6. Integration with the rest of the mod toolchain
-
-- The save-format module is **read-write**: you can load a
-  `SaveDirectory`, mutate `meta_xbx` fields or replace `.sav`
-  payloads, and write back.  No in-game validation happens from
-  the Python side — if you write a malformed payload, Azurik will
-  reject the save on load.
-- There is **no GUI integration yet**.  Save browsing / editing
-  through the main Azurik Mod Tools window is deferred until the
-  payload decoder covers enough fields to make the editor useful.
-- Save editing does **not** require patching the XBE — saves live
-  on the Xbox HDD image, entirely separate from game code.
-
 ## 7. Limitations + future work
 
-- **No real save samples in the repo.**  All test fixtures are
-  synthesised.  Anyone who extracts a real vanilla save is
-  strongly encouraged to drop it in `tests/fixtures/save/` (with
-  privacy scrubbed) so future decoder work can pin byte layouts
-  against real data.
-- **Xbox-swizzled image decoding is stubbed.**  `SaveImage.xbx`
-  bytes are passed through unchanged.  A decoder would be
-  straightforward (standard Xbox texture unswizzle) but isn't
-  worth building until a concrete feature needs it.
-- **qcow2 ⇄ loose-directory round-trip is manual.**  Users export
-  saves from xemu, edit loose files, then need to re-import them.
-  An automated round-trip would require embedding a FATX driver.
-- **Checksum validation is lazy.**  We don't verify the 4-byte
-  checksum field — just expose it.  Once we identify the exact
-  algorithm (CRC32 variant? custom XOR chain?) we can validate
-  on load and recompute on write.
+- **Hash domain is not yet decoded.**  Rewriting `.sav` files
+  requires recomputing `signature.sav`, but we don't know the
+  exact input fed to SHA-1.  Investigation path: find the
+  signature-verification site in Ghidra (should be called from
+  the save-load path alongside the `fopen("signature.sav")`),
+  trace what files it hashes in what order.
+- **`inv.sav` full record layout.**  The implausibly-large
+  `record_count` field suggests the second u32 isn't a count.
+  Candidates: item-bitmask, seed, or flags.  Dump a save with
+  known inventory contents + diff against vanilla to reverse.
+- **Level-save record structure.**  A visited w1.sav has 153
+  records at 61 B each.  Candidates per record: entity state
+  + spawn position + pickup-collected bitmask.  Again: diff a
+  "first visit" vs "full completion" save.
+- **`SaveImage.xbx` decoder.**  Opaque bytes today; Xbox ARGB
+  swizzle decode would let users preview thumbnails in a future
+  GUI save-editor tab.
+
+## 8. Relationship to other docs
+
+- Code: [`azurik_mod/save_format/`](../azurik_mod/save_format/)
+- Legacy scaffold planning: [`docs/SAVE_PARSER_PLAN.md`](SAVE_PARSER_PLAN.md)
+  (partially superseded — this doc is now canonical).
+- Tests: [`tests/test_save_format.py`](../tests/test_save_format.py)
+  with small scrubbed real-save fixtures in
+  [`tests/fixtures/save/`](../tests/fixtures/save/).

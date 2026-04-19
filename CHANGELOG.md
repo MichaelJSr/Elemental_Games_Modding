@@ -2,6 +2,96 @@
 
 ## Unreleased
 
+### Save-format verified against a real xemu HDD + config-lookup wrappers
+
+Two substantial additions end-to-end: (a) extracted a real Azurik
+save from the user's ``xbox_hdd.qcow2`` to validate + correct the
+save-format module; (b) implemented the long-deferred
+``FUN_000d1420`` / ``FUN_000d1520`` config-lookup wrappers.  337
+tests passing (+18 new).
+
+#### Save format — validated + rewritten against real data
+
+Wrote a pure-Python QCOW2 sparse-sector reader + FATX reader (no
+qemu / FATX tools needed) and walked xemu's 8 GB HDD image to
+extract the full Azurik save container.  Findings contradicted
+the initial scaffold's single-20-byte-header assumption — the
+scaffold's ``payload_declared_matches_actual`` was **always False**
+on real data.
+
+Real format (documented in ``docs/SAVE_FORMAT.md``):
+
+- **No unified header.**  Four distinct ``.sav`` variants, now
+  recognised via an ``AzurikSave.kind`` sum type:
+  - **Text saves** (``loc.sav``, ``magic.sav``, ``options.sav``):
+    ``fileversion=1\n<line>\n<line>\n…`` in ASCII + optional
+    binary tail.  Trivially moddable; ``TextSave`` class exposes
+    ``lines`` as a list of str and round-trips with the tail
+    preserved.
+  - **Binary-record saves** (``inv.sav``, ``shared.sav``, level
+    saves): 8-byte ``{version, record_count}`` header + opaque
+    body.  Per-record decoders are still future work.
+  - **Signature** (``signature.sav``): exactly 20 bytes — SHA-1
+    digest Azurik uses to validate every other save file.  Hash
+    domain (what files are fed to SHA-1 in what order) is the
+    remaining unknown blocking write-mods.
+  - **Unknown** (short blobs / anything else).
+- ``SaveDirectory.from_directory`` now **recurses** into
+  subdirectories.  Real saves nest per-level state under
+  ``levels/<element>/<level>.sav``; previously the walker only
+  saw the root-level files and reported 5 saves when there were
+  29.  Summary dict partitions results into ``root_sav_files``
+  / ``level_sav_files`` for easier scanning.
+- CLI ``save inspect`` output updated: groups root vs level saves,
+  shows ``[kind]`` tag, ``version``, ``record_count`` or line
+  count + binary-tail bytes.
+
+Small scrubbed real-save fixtures added at
+``tests/fixtures/save/``: ``signature.sav`` (20-byte digest, no
+PII), ``SaveMeta.xbx`` (38 B UTF-16 metadata, no save names),
+truncated 256-byte ``magic_sample.sav`` / ``inv_sample.sav``
+for text + binary variants.  Tests use them opportunistically
+(skipped when absent so the suite still runs on hosts without
+the fixtures).
+
+Legacy aliases preserved (``AzurikSaveFile``, ``SignatureSav``,
+``LevelSav``, ``SaveHeader``) so pre-rewrite importers don't
+break; they're thin shells over ``AzurikSave``.
+
+#### FUN_000d1420 + FUN_000d1520 config-lookup wrappers
+
+The last two "deferred" vanilla functions from ``docs/SHIMS.md``
+§ near-term — both now exposed.  Ghidra investigation revealed
+they use **classic calling conventions** that clang supports
+natively, so no inline-asm wrapper was needed (unlike the
+gravity wrapper's MSVC-RVO contortions):
+
+- **``config_name_lookup``** (``FUN_000d1420``, ``__thiscall``):
+  ECX = config table object; stack arg = const char *name;
+  callee does ``RET 4``.  Scans the table byte-by-byte for a
+  matching name entry, returns an int index/offset.
+- **``config_cell_value``** (``FUN_000d1520``, ``__cdecl``):
+  all 4 args on stack — ``(int *grid, int row, int col,
+  double *default_out)``; returns 80-bit FPU ``float10`` in
+  ST(0) which clang handles as a normal ``double`` return.
+  Panics (INT3) on out-of-range indices.
+
+Registered in ``vanilla_symbols.py``; new
+``VanillaSymbol.calling_convention == "thiscall"`` branch maps
+thiscall to ``_name`` (no ``@N`` suffix — empirically confirmed
+by a probe compile — matches clang-i386-pe-win32 mangling).
+
+New header ``shims/include/azurik_config.h`` declares both
+functions with the right calling-convention attributes.  Shim
+authors call them like any other C function.
+
+Tests (``tests/test_config_wrappers.py``, 7 new):
+- Registry entries (VAs, calling conv, mangled names).
+- Header declarations present + attributes correct.
+- Probe shim compiles with exactly the two expected externs.
+- Thiscall-mangling contract test — no ``@N`` suffix, so a
+  future clang upgrade that changes this surfaces here.
+
 ### Deep second-pass audit — correctness + optimisation + UX
 
 A wide correctness + optimisation + UX pass, followed by full
@@ -73,7 +163,7 @@ message instead of a flash-and-close console window.
 
 Second audit found a web of stale references; this pass fixes:
 
-- **``azurik-cli`` → ``azurik-mod``** across 6 files (docs +
+- **Obsolete ``azurik``-``cli`` name → ``azurik-mod``** across 6 files (docs +
   test strings + CLI error messages).  The installed console
   script is ``azurik-mod`` per ``pyproject.toml``; every doc
   example now matches.
@@ -119,7 +209,7 @@ Second audit found a web of stale references; this pass fixes:
 - 1 test exercises the ``mod-template`` CLI end-to-end
   against a real config.xbr.
 - 1 test enforces the ``examples/`` folder stays deleted.
-- 1 test greps every doc + every .py file for ``azurik-cli``
+- 1 test greps every doc + every .py file for the obsolete ``azurik``-``cli``
   references + fails if any appear.
 - 2 tests pin the dep-check ``import gui`` guard + ``pip
   install -e .`` hint in both launchers.
