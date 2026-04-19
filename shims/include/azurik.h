@@ -448,6 +448,148 @@ typedef enum BootState {
 
 
 /* ==========================================================================
+ * Entity — global named-object registry entry
+ * ==========================================================================
+ * Everything the game identifies by name (critters, pickups, shader
+ * files, etc.) lives in ``ENTITY_REGISTRY`` — an array of
+ * ``Entity *`` between ``AZURIK_ENTITY_REGISTRY_BEGIN_VA`` and
+ * ``_END_VA``.  Looked up by the vanilla ``entity_lookup`` function.
+ *
+ * **Partial layout** — only the ``name`` pointer at offset 0 is
+ * currently pinned.  Entity instances are extended by multiple
+ * systems (animation, AI, collision) so the tail size isn't fixed.
+ * Shim authors needing specific fields should declare a
+ * locally-scoped ``extern``, verify via Ghidra, then consider
+ * contributing a fix back here.
+ */
+typedef struct Entity {
+    const char *name;          /* +0x00 — NUL-terminated asset key     */
+    /* +0x04 .. end: opaque.  Cast to a more-specific struct
+       once Ghidra identifies the subtype. */
+} Entity;
+
+
+/* ==========================================================================
+ * ConfigTable — keyed-table config section handle (config.xbr)
+ * ==========================================================================
+ * Runtime handle to one of the 15 keyed-table sections in
+ * ``config.xbr`` (critters_critter_data, critters_damage, magic,
+ * etc.).  Consumed by the vanilla helpers:
+ *
+ *   ``config_name_lookup(this, name)``  → column index (row_idx)
+ *   ``config_cell_value(this, row, col, default_out)`` → float10
+ *
+ * **Header layout** (verified from ``FUN_000D1520`` / ``FUN_000D1420``
+ * decomp — note the field names here follow the decompiler's
+ * orientation; the legacy ``scripts/xbr_parser.py`` uses the opposite
+ * row/col naming, kept for backward compat):
+ */
+typedef struct ConfigTable {
+    i32 num_cols;             /* +0x00 — iteration bound used by        */
+                              /* config_name_lookup; typically the      */
+                              /* per-entity count                       */
+    i32 col_hdr_offset;       /* +0x04 — byte offset (relative to this) */
+                              /* of the 8-byte-stride column-header     */
+                              /* table (``name_ptr``, ``name_off``) */
+    i32 num_rows;             /* +0x08 — bound for the row-index arg    */
+                              /* of config_cell_value                   */
+    i32 total_cells;          /* +0x0C — num_rows * num_cols            */
+    i32 cell_data_offset;     /* +0x10 — byte offset (relative to this) */
+                              /* of the 16-byte-stride cell data        */
+    /* Rows start at ``(u8*)this + 0x14`` */
+} ConfigTable;
+
+/* Cell record — one 16-byte slot inside the cell data array.
+ * Cell stride in bytes: ``((row * num_cols) + col) * 16``.
+ */
+typedef struct ConfigCell {
+    i32 kind;                 /* +0x00 — 0=null_default / 1=number      */
+                              /*          2=string / 3=nested_ptr       */
+                              /*          (0, 1 confirmed from decomp;  */
+                              /*           2, 3 probable — see xbr doc) */
+    u32 _reserved_04;         /* +0x04 — padding / flags                */
+    f64 value;                /* +0x08 — 8-byte double when kind==1     */
+} ConfigCell;
+
+
+/* ==========================================================================
+ * IndexEntry — index.xbr-backed asset dispatcher entry
+ * ==========================================================================
+ * One slot inside the index.xbr lookup machinery, consumed by
+ * ``load_asset_by_fourcc``.  Azurik keeps a runtime wrapper around
+ * each indx asset with load-state flags and a pointer to the packed
+ * record array.
+ *
+ * Partial layout — pinned enough for a shim to check load state
+ * + access the record table without crashing; full size (~0x40+)
+ * isn't confirmed.
+ */
+typedef struct IndexEntry {
+    u32 _reserved_00;         /* +0x00                                  */
+    u32 _reserved_04;         /* +0x04                                  */
+    u32 first_record_idx;     /* +0x08 — record_table[0] starts at this */
+                              /* global asset index                     */
+    struct IndexRecord *records; /* +0x0C — packed 20-byte records     */
+    u32 file_base_offset;     /* +0x10 — offset correction for string-  */
+                              /* pool relative file refs                */
+    u8  _reserved_14[6];      /* +0x14 .. +0x19                         */
+    u16 flags;                /* +0x1A — load state:                    */
+                              /*          (flags & 0x3000) == 0x1000 ?  */
+                              /*          (flags & 0x3000) == 0x2000 ⇒ loading */
+                              /*          (flags & 0x3000) == 0x3000 ⇒ loaded  */
+    /* +0x1C .. end: opaque */
+} IndexEntry;
+
+/* One index.xbr record — 20 bytes, documented per-field in
+ * ``docs/LEARNINGS.md`` § index.xbr. */
+typedef struct IndexRecord {
+    u32 length;               /* +0x00 — string length for ``off1`` */
+    u32 off1;                 /* +0x04 — pool offset: file name     */
+    char fourcc[4];           /* +0x08 — asset type (body, banm, …) */
+    u8  disc;                 /* +0x0C — subtype discriminator      */
+    u8  pad[3];               /* +0x0D .. +0x0F — zero              */
+    u32 off2;                 /* +0x10 — pool offset: asset key     */
+} IndexRecord;
+
+
+/* ==========================================================================
+ * MovieContext — Bink playback state (opaque w/ vtable)
+ * ==========================================================================
+ * Pointed to by ``AZURIK_MOVIE_CONTEXT_PTR_VA``.  Allocated by
+ * ``FUN_000D00F0`` (Bink init), stepped by ``poll_movie`` each frame.
+ * The internals are allocated by the Bink library and depend on
+ * frame count / resolution; all the game code needs is the vtable
+ * at offset 0.
+ *
+ * Observed vtable slots (from ``poll_movie`` + ``boot_state_tick``
+ * case 2):
+ *
+ *   vtable[0x00] = advance(ctx, dt_seconds)     — called every tick
+ *   vtable[0x04] = is_done(ctx) -> bool          — true when finished
+ *   vtable[0x10] = destroy(ctx, release_flag)    — tear down
+ *
+ * Shims that want to observe or abort playback should call through
+ * the vtable (so Bink-internal state stays coherent) rather than
+ * touching struct fields directly.
+ */
+/* Forward declare so the vtable can name its receiver type. */
+struct MovieContext;
+
+typedef struct MovieContextVTable {
+    void (*advance)(struct MovieContext *ctx, float dt_seconds);
+    u32 (*is_done)(struct MovieContext *ctx);
+    void (*_reserved_08)(void);
+    void (*_reserved_0C)(void);
+    void (*destroy)(struct MovieContext *ctx, int release_flag);
+} MovieContextVTable;
+
+typedef struct MovieContext {
+    const MovieContextVTable *vtable;  /* +0x00 */
+    /* +0x04 .. end: Bink-library-owned opaque state.  Don't touch. */
+} MovieContext;
+
+
+/* ==========================================================================
  * Known VA anchors
  * ==========================================================================
  * Fixed addresses a shim may reference when patching or calling into
@@ -559,6 +701,44 @@ typedef enum BootState {
 /* Walking-state flag byte (tested by FUN_00085F50 and FUN_0008CCC0
  * at LAB_000863E4; set during the ground-walk state transition). */
 #define AZURIK_WALKING_STATE_FLAG_VA 0x0037ADECu
+
+/* Current / next movie path strings (pointed to by BSS globals).
+ *
+ *   AZURIK_MOVIE_STAGED_PATH_VA      — char * — the movie the boot
+ *                                      state machine is about to
+ *                                      play / currently playing.
+ *                                      Read by ``boot_state_tick``
+ *                                      case 0; non-null means
+ *                                      "there's a movie queued".
+ *                                      NULL during normal gameplay.
+ *
+ *   AZURIK_MOVIE_SKIP_TARGET_VA      — char * — fallback path to
+ *                                      pass to ``play_movie_fn`` when
+ *                                      the staged path isn't prefixed
+ *                                      with ``movies/scenes/``.
+ *                                      Defaults to ``0x001A1E74`` when
+ *                                      the global is NULL.
+ *
+ * A ``qol_force_cutscene`` shim would write both VAs + set
+ * ``AZURIK_BOOT_STATE_VA`` to ``BOOT_STATE_INIT`` to trigger
+ * playback of any Bink movie by path. */
+#define AZURIK_MOVIE_STAGED_PATH_VA  0x001BCDD0u
+#define AZURIK_MOVIE_SKIP_TARGET_VA  0x001BCDD4u
+
+/* FeatureClassRegistry — parallel lookup table to ENTITY_REGISTRY_*
+ * above but keyed by name string → u32 value.  Layout:
+ *
+ *     struct FeatureClass { char *name;  u32 value; };
+ *     FeatureClass *begin = *AZURIK_FEATURE_CLASS_REGISTRY_BEGIN_VA;
+ *     FeatureClass *end   = *AZURIK_FEATURE_CLASS_REGISTRY_END_VA;
+ *     count               = (end - begin);
+ *
+ * Looked up by ``FUN_000493D0`` (the helper that populates
+ * ``CritterData.feature_class_id`` from a name string).  Useful for
+ * shims that want to add new feature classes to the runtime
+ * registry at boot. */
+#define AZURIK_FEATURE_CLASS_REGISTRY_BEGIN_VA 0x0038C1F4u
+#define AZURIK_FEATURE_CLASS_REGISTRY_END_VA   0x0038C1F8u
 
 
 /* ==========================================================================
@@ -690,6 +870,51 @@ _Static_assert(__builtin_offsetof(PlayerInputState, direction_x) == 0x128,
                "PlayerInputState.direction_x drifted");
 _Static_assert(__builtin_offsetof(PlayerInputState, direction_z) == 0x130,
                "PlayerInputState.direction_z drifted");
+
+/* ConfigTable (from FUN_000D1420 / FUN_000D1520). */
+_Static_assert(__builtin_offsetof(ConfigTable, num_cols) == 0x00,
+               "ConfigTable.num_cols must be first field — "
+               "config_name_lookup does *(int*)this");
+_Static_assert(__builtin_offsetof(ConfigTable, num_rows) == 0x08,
+               "ConfigTable.num_rows drifted — config_cell_value "
+               "reads param_1[2] as the row-index bound");
+_Static_assert(__builtin_offsetof(ConfigTable, cell_data_offset) == 0x10,
+               "ConfigTable.cell_data_offset drifted — "
+               "config_cell_value reads param_1[4] for it");
+_Static_assert(sizeof(ConfigTable) == 0x14,
+               "ConfigTable header is exactly 20 bytes; rows start "
+               "at this+0x14 per config_cell_value");
+_Static_assert(sizeof(ConfigCell) == 0x10,
+               "ConfigCell stride MUST be 16 bytes — the "
+               "(*param_1 * row + col) * 0x10 arithmetic relies on it");
+
+/* IndexEntry (from FUN_000A67A0). */
+_Static_assert(__builtin_offsetof(IndexEntry, first_record_idx) == 0x08,
+               "IndexEntry.first_record_idx drifted — "
+               "load_asset_by_fourcc uses piVar3[2]");
+_Static_assert(__builtin_offsetof(IndexEntry, records) == 0x0C,
+               "IndexEntry.records drifted — piVar3[3]");
+_Static_assert(__builtin_offsetof(IndexEntry, file_base_offset) == 0x10,
+               "IndexEntry.file_base_offset drifted — piVar3[4]");
+_Static_assert(__builtin_offsetof(IndexEntry, flags) == 0x1A,
+               "IndexEntry.flags drifted — *(ushort*)(piVar3 + 0x1A)");
+
+/* IndexRecord (from docs/LEARNINGS.md § index.xbr). */
+_Static_assert(sizeof(IndexRecord) == 0x14,
+               "IndexRecord must be exactly 20 bytes — the index.xbr "
+               "record table uses a 20-byte stride");
+_Static_assert(__builtin_offsetof(IndexRecord, off1) == 0x04,
+               "IndexRecord.off1 drifted");
+_Static_assert(__builtin_offsetof(IndexRecord, fourcc) == 0x08,
+               "IndexRecord.fourcc drifted — load_asset_by_fourcc "
+               "compares piVar1[2] against the requested fourcc");
+_Static_assert(__builtin_offsetof(IndexRecord, off2) == 0x10,
+               "IndexRecord.off2 drifted");
+
+/* MovieContext (vtable-at-0 pattern; size not pinned — Bink-owned). */
+_Static_assert(__builtin_offsetof(MovieContext, vtable) == 0x00,
+               "MovieContext.vtable must be first field — poll_movie "
+               "indirects through *DAT_001bcdb0 at offset 0");
 #endif
 
 

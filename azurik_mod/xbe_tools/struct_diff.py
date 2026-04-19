@@ -209,8 +209,19 @@ def _extract_fields(body: str) -> list[HeaderField]:
         parts = decl_clean.split()
         if len(parts) < 2:
             continue
-        name = parts[-1].rstrip(",").rstrip("]").split("[")[0]
-        c_type = " ".join(parts[:-1])
+        # Collapse leading asterisks on the field-name token back
+        # into the type string so ``struct Foo *records`` parses as
+        # name=``records`` with c_type=``struct Foo *`` (instead of
+        # name=``*records`` with the pointer spelling lost).
+        raw_name = parts[-1].rstrip(",").rstrip("]").split("[")[0]
+        leading_stars = ""
+        while raw_name.startswith("*"):
+            leading_stars += "*"
+            raw_name = raw_name[1:]
+        name = raw_name
+        c_type = " ".join(parts[:-1]).rstrip()
+        if leading_stars:
+            c_type = f"{c_type} {leading_stars}"
         # Look for the offset annotation in EITHER the decl
         # (legacy placement) or the trailing comment (dominant
         # style in azurik.h).

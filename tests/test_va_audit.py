@@ -149,6 +149,18 @@ ANCHOR_EXPECTATIONS: dict[str, tuple[int, str, object, str]] = {
         0x001BCDB4, ".data",
         lambda b: b == b"" or b[:1] == b"\x00",
         "BSS: u8 movie-idle flag"),
+    "AZURIK_MOVIE_STAGED_PATH_VA": (
+        0x001BCDD0, ".data", _BSS,
+        "BSS: char* staged movie path (NULL ⇒ nothing queued)"),
+    "AZURIK_MOVIE_SKIP_TARGET_VA": (
+        0x001BCDD4, ".data", _BSS,
+        "BSS: char* fallback movie path for non-scenes/ paths"),
+    "AZURIK_FEATURE_CLASS_REGISTRY_BEGIN_VA": (
+        0x0038C1F4, ".data", _BSS,
+        "BSS: FeatureClass** begin (name→u32 value lookup)"),
+    "AZURIK_FEATURE_CLASS_REGISTRY_END_VA": (
+        0x0038C1F8, ".data", _BSS,
+        "BSS: FeatureClass** end (one past last)"),
     "AZURIK_WALKING_STATE_FLAG_VA": (
         0x0037ADEC, ".data", _BSS,
         "BSS: player walking-state transition flag"),

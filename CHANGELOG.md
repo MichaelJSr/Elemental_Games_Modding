@@ -2,6 +2,69 @@
 
 ## Unreleased
 
+### Struct coverage expansion — azurik.h grew 3 → 10 structs
+
+Pinned seven more game-internal struct layouts so shim authors can
+reach beyond the player-physics + controller-input surface.  Mined
+from Ghidra decomp of ``entity_lookup``, ``config_name_lookup`` /
+``config_cell_value``, ``load_asset_by_fourcc``, ``play_movie_fn`` /
+``poll_movie``, and ``boot_state_tick`` (plus the April 2026
+index.xbr RE in ``docs/LEARNINGS.md``).
+
+**New types in ``shims/include/azurik.h``:**
+
+- **``Entity``** — partial: pinned the ``const char *name`` slot
+  at ``+0x00`` (the only universally-present field); tail varies
+  per subsystem and is left opaque.
+- **``ConfigTable``** + **``ConfigCell``** — runtime handle + cell
+  stride for ``config.xbr``'s keyed-table sections.  All five
+  header-word offsets (``num_cols`` / ``col_hdr_offset`` /
+  ``num_rows`` / ``total_cells`` / ``cell_data_offset``) plus the
+  16-byte cell stride are locked with ``_Static_assert``.  Note:
+  per-decomp orientation (row-major with ``num_cols`` as the
+  innermost stride); the legacy ``scripts/xbr_parser.py`` uses
+  the inverted naming, documented inline.
+- **``IndexEntry``** + **``IndexRecord``** — index.xbr dispatcher
+  entry exposed by ``load_asset_by_fourcc`` + the 20-byte record
+  layout decoded in ``LEARNINGS.md`` § index.xbr.  Asserts pin
+  ``first_record_idx`` / ``records`` / ``file_base_offset`` /
+  ``flags`` on the live entry and the full record stride.
+- **``MovieContext``** + **``MovieContextVTable``** — Bink-owned
+  opaque state with the vtable-at-offset-0 pattern.  Vtable slots
+  observed from ``poll_movie`` (``advance`` / ``is_done``) and
+  ``boot_state_tick`` case 2 (``destroy`` at ``+0x10``).  Tail
+  is Bink-internal and explicitly left unpinned.
+
+**New VA anchors (4 added):**
+
+- ``AZURIK_MOVIE_STAGED_PATH_VA`` / ``AZURIK_MOVIE_SKIP_TARGET_VA``
+  — the two BSS ``char *`` globals the boot state machine reads in
+  case 0 to decide what Bink to play next.
+- ``AZURIK_FEATURE_CLASS_REGISTRY_BEGIN_VA`` / ``_END_VA`` — the
+  parallel name→u32 registry behind ``FUN_000493D0`` (used by
+  CritterData feature-class ID population).
+
+**Toolchain fixes shaken out by the push:**
+
+- ``GhidraSyncPlanner._ghidra_type_for`` now accepts ``i32``/``s32``
+  as equivalent spellings (the header uses ``i32``; legacy notes
+  sometimes quote ``s32``).  Adds ``i8``/``i16``/``i64`` symmetry.
+- ``struct_diff._extract_fields`` collapses leading ``*`` from
+  field-name tokens back into the type string, so
+  ``struct Foo *records`` now parses as name=``records`` with
+  c_type=``struct Foo *`` (was lost, causing ``ghidra-sync``
+  to push pointer fields as ``undefined4``).
+- ``ghidra_snapshot.py``'s default struct-name prefix allow-list
+  extended to cover every struct declared in ``azurik.h`` so the
+  committed snapshot reflects the full set (10/138 captured,
+  up from 3/138).
+- ``tests/test_va_audit.py::ANCHOR_EXPECTATIONS`` extended for
+  the four new anchors; drift guard still green.
+
+**Drift guards still green:** 685 passed / 1 skipped, including
+the ``test_shim_authoring`` battery that compiles the full
+``azurik.h`` and verifies every new static-assert resolves.
+
 ### Next-wave tooling audit pass — correctness, perf, level-preview rework
 
 Follow-up to the next-wave landing: audited every tool for

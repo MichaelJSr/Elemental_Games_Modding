@@ -327,10 +327,14 @@ def apply_sync(client: GhidraClient, actions: Iterable[SyncAction],
 # collapse to the ``void *`` typedef.  Anything unknown falls back
 # to a typed ``undefined`` of the field's intrinsic width.
 _C_TYPE_TO_GHIDRA = {
-    "u8":       "uchar",    "s8":       "char",
-    "u16":      "ushort",   "s16":      "short",
-    "u32":      "uint",     "s32":      "int",
-    "u64":      "ulonglong", "s64":      "longlong",
+    # Signed-int typedef spellings we accept (both `i32`-style +
+    # `s32`-style since the header uses `i` but some legacy notes
+    # quote `s`):
+    "u8":       "uchar",    "i8":       "char",    "s8":       "char",
+    "u16":      "ushort",   "i16":      "short",   "s16":      "short",
+    "u32":      "uint",     "i32":      "int",     "s32":      "int",
+    "u64":      "ulonglong",
+    "i64":      "longlong", "s64":      "longlong",
     "f32":      "float",    "f64":      "double",
     "float":    "float",    "double":   "double",
     "char":     "char",     "uchar":    "uchar",

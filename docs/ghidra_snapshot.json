@@ -31527,6 +31527,78 @@
   ],
   "structs": [
     {
+      "name": "ConfigCell",
+      "size": 16,
+      "category": "/",
+      "description": "Mirror of ConfigCell from azurik.h",
+      "fields": [
+        {
+          "name": "kind",
+          "type": "int",
+          "offset": 0,
+          "length": 4,
+          "comment": "+0x00 \u2014 0=null_default / 1=number"
+        },
+        {
+          "name": "_reserved_04",
+          "type": "uint",
+          "offset": 4,
+          "length": 4,
+          "comment": "+0x04 \u2014 padding / flags"
+        },
+        {
+          "name": "value",
+          "type": "double",
+          "offset": 8,
+          "length": 8,
+          "comment": "+0x08 \u2014 8-byte double when kind==1"
+        }
+      ]
+    },
+    {
+      "name": "ConfigTable",
+      "size": 20,
+      "category": "/",
+      "description": "Mirror of ConfigTable from azurik.h",
+      "fields": [
+        {
+          "name": "num_cols",
+          "type": "int",
+          "offset": 0,
+          "length": 4,
+          "comment": "+0x00 \u2014 iteration bound used by"
+        },
+        {
+          "name": "col_hdr_offset",
+          "type": "int",
+          "offset": 4,
+          "length": 4,
+          "comment": "+0x04 \u2014 byte offset (relative to this)"
+        },
+        {
+          "name": "num_rows",
+          "type": "int",
+          "offset": 8,
+          "length": 4,
+          "comment": "+0x08 \u2014 bound for the row-index arg"
+        },
+        {
+          "name": "total_cells",
+          "type": "int",
+          "offset": 12,
+          "length": 4,
+          "comment": "+0x0C \u2014 num_rows * num_cols"
+        },
+        {
+          "name": "cell_data_offset",
+          "type": "int",
+          "offset": 16,
+          "length": 4,
+          "comment": "+0x10 \u2014 byte offset (relative to this)"
+        }
+      ]
+    },
+    {
       "name": "ControllerState",
       "size": 73,
       "category": "/",
@@ -31988,7 +32060,7 @@
         },
         {
           "name": "shadow_texture_res",
-          "type": "undefined4",
+          "type": "int",
           "offset": 156,
           "length": 4,
           "comment": "+0x9C piVar9[0x27] \u2014 -1 = no shadow"
@@ -32345,6 +32417,210 @@
       ]
     },
     {
+      "name": "Entity",
+      "size": 4,
+      "category": "/",
+      "description": "Mirror of Entity from azurik.h",
+      "fields": [
+        {
+          "name": "name",
+          "type": "void *",
+          "offset": 0,
+          "length": 4,
+          "comment": "+0x00 \u2014 NUL-terminated asset key"
+        }
+      ]
+    },
+    {
+      "name": "IndexEntry",
+      "size": 28,
+      "category": "/",
+      "description": "Mirror of IndexEntry from azurik.h",
+      "fields": [
+        {
+          "name": "_reserved_00",
+          "type": "uint",
+          "offset": 0,
+          "length": 4,
+          "comment": "+0x00"
+        },
+        {
+          "name": "_reserved_04",
+          "type": "uint",
+          "offset": 4,
+          "length": 4,
+          "comment": "+0x04"
+        },
+        {
+          "name": "first_record_idx",
+          "type": "uint",
+          "offset": 8,
+          "length": 4,
+          "comment": "+0x08 \u2014 record_table[0] starts at this"
+        },
+        {
+          "name": "records",
+          "type": "void *",
+          "offset": 12,
+          "length": 4,
+          "comment": "+0x0C \u2014 packed 20-byte records"
+        },
+        {
+          "name": "file_base_offset",
+          "type": "uint",
+          "offset": 16,
+          "length": 4,
+          "comment": "+0x10 \u2014 offset correction for string-"
+        },
+        {
+          "name": "_reserved_14",
+          "type": "uchar",
+          "offset": 20,
+          "length": 1,
+          "comment": "+0x14 .. +0x19"
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 21,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 22,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 23,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 24,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 25,
+          "length": 1
+        },
+        {
+          "name": "flags",
+          "type": "ushort",
+          "offset": 26,
+          "length": 2,
+          "comment": "+0x1A \u2014 load state:"
+        }
+      ]
+    },
+    {
+      "name": "IndexRecord",
+      "size": 20,
+      "category": "/",
+      "description": "Mirror of IndexRecord from azurik.h",
+      "fields": [
+        {
+          "name": "length",
+          "type": "uint",
+          "offset": 0,
+          "length": 4,
+          "comment": "+0x00 \u2014 string length for ``off1``"
+        },
+        {
+          "name": "off1",
+          "type": "uint",
+          "offset": 4,
+          "length": 4,
+          "comment": "+0x04 \u2014 pool offset: file name"
+        },
+        {
+          "name": "fourcc",
+          "type": "char",
+          "offset": 8,
+          "length": 1,
+          "comment": "+0x08 \u2014 asset type (body, banm, \u2026)"
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 9,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 10,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 11,
+          "length": 1
+        },
+        {
+          "name": "disc",
+          "type": "uchar",
+          "offset": 12,
+          "length": 1,
+          "comment": "+0x0C \u2014 subtype discriminator"
+        },
+        {
+          "name": "pad",
+          "type": "uchar",
+          "offset": 13,
+          "length": 1,
+          "comment": "+0x0D .. +0x0F \u2014 zero"
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 14,
+          "length": 1
+        },
+        {
+          "name": "",
+          "type": "undefined",
+          "offset": 15,
+          "length": 1
+        },
+        {
+          "name": "off2",
+          "type": "uint",
+          "offset": 16,
+          "length": 4,
+          "comment": "+0x10 \u2014 pool offset: asset key"
+        }
+      ]
+    },
+    {
+      "name": "MovieContext",
+      "size": 4,
+      "category": "/",
+      "description": "Mirror of MovieContext from azurik.h",
+      "fields": [
+        {
+          "name": "vtable",
+          "type": "void *",
+          "offset": 0,
+          "length": 4,
+          "comment": "+0x00"
+        }
+      ]
+    },
+    {
+      "name": "MovieContextVTable",
+      "size": 1,
+      "category": "/",
+      "description": "Mirror of MovieContextVTable from azurik.h",
+      "fields": []
+    },
+    {
       "name": "PlayerInputState",
       "size": 308,
       "category": "/",
@@ -32480,8 +32756,8 @@
           "length": 1
         },
         {
-          "name": "*critter_data",
-          "type": "undefined4",
+          "name": "critter_data",
+          "type": "void *",
           "offset": 52,
           "length": 4,
           "comment": "+0x34 \u2014 ptr to the player's CritterData"

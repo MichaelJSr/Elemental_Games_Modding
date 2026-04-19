@@ -125,9 +125,22 @@ def dump_snapshot(client: GhidraClient, *,
         # kernel noise.  Pass ``struct_name_prefixes=("",)`` to
         # capture everything.
         our_prefixes = struct_name_prefixes or (
-            "CritterData", "ControllerState", "PlayerInputState",
-            "PlayerState", "PlayerPhysics", "BootState",
-            "SaveSlot", "SaveMeta", "XbeCertificate",
+            # Keep this list in sync with the structs declared in
+            # shims/include/azurik.h — every struct we push via
+            # ``ghidra-sync --push-structs`` should show up in the
+            # committed snapshot so offline consumers can see the
+            # full layout.
+            "Azurik",                                     # future namespacing
+            "BootState", "BootStateCtx",
+            "CritterData",
+            "ControllerState",
+            "PlayerInputState", "PlayerState", "PlayerPhysics",
+            "Entity",
+            "ConfigTable", "ConfigCell",
+            "IndexEntry", "IndexRecord",
+            "MovieContext", "MovieContextVTable",
+            "SaveSlot", "SaveMeta",
+            "XbeCertificate",
         )
 
         def _matches_our_prefixes(n: str) -> bool:
