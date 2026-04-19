@@ -124,6 +124,23 @@ _BUILTIN_CATEGORIES: tuple[Category, ...] = (
         order=40,
     ),
     Category(
+        id="randomize",
+        title="Randomize",
+        description=("Randomization passes that reshuffle game content — "
+                     "gems, power-ups, and (optionally) level connections. "
+                     "Pair with a seed on the Randomize page for "
+                     "reproducible runs."),
+        order=50,
+    ),
+    Category(
+        id="experimental",
+        title="Experimental",
+        description=("Opt-in patches that may destabilise the game, break "
+                     "saves, or interact badly with xemu.  Use at your own "
+                     "risk and keep a backup ISO handy."),
+        order=80,
+    ),
+    Category(
         id="other",
         title="Other",
         description=("Uncategorised patches — packs that haven't picked a "

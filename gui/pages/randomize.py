@@ -1,9 +1,22 @@
-"""Randomize page — shuffle-pool toggles, seed, and advanced options.
+"""Randomize page — shuffle pools (via PackBrowser) + seed + advanced.
 
-This page no longer carries its own "Build" button.  It mirrors its
-field state into ``AppState.randomize_config`` on every change, and
-the Build & Logs page reads that snapshot when the user clicks
-"Start build".  One build entry point, no re-click.
+The five shuffle pools are surfaced as ``category="randomize"``
+features in the central registry (see
+``azurik_mod/patches/randomize/__init__.py``), so this page
+renders them via the shared :class:`PackBrowser` — the same
+widget the Patches page uses — instead of hand-coded
+checkboxes.  Seed + advanced options remain page-local
+because they don't fit the Feature model.
+
+Bidirectional sync:
+
+- Widget → state: ``PackBrowser`` mirrors pack toggles into
+  ``AppState.enabled_packs`` via its standard ``trace_add``
+  path.  ``_sync_state`` then copies each ``enabled_packs["rand_*"]``
+  boolean into the matching ``randomize_config.do_*`` field so
+  the Build page's legacy call path keeps working.
+- State → widget: nothing writes to ``enabled_packs`` behind
+  our back, so we don't need reverse tracing.
 """
 
 from __future__ import annotations
@@ -12,16 +25,32 @@ import json
 import tkinter as tk
 from tkinter import ttk
 
+import azurik_mod.patches  # noqa: F401 — populate the registry
+from azurik_mod.patching.registry import all_packs
+
 from ..models import RandomizerConfig
-from ..widgets import Page, SecondaryButton, Section, SeedEntry
+from ..widgets import PackBrowser, Page, SecondaryButton, Section, SeedEntry
+
+# Map from ``Feature.name`` in the randomize category to the
+# matching ``RandomizerConfig`` boolean field.  Keeping this
+# table explicit (vs. string-munging) makes the sync intent
+# obvious + lets us add a pool without touching this page.
+_POOL_TO_CONFIG_FIELD = {
+    "rand_major":       "do_major",
+    "rand_keys":        "do_keys",
+    "rand_gems":        "do_gems",
+    "rand_barriers":    "do_barriers",
+    "rand_connections": "do_connections",
+}
 
 
 class RandomizePage(Page):
     title = "Randomize"
     description = (
-        "Configure the shuffle pools and seed.  Patch packs live on "
-        "the Patches page.  When you're ready, hop over to Build & "
-        "Logs and hit Start build."
+        "Pick a seed, tick the shuffle pools you want, and optionally "
+        "tweak the advanced options.  Patch packs live on the Patches "
+        "page.  When you're ready, hop over to Build & Logs and hit "
+        "Start build."
     )
 
     def _build(self) -> None:
@@ -33,30 +62,38 @@ class RandomizePage(Page):
         seed_row.pack(fill=tk.X, pady=(0, 8))
         self._seed = SeedEntry(seed_row)
         self._seed.pack(side=tk.LEFT)
-        # SeedEntry doesn't expose a trace API directly — wrap its
-        # internal var via its public `get_seed()` + periodic syncs
-        # on focus-out / Return.
         try:
             self._seed._var.trace_add("write", lambda *_a: self._sync_state())
         except Exception:  # noqa: BLE001
             pass
 
-        # --- Pools --------------------------------------------------------
-        pools = Section(self._body, title="Shuffle pools", initially_open=True)
-        pools.pack(fill=tk.X, pady=(0, 6))
+        # --- Shuffle pools (via the shared PackBrowser) -------------------
+        #
+        # Filter ``all_packs()`` to the randomize category so the
+        # browser only renders the 5 pool toggles here (the Patches
+        # page shows every category).  Empty-category hiding means
+        # the browser collapses to a single tab labelled "Randomize",
+        # which keeps the Randomize page looking like the old
+        # hand-coded section.
+        randomize_packs = [p for p in all_packs()
+                           if p.category == "randomize"]
+        pool_host = ttk.Frame(self._body)
+        pool_host.pack(fill=tk.X, pady=(0, 6))
+        self._browser = PackBrowser(
+            pool_host, randomize_packs, self._pool_vars,
+            pack_params=None,     # no sliders on shuffle pools
+            on_param_change=None,
+        )
+        self._browser.pack(fill=tk.X)
 
-        for key, label, default in [
-            ("do_major", "Major items (fragments + powers + obsidians)", False),
-            ("do_keys", "Keys (within elemental realm)", False),
-            ("do_gems", "Gems (per-level)", False),
-            ("do_barriers", "Barriers (element vulnerability)", False),
-            ("do_connections", "Level connections (may cause unsolvable seeds)", False),
-        ]:
-            var = tk.BooleanVar(value=default)
-            self._pool_vars[key] = var
-            var.trace_add("write", lambda *_a: self._sync_state())
-            ttk.Checkbutton(pools.body, text=label, variable=var).pack(
-                anchor=tk.W, pady=2)
+        # Mirror pool toggles → AppState.enabled_packs + kick off a
+        # ``_sync_state`` so ``randomize_config.do_*`` keeps in lock-
+        # step.  Using the same trace pattern PatchesPage uses.
+        for name, var in self._pool_vars.items():
+            self.app.state.enabled_packs[name] = var.get()
+            var.trace_add(
+                "write",
+                lambda *_a, n=name, v=var: self._on_pool_toggle(n, v))
 
         # --- Advanced -----------------------------------------------------
         adv = Section(self._body, title="Advanced", initially_open=False)
@@ -107,14 +144,24 @@ class RandomizePage(Page):
         # if the user hasn't touched anything on this page.
         self._sync_state()
 
-    # --- state mirroring -----------------------------------------------
+    # ---- pool toggle handling ----------------------------------------
+
+    def _on_pool_toggle(self, pack_name: str,
+                        var: "tk.BooleanVar") -> None:
+        """Mirror a shuffle-pool checkbox into AppState."""
+        self.app.state.set_pack(pack_name, var.get())
+        self._sync_state()
+
+    # ---- state mirroring ---------------------------------------------
 
     def _sync_state(self) -> None:
         """Push current widget state into AppState.randomize_config.
 
-        Runs on every widget change.  We deliberately swallow exceptions
-        for half-typed numeric fields (e.g. user is mid-edit on the
-        obsidian cost box) so the snapshot stays sane."""
+        The 5 pool booleans are drawn from ``enabled_packs`` (the
+        PackBrowser's source of truth); seed + advanced come from
+        our local widgets.  Exceptions from half-typed numeric
+        fields are swallowed so the snapshot stays sane mid-edit.
+        """
         try:
             self.app.state.randomize_config = self._read_config()
         except Exception:  # noqa: BLE001
@@ -123,14 +170,25 @@ class RandomizePage(Page):
     def _read_config(self) -> RandomizerConfig:
         return RandomizerConfig(
             seed=self._seed.get_seed(),
-            do_major=self._pool_vars["do_major"].get(),
-            do_keys=self._pool_vars["do_keys"].get(),
-            do_gems=self._pool_vars["do_gems"].get(),
-            do_barriers=self._pool_vars["do_barriers"].get(),
-            do_connections=self._pool_vars["do_connections"].get(),
+            do_major=self._pack_enabled("rand_major"),
+            do_keys=self._pack_enabled("rand_keys"),
+            do_gems=self._pack_enabled("rand_gems"),
+            do_barriers=self._pack_enabled("rand_barriers"),
+            do_connections=self._pack_enabled("rand_connections"),
             obsidian_cost=self._parse_obsidian_cost(),
             item_pool=self._parse_item_pool(),
         )
+
+    def _pack_enabled(self, name: str) -> bool:
+        """Read a ``rand_*`` flag from the app-wide enabled_packs dict,
+        falling back to the local BooleanVar when the bus hasn't
+        propagated yet (e.g. on first ``_sync_state`` before the
+        initial trace_add fires).
+        """
+        if name in self.app.state.enabled_packs:
+            return bool(self.app.state.enabled_packs[name])
+        var = self._pool_vars.get(name)
+        return bool(var.get()) if var is not None else False
 
     def _parse_obsidian_cost(self) -> int | None:
         raw = self._adv_vars["obsidian_cost"].get().strip()

@@ -14,6 +14,8 @@ Every pack lives in exactly one **category**, which determines the tab it appear
 | `player`        | Player            | 20    | Player-character movement + physics       |
 | `boot`          | Boot / Intro      | 30    | Skip boot-time cutscenes and logos        |
 | `qol`           | Quality of Life   | 40    | In-game UX and pacing improvements        |
+| `randomize`     | Randomize         | 50    | Shuffle-pool toggles (also on Randomize page) |
+| `experimental`  | Experimental      | 80    | Opt-in patches that may destabilise the game |
 | `other`         | Other             | 9999  | Fallback for packs without an explicit id |
 
 ### Creating a new category
@@ -37,14 +39,19 @@ register_category(Category(
 
 ---
 
-| Pack                 | Sites | Default-on | Category      | Tags          | Folder |
-|----------------------|-------|------------|---------------|---------------|--------|
-| `fps_unlock`         | 50    | no         | `performance` | fps, experimental | [azurik_mod/patches/fps_unlock/](../azurik_mod/patches/fps_unlock/) |
-| `player_physics`     | 3     | no         | `player`      | physics       | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
-| `qol_skip_logo`      | 1     | no         | `boot`        | c-shim        | [azurik_mod/patches/qol_skip_logo/](../azurik_mod/patches/qol_skip_logo/) |
-| `qol_gem_popups`     | 0     | no         | `qol`         | —             | [azurik_mod/patches/qol_gem_popups/](../azurik_mod/patches/qol_gem_popups/) |
-| `qol_other_popups`   | 0     | no         | `qol`         | —             | [azurik_mod/patches/qol_other_popups/](../azurik_mod/patches/qol_other_popups/) |
-| `qol_pickup_anims`   | 1     | no         | `qol`         | —             | [azurik_mod/patches/qol_pickup_anims/](../azurik_mod/patches/qol_pickup_anims/) |
+| Pack                 | Sites | Default-on | Category       | Tags          | Folder |
+|----------------------|-------|------------|----------------|---------------|--------|
+| `player_physics`     | 3     | no         | `player`       | physics       | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
+| `qol_skip_logo`      | 1     | no         | `boot`         | c-shim        | [azurik_mod/patches/qol_skip_logo/](../azurik_mod/patches/qol_skip_logo/) |
+| `qol_gem_popups`     | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_gem_popups/](../azurik_mod/patches/qol_gem_popups/) |
+| `qol_other_popups`   | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_other_popups/](../azurik_mod/patches/qol_other_popups/) |
+| `qol_pickup_anims`   | 1     | no         | `qol`          | —             | [azurik_mod/patches/qol_pickup_anims/](../azurik_mod/patches/qol_pickup_anims/) |
+| `rand_major`         | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
+| `rand_keys`          | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
+| `rand_gems`          | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
+| `rand_barriers`      | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
+| `rand_connections`   | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
+| `fps_unlock`         | 50    | no         | `experimental` | fps           | [azurik_mod/patches/fps_unlock/](../azurik_mod/patches/fps_unlock/) |
 
 ---
 

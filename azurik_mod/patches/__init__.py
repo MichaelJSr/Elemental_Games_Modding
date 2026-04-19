@@ -48,6 +48,13 @@ from azurik_mod.patches.qol_skip_logo import (
     apply_skip_logo_patch,
 )
 
+# ``randomize`` has no byte patches — it surfaces the randomizer
+# shuffle pools as ``Feature(category="randomize")`` entries so
+# the category-aware GUI + CLI can treat them uniformly with the
+# patch packs.  Importing the module triggers its
+# ``register_feature(...)`` side effects.
+from azurik_mod.patches.randomize import RANDOMIZER_POOLS  # noqa: F401
+
 # Non-pack helpers used by the CLI (not part of the pack registry).
 from azurik_mod.patches._player_character import apply_player_character_patch
 

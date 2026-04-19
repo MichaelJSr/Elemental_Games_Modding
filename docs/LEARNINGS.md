@@ -1005,6 +1005,105 @@ guarded by tests: ``tests/test_va_audit.py`` pins the bytes,
 ``tests/test_vanilla_thunks.py`` pins the header<->registry
 equivalence.
 
+## 60 FPS patch re-audit (April 2026)
+
+Second-pass audit of ``fps_unlock`` against every frame-rate-
+adjacent constant in ``default.xbe``'s ``.rdata``, motivated by
+the fx.xbr record-layout RE + the new ``azurik-mod xbe
+find-floats`` tooling.
+
+### Scope
+
+Exhaustive scan of ``.rdata`` for any IEEE 754 constant in the
+``1/30``, ``30.0``, ``60.0``, or ``1/60`` neighbourhoods —
+plus float64 counterparts for each.  Every hit cross-referenced
+against ``FPS_DATA_PATCHED_VAS`` to classify:
+
+- **Patched** ⇒ halved at apply time (no action needed).
+- **Unpatched + frame-rate-dependent** ⇒ BUG, needs patching.
+- **Unpatched + not frame-rate-dependent** ⇒ needs documenting
+  so the regression guard doesn't flip on it.
+
+### Findings
+
+| Category    | Count | Status                                    |
+|-------------|-------|-------------------------------------------|
+| 1/30 f32    | 29    | 29/29 patched ✅                           |
+| 1/30 f64    | 1     | 1/1 patched ✅                             |
+| 30.0 f32    | 5     | 3 patched + 2 classified non-rate ✅       |
+| 30.0 f64    | 1     | 1/1 patched ✅                             |
+| 60.0 f32    | 6     | all 6 classified non-rate ✅               |
+| 1/60 f32/64 | 0     | no baked-in "60 FPS assumed" math ✅       |
+
+**Zero missed patches.**  The 2 unpatched 30.0 constants and all
+6 of the 60.0 constants are in rendering / UI / threshold code
+paths:
+
+- ``0x0019FD98`` — threshold in ``FUN_0003EA00``
+  (``if (30.0 < *(float*)(param_2 + 8))``) — speed / angle test,
+  not a rate multiplier.
+- ``0x001A2524`` — dead data (no .text xrefs).
+- All 6 × 60.0 — FOV defaults (``FUN_00054800``) + screen-space
+  UI scale math (``FUN_0005AC80`` etc.).  Decoded pattern:
+  ``fVar13 = (float10)60.0; fptan(fVar13 * 0.5)`` — the classic
+  camera-projection ``tan(fov/2)`` setup.
+
+### fx.xbr-specific audit
+
+The 3 ``fx_magic_timer`` XBE callsites (discovered during the
+earlier fx.xbr audit) were re-decompiled:
+
+- **``FUN_00083000``** — update: "if new > max, store".  No dt.
+- **``FUN_00083050``** — spawn: reads stored max into new
+  effect.  No dt.
+- **``FUN_00083230``** — serialise: writes effects to save.
+  No dt.
+
+The effect-timer system stores values as *numbers*, not as
+frame counts.  60 FPS unlock is SAFE w.r.t. fx.xbr.
+
+### Regression guard
+
+``tests/test_fps_coverage.py`` (new) pins the exact vanilla
+counts so any future re-dump of the XBE that introduces a new
+frame-rate constant (or drops one) flips red immediately.  The
+test has six cases:
+
+1. Every 1/30 f32 is patched
+2. Every 1/30 f64 is patched
+3. Every 30.0 f32 is patched OR classified as non-rate
+4. Every 60.0 f32 is classified as non-rate
+5. No 1/60 constants exist (the game is 30 FPS native)
+6. Vanilla counts match the audit's ground truth
+
+If (3) or (4) flips red, add the new VA to either the fps_unlock
+patch set or the ``_NOT_FRAMERATE_*`` dict (with a Ghidra-xref
+note in the comment).  If (1), (2), or (5) flips red, the
+discovered constant IS a genuine frame-rate dep that needs
+patching.
+
+## Patch categories reorg (April 2026)
+
+Second-pass at the category tab layout:
+
+- **fps_unlock** moved from ``performance`` → ``experimental``.
+  The patch triggers a pre-existing D3D push-buffer BSOD on
+  player death (engine bug, unrelated to the patch bytes) and
+  introduces visual-timing drift in a few subsystems we don't
+  statically patch.  An ``experimental`` category signals
+  "opt-in, keep a backup ISO" more clearly than ``performance``.
+- **``randomize`` category added** — the five shuffle pools
+  (``rand_major``, ``rand_keys``, ``rand_gems``, ``rand_barriers``,
+  ``rand_connections``) are now first-class ``Feature`` entries
+  with ``sites=[]`` + ``apply=noop``.  The Randomize page
+  renders them via the same ``PackBrowser`` the Patches page
+  uses, and the Patches page automatically grows a "Randomize"
+  tab that mirrors the same state.
+- The ``performance`` category is now EMPTY (fps_unlock was its
+  only resident).  It stays registered so a future performance
+  mod can slot into it without touching ``category.py``; the
+  GUI hides empty categories from the tab strip.
+
 ## What to add here next
 
 Things we haven't pinned down but should when a shim needs them:
