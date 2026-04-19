@@ -740,6 +740,9 @@ def main() -> None:
              "(default 'experimental')")
     p_ns.add_argument("--dry-run", action="store_true",
         help="Print the rendered files without writing them")
+    p_ns.add_argument("--emit-test", action="store_true",
+        help="Also emit test_<name>.py pinning the scaffolded "
+             "feature registration + trampoline constants (#19)")
 
     # ------------------------------------------------------------------
     # movies info (tier 3 #13)
@@ -824,6 +827,265 @@ def main() -> None:
              "state)")
     p_pl.add_argument("--json", action="store_true")
 
+    # ------------------------------------------------------------------
+    # Next-wave tools (#17 – #26 from docs/TOOLING_ROADMAP.md)
+    # ------------------------------------------------------------------
+
+    # #21 xrefs — walk Ghidra's xref graph up to N hops
+    p_xrefs = sub.add_parser(
+        "xrefs",
+        help="Walk Ghidra's xref graph around a VA (callers / callees)",
+        description=(
+            "Pulls xrefs from a live Ghidra instance and renders\n"
+            "them as an ASCII tree (or JSON).  Collapses intra-\n"
+            "function edges onto their enclosing function so the\n"
+            "tree stays readable.\n\n"
+            "Examples:\n"
+            "  azurik-mod xrefs 0x85700\n"
+            "  azurik-mod xrefs 0x85700 --direction out --depth 3\n"
+            "  azurik-mod xrefs 0x85700 --json"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_xrefs.add_argument("va",
+        help="Virtual address (hex like 0x85700 or decimal)")
+    p_xrefs.add_argument("--direction",
+        choices=("in", "out"), default="in",
+        help="'in' = callers of VA, 'out' = what VA calls")
+    p_xrefs.add_argument("--depth", type=int, default=2,
+        help="Maximum hops from the seed (default 2)")
+    p_xrefs.add_argument("--max-nodes", type=int, default=200,
+        help="Hard cap on total nodes to keep terminal output sane")
+    p_xrefs.add_argument("--host", default=None)
+    p_xrefs.add_argument("--port", type=int, default=None)
+    p_xrefs.add_argument("--json", action="store_true")
+
+    # #20 call-graph — Graphviz DOT / JSON out to N hops
+    p_cg = sub.add_parser(
+        "call-graph",
+        help="Emit a Graphviz DOT call-graph from one or more seeds",
+        description=(
+            "BFS over Ghidra's xref graph, emitting a Graphviz\n"
+            ".dot file that ``dot -Tpng`` can render.  Collapses\n"
+            "intra-function CALLs onto their enclosing functions\n"
+            "so the graph stays legible.\n\n"
+            "Examples:\n"
+            "  azurik-mod call-graph 0x85700 --depth 2 > g.dot\n"
+            "  azurik-mod call-graph 0x85700 --direction reverse \\\n"
+            "      --depth 3 --dot callers.dot\n"
+            "  azurik-mod call-graph 0x85700 0x42000 --json"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_cg.add_argument("seeds", nargs="+",
+        help="One or more seed VAs (hex or decimal)")
+    p_cg.add_argument("--direction",
+        choices=("forward", "reverse"), default="forward",
+        help="'forward' chases callees, 'reverse' chases callers")
+    p_cg.add_argument("--depth", type=int, default=2)
+    p_cg.add_argument("--max-edges", type=int, default=500,
+        help="Cap the total edge count (default 500)")
+    p_cg.add_argument("--dot", default=None,
+        help="Write the DOT document to this path instead of stdout")
+    p_cg.add_argument("--host", default=None)
+    p_cg.add_argument("--port", type=int, default=None)
+    p_cg.add_argument("--json", action="store_true")
+
+    # #23 struct-diff — azurik.h vs live Ghidra
+    p_sd = sub.add_parser(
+        "struct-diff",
+        help="Diff struct layouts in shims/include/azurik.h vs Ghidra",
+        description=(
+            "Surfaces three drift classes:\n"
+            "  * header_only  — azurik.h declares it, Ghidra doesn't\n"
+            "  * ghidra_only  — Ghidra has it, azurik.h doesn't\n"
+            "  * size_mismatch / field_mismatch — present on both\n"
+            "    sides but at least one side is stale.\n\n"
+            "Use --offline to skip Ghidra (dry-run of the header\n"
+            "parser).  --verbose prints per-field diffs on mismatch.\n\n"
+            "Examples:\n"
+            "  azurik-mod struct-diff\n"
+            "  azurik-mod struct-diff --verbose\n"
+            "  azurik-mod struct-diff --offline"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_sd.add_argument("--header", default=None,
+        help="Override path to azurik.h")
+    p_sd.add_argument("--offline", action="store_true",
+        help="Skip Ghidra; dry-run the header parser only")
+    p_sd.add_argument("--verbose", "-v", action="store_true",
+        help="Show per-field diffs on mismatch")
+    p_sd.add_argument("--host", default=None)
+    p_sd.add_argument("--port", type=int, default=None)
+    p_sd.add_argument("--json", action="store_true")
+
+    # #22 decomp-cache — memoise GhidraClient.decompile on disk
+    p_dc = sub.add_parser(
+        "decomp-cache",
+        help="Inspect / clear the on-disk decompilation cache",
+        description=(
+            "The cache lives under ~/.cache/azurik-mod/decomps\n"
+            "(or $AZURIK_DECOMP_CACHE if set).  Verbs:\n"
+            "  stats   — entries per program (no Ghidra required)\n"
+            "  clear   — nuke the current Ghidra program's cache\n"
+            "  get VA  — fetch one decomp via the cache"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _dc_sub = p_dc.add_subparsers(
+        dest="cache_command", required=True)
+    p_dcs = _dc_sub.add_parser("stats",
+        help="Show on-disk cache footprint")
+    p_dcs.add_argument("--root", default=None,
+        help="Override cache root (default: XDG-respecting)")
+    p_dcs.add_argument("--json", action="store_true")
+    p_dcc = _dc_sub.add_parser("clear",
+        help="Clear the cache for the current Ghidra program")
+    p_dcc.add_argument("--root", default=None)
+    p_dcc.add_argument("--host", default=None)
+    p_dcc.add_argument("--port", type=int, default=None)
+    p_dcg = _dc_sub.add_parser("get",
+        help="Fetch one decomp via the cache")
+    p_dcg.add_argument("va")
+    p_dcg.add_argument("--root", default=None)
+    p_dcg.add_argument("--host", default=None)
+    p_dcg.add_argument("--port", type=int, default=None)
+    p_dcg.add_argument("--json", action="store_true")
+
+    # #25 assets fingerprint (+ fingerprint-diff)
+    p_afp = sub.add_parser(
+        "assets",
+        help="Asset fingerprint + diff utilities (#25)",
+        description=(
+            "Content-addressed fingerprints of an ISO / unpacked\n"
+            "tree / single file.  Commit the JSON beside your mod\n"
+            "and diff it against a later build to see exactly\n"
+            "which files changed."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _afp_sub = p_afp.add_subparsers(
+        dest="assets_command", required=True)
+    p_afpi = _afp_sub.add_parser(
+        "fingerprint",
+        help="Emit a fingerprint JSON for a directory / file")
+    p_afpi.add_argument("root",
+        help="Directory or file to fingerprint")
+    p_afpi.add_argument("--out", default=None,
+        help="Write the JSON here (otherwise prints a summary)")
+    p_afpi.add_argument("--include", action="append", default=None,
+        help="Glob include filter (can repeat)")
+    p_afpi.add_argument("--exclude", action="append", default=None,
+        help="Glob exclude filter (can repeat)")
+    p_afpi.add_argument("--json", action="store_true")
+    p_afpd = _afp_sub.add_parser(
+        "fingerprint-diff",
+        help="Diff two fingerprint JSON files")
+    p_afpd.add_argument("before")
+    p_afpd.add_argument("after")
+    p_afpd.add_argument("--json", action="store_true")
+
+    # #17 save edit
+    p_save_edit = p_save_sub.add_parser(
+        "edit",
+        help="Apply a declarative set of edits to a save slot (#17)",
+        description=(
+            "Load the input save slot, apply one or more edits,\n"
+            "and write the result to a fresh output directory.\n"
+            "Only text saves (magic.sav / loc.sav / options.sav)\n"
+            "are editable today — see docs/SAVE_FORMAT.md § 7.\n\n"
+            "Edit spec format:\n"
+            "  <file>:<line_index>=<value>\n"
+            "\n"
+            "Examples:\n"
+            "  azurik-mod save edit exported/ patched/ \\\n"
+            "      --set magic.sav:0=99.000000\n"
+            "  azurik-mod save edit exported/ patched/ \\\n"
+            "      --plan edits.json"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_save_edit.add_argument("input", help="Source save directory")
+    p_save_edit.add_argument("output",
+        help="Destination directory (must not exist yet)")
+    p_save_edit.add_argument("--set", action="append", default=None,
+        help="<file>:<line_index>=<value> (repeatable)")
+    p_save_edit.add_argument("--plan", default=None,
+        help="JSON file with an {\"edits\":[...]} block")
+    p_save_edit.add_argument("--json", action="store_true")
+
+    # #18 xbr edit (extends existing xbr subcommand)
+    p_xbre = _xbr_sub.add_parser(
+        "edit",
+        help="Apply byte / string patches to an XBR file (#18)",
+        description=(
+            "Safe XBR mutation.  Supports in-place byte and ASCII\n"
+            "string replacement at equal-sized slots.  Full\n"
+            "structural edits (adding entries, resizing the string\n"
+            "pool) are not supported yet; see azurik_mod/xbe_tools\n"
+            "/xbr_edit.py for the current scope.\n\n"
+            "Examples:\n"
+            "  azurik-mod xbr edit in.xbr out.xbr \\\n"
+            "      --set-string 'Hello=World' --tag surf\n"
+            "  azurik-mod xbr edit in.xbr out.xbr \\\n"
+            "      --replace-bytes 0x0040:DEADBEEF"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_xbre.add_argument("input", help="Source XBR")
+    p_xbre.add_argument("output", help="Destination XBR")
+    p_xbre.add_argument("--set-string", action="append", default=None,
+        help="'old=new' ASCII string replacement; repeatable")
+    p_xbre.add_argument("--tag", default=None,
+        help="Restrict string search to this 4-char TOC tag")
+    p_xbre.add_argument("--replace-bytes", action="append",
+        default=None,
+        help="'OFFSET:HEX' raw byte replacement; repeatable")
+
+    # #24 level preview
+    p_lp = sub.add_parser(
+        "level",
+        help="Level XBR inspection utilities (#24)",
+        description=(
+            "preview: structured summary of a level XBR — TOC\n"
+            "          entry counts, strings per gameplay tag, and\n"
+            "          plausible position triples."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _lp_sub = p_lp.add_subparsers(
+        dest="level_command", required=True)
+    p_lpp = _lp_sub.add_parser("preview",
+        help="Structural preview of a level XBR")
+    p_lpp.add_argument("path", help="Path to <level>.xbr")
+    p_lpp.add_argument("--json", action="store_true")
+
+    # #26 movies frames (extends movies subcommand)
+    p_mframes = _movies_sub.add_parser(
+        "frames",
+        help="Plan / extract PNG frames from a .bik file (#26)",
+        description=(
+            "Bink 1.x is proprietary; this tool relies on ffmpeg's\n"
+            "open-source 'bink' decoder.  Without --run the command\n"
+            "PLANS the extraction and prints the ffmpeg invocation\n"
+            "(useful for CI pipelines / dry-runs).\n\n"
+            "--info flag dumps metadata + per-frame offsets without\n"
+            "requiring any decoder."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_mframes.add_argument("path", help="Path to a .bik file")
+    p_mframes.add_argument("--out", default=None,
+        help="Output directory (default: <bik>.frames/)")
+    p_mframes.add_argument("--pattern", default="frame_%04d.png",
+        help="Output filename template (default frame_%%04d.png)")
+    p_mframes.add_argument("--info", action="store_true",
+        help="Dump metadata only; no extraction")
+    p_mframes.add_argument("--dry-run", action="store_true",
+        help="Print the plan instead of running ffmpeg")
+    p_mframes.add_argument("--json", action="store_true")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -855,8 +1117,58 @@ def main() -> None:
         "new-shim": _dispatch_new_shim,
         "audio": _dispatch_audio,
         "plugins": _dispatch_plugins,
+        "xrefs": _dispatch_xrefs,
+        "call-graph": _dispatch_call_graph,
+        "struct-diff": _dispatch_struct_diff,
+        "decomp-cache": _dispatch_decomp_cache,
+        "assets": _dispatch_assets,
+        "level": _dispatch_level,
     }
     dispatch[args.command](args)
+
+
+def _dispatch_xrefs(args) -> None:
+    from azurik_mod.xbe_tools.commands import cmd_xrefs
+    cmd_xrefs(args)
+
+
+def _dispatch_call_graph(args) -> None:
+    from azurik_mod.xbe_tools.commands import cmd_call_graph
+    cmd_call_graph(args)
+
+
+def _dispatch_struct_diff(args) -> None:
+    from azurik_mod.xbe_tools.commands import cmd_struct_diff
+    cmd_struct_diff(args)
+
+
+def _dispatch_decomp_cache(args) -> None:
+    from azurik_mod.xbe_tools.commands import cmd_decomp_cache
+    cmd_decomp_cache(args)
+
+
+def _dispatch_assets(args) -> None:
+    from azurik_mod.xbe_tools.commands import (
+        cmd_assets_fingerprint, cmd_assets_fingerprint_diff)
+    verbs = {
+        "fingerprint": cmd_assets_fingerprint,
+        "fingerprint-diff": cmd_assets_fingerprint_diff,
+    }
+    verb = verbs.get(args.assets_command)
+    if verb is None:
+        raise SystemExit(
+            f"unknown assets verb: {args.assets_command!r}")
+    verb(args)
+
+
+def _dispatch_level(args) -> None:
+    from azurik_mod.xbe_tools.commands import cmd_level_preview
+    verbs = {"preview": cmd_level_preview}
+    verb = verbs.get(args.level_command)
+    if verb is None:
+        raise SystemExit(
+            f"unknown level verb: {args.level_command!r}")
+    verb(args)
 
 
 def _dispatch_ghidra_sync(args) -> None:
@@ -887,8 +1199,12 @@ def _dispatch_entity(args) -> None:
 
 def _dispatch_xbr(args) -> None:
     from azurik_mod.xbe_tools.commands import (
-        cmd_xbr_diff, cmd_xbr_inspect)
-    verbs = {"inspect": cmd_xbr_inspect, "diff": cmd_xbr_diff}
+        cmd_xbr_diff, cmd_xbr_edit, cmd_xbr_inspect)
+    verbs = {
+        "inspect": cmd_xbr_inspect,
+        "diff": cmd_xbr_diff,
+        "edit": cmd_xbr_edit,
+    }
     verb = verbs.get(args.xbr_command)
     if verb is None:
         raise SystemExit(
@@ -902,8 +1218,9 @@ def _dispatch_ghidra_snapshot(args) -> None:
 
 
 def _dispatch_movies(args) -> None:
-    from azurik_mod.xbe_tools.commands import cmd_movies_info
-    verbs = {"info": cmd_movies_info}
+    from azurik_mod.xbe_tools.commands import (
+        cmd_movies_frames, cmd_movies_info)
+    verbs = {"info": cmd_movies_info, "frames": cmd_movies_frames}
     verb = verbs.get(args.movies_command)
     if verb is None:
         raise SystemExit(
@@ -977,8 +1294,11 @@ def _dispatch_shim_inspect(args) -> None:
 def _dispatch_save(args) -> None:
     """Dispatch the ``save`` subcommand to its implementation."""
     from azurik_mod.save_format.commands import cmd_save_inspect
+    from azurik_mod.xbe_tools.commands import cmd_save_edit
     if args.save_command in (None, "inspect"):
         cmd_save_inspect(args)
+    elif args.save_command == "edit":
+        cmd_save_edit(args)
     else:
         raise SystemExit(
             f"unknown save subcommand: {args.save_command!r}.  "

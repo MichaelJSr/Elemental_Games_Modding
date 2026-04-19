@@ -67,9 +67,13 @@ from typing import Any, Iterator
 __all__ = [
     "GhidraClient",
     "GhidraClientError",
+    "GhidraDecomp",
     "GhidraFunction",
     "GhidraLabel",
     "GhidraProgramInfo",
+    "GhidraStruct",
+    "GhidraStructField",
+    "GhidraXref",
 ]
 
 
@@ -175,6 +179,122 @@ class GhidraLabel:
             namespace=obj.get("namespace", ""),
             symbol_type=obj.get("type", ""),
             is_primary=bool(obj.get("isPrimary", False)),
+        )
+
+
+@dataclass(frozen=True)
+class GhidraXref:
+    """One cross-reference edge between two addresses.
+
+    Matches the shape ``GET /xrefs?to_addr=HEX`` /
+    ``?from_addr=HEX`` returns: edges + the enclosing functions
+    + the referring-instruction mnemonic.
+    """
+
+    from_addr: int
+    to_addr: int
+    ref_type: str         # "UNCONDITIONAL_CALL", "DATA", ...
+    from_instruction: str  # e.g. "CALL 0x00085700"
+    from_function_va: int | None   # enclosing caller, if any
+    from_function_name: str | None
+    to_function_va: int | None     # enclosing callee, if any
+    to_function_name: str | None
+    is_primary: bool = True
+
+    @classmethod
+    def from_json(cls, obj: dict) -> "GhidraXref":
+        def _parse(s: object) -> int:
+            try:
+                return int(str(s), 16)
+            except (TypeError, ValueError):
+                return 0
+
+        def _fn(which: str) -> tuple[int | None, str | None]:
+            fn = obj.get(which) or {}
+            if not fn:
+                return None, None
+            return _parse(fn.get("address")), fn.get("name")
+
+        from_va, from_name = _fn("from_function")
+        to_va, to_name = _fn("to_function")
+        return cls(
+            from_addr=_parse(obj.get("from_addr")),
+            to_addr=_parse(obj.get("to_addr")),
+            ref_type=obj.get("refType", ""),
+            from_instruction=obj.get("from_instruction", ""),
+            from_function_va=from_va,
+            from_function_name=from_name,
+            to_function_va=to_va,
+            to_function_name=to_name,
+            is_primary=bool(obj.get("isPrimary", True)),
+        )
+
+
+@dataclass(frozen=True)
+class GhidraDecomp:
+    """Result of ``GET /functions/{addr}/decompile``."""
+
+    address: int
+    function_name: str
+    decompiled: str
+
+    @classmethod
+    def from_json(cls, obj: dict,
+                  *, address_hint: int = 0) -> "GhidraDecomp":
+        inner = obj.get("result") if "decompiled" not in obj else obj
+        fn = (inner or {}).get("function") or {}
+        try:
+            addr = int(str(fn.get("address")), 16)
+        except (TypeError, ValueError):
+            addr = address_hint
+        return cls(
+            address=addr,
+            function_name=fn.get("name", ""),
+            decompiled=(inner or {}).get("decompiled", ""),
+        )
+
+
+@dataclass(frozen=True)
+class GhidraStructField:
+    """One field inside a :class:`GhidraStruct`."""
+
+    name: str
+    data_type: str
+    offset: int
+    length: int
+    comment: str = ""
+
+    @classmethod
+    def from_json(cls, obj: dict) -> "GhidraStructField":
+        return cls(
+            name=obj.get("name", ""),
+            data_type=obj.get("dataType", ""),
+            offset=int(obj.get("offset", 0)),
+            length=int(obj.get("length", 0)),
+            comment=obj.get("comment", ""),
+        )
+
+
+@dataclass(frozen=True)
+class GhidraStruct:
+    """Result of ``GET /structs/{name}`` — a typed struct layout."""
+
+    name: str
+    size: int
+    fields: tuple[GhidraStructField, ...]
+    category: str = ""
+    description: str = ""
+
+    @classmethod
+    def from_json(cls, obj: dict) -> "GhidraStruct":
+        fields_raw = obj.get("fields") or []
+        return cls(
+            name=obj.get("name", ""),
+            size=int(obj.get("size", 0)),
+            fields=tuple(
+                GhidraStructField.from_json(f) for f in fields_raw),
+            category=obj.get("category", ""),
+            description=obj.get("description", ""),
         )
 
 
@@ -368,6 +488,107 @@ class GhidraClient:
             "POST", f"/memory/{address:08X}/comments/{kind}",
             json_body={"comment": comment})
         return self._require_success(resp)
+
+    def decompile(self, address: int) -> GhidraDecomp:
+        """Fetch C-like decompilation for the function at ``address``.
+
+        Returns a :class:`GhidraDecomp` whose ``decompiled``
+        field is the raw Ghidra output (same string the UI
+        shows).  Raises :class:`GhidraClientError` when the
+        address doesn't resolve to a known function.
+        """
+        resp = self._request(
+            "GET", f"/functions/{address:08X}/decompile")
+        body = self._require_success(resp)
+        return GhidraDecomp.from_json(body, address_hint=address)
+
+    def iter_xrefs_to(self, address: int, *,
+                      page_size: int = 200,
+                      ) -> Iterator[GhidraXref]:
+        """Paginate every INCOMING xref to ``address``.
+
+        The Ghidra endpoint returns one row per referring
+        instruction.  Call-callers / data-referrers are
+        surfaced the same way — filter on ``ref_type`` if the
+        caller only wants certain kinds.
+        """
+        offset = 0
+        while True:
+            resp = self._request(
+                "GET", "/xrefs",
+                params={"to_addr": f"{address:08X}",
+                        "offset": offset, "limit": page_size})
+            body = self._require_success(resp)
+            result = body.get("result") or {}
+            refs = result.get("references") or []
+            if not refs:
+                return
+            for entry in refs:
+                yield GhidraXref.from_json(entry)
+            if len(refs) < page_size:
+                return
+            offset += len(refs)
+
+    def iter_xrefs_from(self, address: int, *,
+                        page_size: int = 200,
+                        ) -> Iterator[GhidraXref]:
+        """Paginate every OUTGOING xref from ``address`` (calls /
+        data references the code at this VA emits).
+
+        Useful for call-graph traversal: from a function entry,
+        the outgoing xrefs give every call it makes.
+        """
+        offset = 0
+        while True:
+            resp = self._request(
+                "GET", "/xrefs",
+                params={"from_addr": f"{address:08X}",
+                        "offset": offset, "limit": page_size})
+            body = self._require_success(resp)
+            result = body.get("result") or {}
+            refs = result.get("references") or []
+            if not refs:
+                return
+            for entry in refs:
+                yield GhidraXref.from_json(entry)
+            if len(refs) < page_size:
+                return
+            offset += len(refs)
+
+    def get_struct(self, name: str) -> GhidraStruct:
+        """Fetch one struct layout by name.
+
+        Raises :class:`GhidraClientError` (``STRUCT_NOT_FOUND``)
+        when the struct isn't defined in the Ghidra project.
+        """
+        resp = self._request(
+            "GET", f"/structs/{name}")
+        body = self._require_success(resp)
+        return GhidraStruct.from_json(body.get("result") or {})
+
+    def iter_structs(self, *, page_size: int = 200
+                     ) -> Iterator[dict]:
+        """Paginate every struct in the project.
+
+        Yields the raw JSON dict per entry because the list
+        endpoint returns summaries (path / size / name /
+        numFields) without full field detail — call
+        :meth:`get_struct` for the detailed layout.
+        """
+        offset = 0
+        while True:
+            resp = self._request(
+                "GET", "/structs",
+                params={"offset": offset, "limit": page_size})
+            body = self._require_success(resp)
+            result = body.get("result") or []
+            if not result:
+                return
+            for entry in result:
+                yield entry
+            if len(result) < page_size:
+                return
+            offset += len(result)
 
     def iter_labels(self, *, page_size: int = 500
                     ) -> Iterator[GhidraLabel]:

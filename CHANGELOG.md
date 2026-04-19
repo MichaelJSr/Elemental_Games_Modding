@@ -2,6 +2,57 @@
 
 ## Unreleased
 
+### Next-wave tooling (#17 – #26) shipped
+
+All ten next-wave tools from ``docs/TOOLING_ROADMAP.md`` land in
+one pass.  Every tool is CLI-accessible via ``azurik-mod`` + has
+a Python API for programmatic use + ships with regression tests.
+
+**Shipped:**
+
+- **#17 Save-file editor** — ``azurik-mod save edit`` with
+  declarative ``--set`` / ``--plan`` edits for text saves.  Code
+  in :mod:`azurik_mod.save_format.editor`.
+- **#18 XBR write-back** — ``azurik-mod xbr edit`` with safe
+  in-place string + byte replacement
+  (:mod:`azurik_mod.xbe_tools.xbr_edit`).
+- **#19 Shim test generator** — ``new-shim --emit-test`` emits
+  ``test_<name>.py`` with drift-guards for hook VA + replaced
+  bytes + feature registration.
+- **#20 Call-graph explorer** — ``azurik-mod call-graph`` with
+  Graphviz DOT output
+  (:mod:`azurik_mod.xbe_tools.call_graph`).
+- **#21 Xref aggregator** — ``azurik-mod xrefs`` with ASCII-tree
+  dump of callers/callees
+  (:mod:`azurik_mod.xbe_tools.xref_aggregator`).
+- **#22 Decompile cache** — ``azurik-mod decomp-cache`` with
+  content-addressed on-disk memoisation
+  (:mod:`azurik_mod.xbe_tools.decomp_cache`).
+- **#23 Struct type diff** — ``azurik-mod struct-diff`` against
+  live Ghidra (:mod:`azurik_mod.xbe_tools.struct_diff`).
+- **#24 Level previewer** — ``azurik-mod level preview`` for
+  structural level summaries
+  (:mod:`azurik_mod.xbe_tools.level_preview`).
+- **#25 Asset fingerprint registry** — ``azurik-mod assets
+  fingerprint`` + ``fingerprint-diff``
+  (:mod:`azurik_mod.xbe_tools.asset_fingerprint`).
+- **#26 Bink frame extractor** — ``azurik-mod movies frames``
+  with ffmpeg-backed decoder + metadata-only mode
+  (:mod:`azurik_mod.xbe_tools.bink_extract`).
+
+**Foundations:**
+
+- :class:`GhidraClient` gained ``decompile()``,
+  ``iter_xrefs_to()``, ``iter_xrefs_from()``, ``get_struct()``,
+  ``iter_structs()``; :class:`MockGhidraServer` grew matching
+  endpoint coverage (``/functions/{addr}/decompile``,
+  ``/xrefs``, ``/structs``, ``/structs/{name}``).
+- Mock-server test timeout bumped from 10s to 30s to tolerate
+  full-suite parallelism (was flaking under load).
+
+**Tests:** 34 new regression tests.  642 tests passing overall
+(up from 608), zero tolerated failures under full-suite load.
+
 ### Level-XBR parser — correctness fixes, 6× speedup, new features
 
 ``scripts/xbr_parser.py`` verified against real Azurik level files

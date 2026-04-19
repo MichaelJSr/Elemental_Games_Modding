@@ -58,8 +58,13 @@ class MockServerClientRoundTrip(unittest.TestCase):
         self.server = MockGhidraServer()
         self.server.start()
         self.addCleanup(self.server.stop)
+        # Bumped from the default 10s to tolerate slow CI runs
+        # where many mock servers contend for sockets.  Locally
+        # each request takes <50 ms, so the higher ceiling is
+        # essentially free.
         self.client = GhidraClient(port=self.server.port,
-                                   host=self.server.host)
+                                   host=self.server.host,
+                                   timeout=30.0)
 
     def test_ping_succeeds_on_empty_program(self):
         self.assertTrue(self.client.ping())

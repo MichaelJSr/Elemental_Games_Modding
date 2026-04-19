@@ -548,7 +548,8 @@ def cmd_new_shim(args) -> None:
             args.name, repo_root=repo_root,
             hook_va=hook_va, xbe_bytes=xbe_bytes,
             ghidra_client=ghidra_client,
-            category=args.category)
+            category=args.category,
+            emit_test=bool(getattr(args, "emit_test", False)))
     except ValueError as exc:
         print(f"new-shim: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -728,17 +729,365 @@ def cmd_xbr_inspect(args) -> None:
         print(format_inspection(insp))
 
 
+# ---------------------------------------------------------------------------
+# Next-wave tools (#17 – #26)
+# ---------------------------------------------------------------------------
+
+
+def _ghidra_client_from_args(args):
+    """Shared helper: build + ping a GhidraClient from standard
+    ``--host`` / ``--port`` flags.  Exits with a clear error when
+    the instance isn't reachable."""
+    from .ghidra_client import GhidraClient
+    client = GhidraClient(
+        host=getattr(args, "host", None) or "localhost",
+        port=getattr(args, "port", None) or 8193)
+    if not client.ping():
+        print(f"ERROR: no Ghidra instance reachable at {client.base_url}",
+              file=sys.stderr)
+        sys.exit(2)
+    return client
+
+
+def _parse_va(arg: str) -> int:
+    """Accept hex (``0x85700``), decimal (``547584``), or bare hex
+    (``85700``) — matches ``xbe addr`` / ``plan-trampoline`` UX."""
+    try:
+        return int(arg, 0)
+    except ValueError:
+        try:
+            return int(arg, 16)
+        except ValueError as exc:
+            raise SystemExit(
+                f"bad VA {arg!r}: expected hex or decimal") from exc
+
+
+def cmd_xrefs(args) -> None:
+    """``azurik-mod xrefs <VA>`` — walk the Ghidra xref graph."""
+    from .xref_aggregator import build_xref_tree, format_tree
+
+    client = _ghidra_client_from_args(args)
+    va = _parse_va(args.va)
+    report = build_xref_tree(
+        client, address=va,
+        direction=args.direction,
+        max_depth=args.depth,
+        max_nodes=args.max_nodes)
+    if args.json:
+        _emit(report.to_json_dict(), as_json=True)
+    else:
+        print(format_tree(report))
+
+
+def cmd_call_graph(args) -> None:
+    """``azurik-mod call-graph <VA>`` — Graphviz DOT out to N hops."""
+    from .call_graph import build_call_graph, to_dot
+
+    client = _ghidra_client_from_args(args)
+    seeds = [_parse_va(s) for s in args.seeds]
+    graph = build_call_graph(
+        client, seeds=seeds,
+        direction=args.direction,
+        max_depth=args.depth,
+        max_edges=args.max_edges)
+    if args.json:
+        _emit(graph.to_json_dict(), as_json=True)
+        return
+    dot = to_dot(graph)
+    if args.dot:
+        Path(args.dot).write_text(dot, encoding="utf-8")
+        print(f"wrote {args.dot}  "
+              f"(nodes={graph.node_count()}, "
+              f"edges={graph.edge_count()})")
+    else:
+        print(dot)
+
+
+def cmd_struct_diff(args) -> None:
+    """``azurik-mod struct-diff`` — azurik.h vs live Ghidra."""
+    from .struct_diff import diff_structs, format_report
+
+    header_path = (
+        Path(args.header) if args.header
+        else Path(__file__).resolve().parents[2]
+        / "shims" / "include" / "azurik.h")
+    if not header_path.exists():
+        print(f"struct-diff: header not found: {header_path}",
+              file=sys.stderr)
+        sys.exit(1)
+
+    client = None
+    structs = None
+    if args.offline:
+        structs = ()
+    else:
+        client = _ghidra_client_from_args(args)
+
+    report = diff_structs(header=header_path, client=client,
+                          ghidra_structs=structs)
+    if args.json:
+        _emit(report.to_json_dict(), as_json=True)
+    else:
+        print(format_report(report, verbose=args.verbose))
+
+
+def cmd_decomp_cache(args) -> None:
+    """``azurik-mod decomp-cache <stats|clear|get>``."""
+    from .decomp_cache import DecompCache, cache_root_default
+
+    if args.cache_command == "stats":
+        root = (Path(args.root) if args.root
+                else cache_root_default())
+        total = 0
+        programs: list[dict] = []
+        if root.exists():
+            for prog_dir in sorted(root.iterdir()):
+                if not prog_dir.is_dir():
+                    continue
+                entries = list(prog_dir.glob("*.json"))
+                total += len(entries)
+                programs.append({
+                    "program_key": prog_dir.name,
+                    "entries": len(entries),
+                })
+        out = {"root": str(root), "total_entries": total,
+               "programs": programs}
+        if args.json:
+            _emit(out, as_json=True)
+        else:
+            print(f"cache root: {root}")
+            print(f"  total entries: {total}")
+            for p in programs:
+                print(f"    {p['program_key']:16}  "
+                      f"{p['entries']} entries")
+        return
+
+    if args.cache_command == "clear":
+        client = _ghidra_client_from_args(args)
+        cache = DecompCache.for_client(
+            client,
+            root=Path(args.root) if args.root else None)
+        removed = cache.clear()
+        print(f"cleared {removed} cached decomps for "
+              f"program_key={cache.program_key}")
+        return
+
+    if args.cache_command == "get":
+        client = _ghidra_client_from_args(args)
+        cache = DecompCache.for_client(
+            client,
+            root=Path(args.root) if args.root else None)
+        decomp = cache.get(_parse_va(args.va))
+        if args.json:
+            _emit({"address": f"0x{decomp.address:08x}",
+                   "function_name": decomp.function_name,
+                   "decompiled": decomp.decompiled},
+                  as_json=True)
+        else:
+            print(f"// function_name: {decomp.function_name}")
+            print(decomp.decompiled)
+        return
+
+    print(f"decomp-cache: unknown verb {args.cache_command!r}",
+          file=sys.stderr)
+    sys.exit(2)
+
+
+def cmd_assets_fingerprint(args) -> None:
+    """``azurik-mod assets fingerprint <root>``."""
+    from .asset_fingerprint import (
+        build_fingerprint, save_fingerprint)
+
+    fp = build_fingerprint(
+        Path(args.root),
+        include=args.include or None,
+        exclude=args.exclude or None,
+    )
+    if args.out:
+        save_fingerprint(fp, Path(args.out))
+        print(f"wrote: {args.out}  "
+              f"(entries={len(fp.entries)})")
+    elif args.json:
+        _emit(fp.to_json_dict(), as_json=True)
+    else:
+        print(f"root: {fp.root}")
+        print(f"  entries:      {len(fp.entries)}")
+        print(f"  generated_at: {fp.generated_at}")
+        for entry in fp.entries[:10]:
+            print(f"    {entry.path:40}  {entry.size:>10} B  "
+                  f"{entry.sha1[:16]}...  [{entry.hash_mode}]")
+        if len(fp.entries) > 10:
+            print(f"    ... (+{len(fp.entries) - 10} more)")
+
+
+def cmd_assets_fingerprint_diff(args) -> None:
+    """``azurik-mod assets fingerprint-diff <before> <after>``."""
+    from .asset_fingerprint import (
+        diff_fingerprints, load_fingerprint)
+
+    before = load_fingerprint(Path(args.before))
+    after = load_fingerprint(Path(args.after))
+    diff = diff_fingerprints(before, after)
+    if args.json:
+        _emit(diff.to_json_dict(), as_json=True)
+        return
+    print(f"before: {args.before}")
+    print(f"after:  {args.after}")
+    print(f"  added:    {len(diff.added)}")
+    print(f"  removed:  {len(diff.removed)}")
+    print(f"  modified: {len(diff.modified)}")
+    print(f"  unchanged: {diff.unchanged}")
+    for entry in diff.added:
+        print(f"  + {entry.path}  ({entry.size} B)")
+    for entry in diff.removed:
+        print(f"  - {entry.path}")
+    for old, new in diff.modified:
+        print(f"  ~ {new.path}  "
+              f"({old.size}->{new.size} B, "
+              f"sha1 {old.sha1[:8]}->{new.sha1[:8]})")
+
+
+def cmd_save_edit(args) -> None:
+    """``azurik-mod save edit <in> <out> --set <spec>``."""
+    from azurik_mod.save_format.editor import (
+        SaveEditor, build_plan_from_cli)
+
+    plan = build_plan_from_cli(
+        args.set or (),
+        plan_path=Path(args.plan) if args.plan else None)
+    editor = SaveEditor(Path(args.input))
+    report = editor.apply(plan)
+    report = editor.write_to(Path(args.output), report=report)
+    if args.json:
+        _emit({
+            "applied": [
+                {"file": e.file, "line_index": e.line_index,
+                 "new_value": e.new_value, "old_value": old}
+                for e, old in report.applied],
+            "skipped": [
+                {"file": e.file, "line_index": e.line_index,
+                 "new_value": e.new_value, "reason": r}
+                for e, r in report.skipped],
+            "signature_stale": report.signature_stale,
+            "out_path": str(report.out_path),
+        }, as_json=True)
+    else:
+        print(report.format())
+
+
+def cmd_xbr_edit(args) -> None:
+    """``azurik-mod xbr edit <in> <out>``."""
+    from .xbr_edit import XbrEditError, XbrEditor
+
+    editor = XbrEditor.load(Path(args.input))
+    try:
+        for spec in args.set_string or ():
+            if "=" not in spec:
+                raise XbrEditError(
+                    f"bad --set-string spec {spec!r}: "
+                    f"expected 'old=new'")
+            old, new = spec.split("=", 1)
+            editor.replace_string_in_tag(
+                old=old, new=new, tag=args.tag)
+        for spec in args.replace_bytes or ():
+            if ":" not in spec:
+                raise XbrEditError(
+                    f"bad --replace-bytes spec {spec!r}: "
+                    f"expected 'OFFSET:HEX'")
+            offs_part, hex_part = spec.split(":", 1)
+            offset = int(offs_part, 0)
+            editor.replace_bytes(offset, bytes.fromhex(hex_part))
+    except XbrEditError as exc:
+        print(f"xbr edit: {exc}", file=sys.stderr)
+        sys.exit(1)
+    editor.write(Path(args.output))
+    print(editor.log.format())
+
+
+def cmd_level_preview(args) -> None:
+    """``azurik-mod level preview <xbr>``."""
+    from .level_preview import format_preview, preview_level
+
+    preview = preview_level(Path(args.path))
+    if args.json:
+        _emit(preview.to_json_dict(), as_json=True)
+    else:
+        print(format_preview(preview))
+
+
+def cmd_movies_frames(args) -> None:
+    """``azurik-mod movies frames <bik>`` — plan / extract PNGs."""
+    from .bink_extract import (
+        describe_bink, extract_frames_via_ffmpeg,
+        plan_frame_extraction)
+
+    bik = Path(args.path)
+    out_dir = Path(args.out) if args.out else bik.parent / (
+        bik.stem + ".frames")
+    if args.info:
+        try:
+            table = describe_bink(bik)
+        except ValueError as exc:
+            print(f"movies frames: {exc}", file=sys.stderr)
+            sys.exit(1)
+        payload = {
+            "file": str(bik),
+            "magic": "BIKi",
+            "frame_count": table.info.frame_count,
+            "fps": round(table.info.fps, 3),
+            "width": table.info.width,
+            "height": table.info.height,
+            "audio_tracks": table.info.audio_track_count,
+            "keyframe_count": len(table.keyframes),
+        }
+        if args.json:
+            _emit(payload, as_json=True)
+        else:
+            for k, v in payload.items():
+                print(f"  {k}: {v}")
+        return
+
+    plan = plan_frame_extraction(bik, out_dir,
+                                 pattern=args.pattern)
+    if args.dry_run or not plan.available:
+        if args.json:
+            _emit(plan.to_json_dict(), as_json=True)
+        else:
+            print(f"plan: {plan.reason}")
+            if plan.command:
+                print("  command: " + " ".join(plan.command))
+            if not plan.available:
+                print("  available: NO")
+        return
+
+    try:
+        extract_frames_via_ffmpeg(bik, out_dir,
+                                  pattern=args.pattern)
+    except RuntimeError as exc:
+        print(f"movies frames: {exc}", file=sys.stderr)
+        sys.exit(1)
+    print(f"extracted frames into {out_dir}")
+
+
 __all__ = [
+    "cmd_assets_fingerprint",
+    "cmd_assets_fingerprint_diff",
     "cmd_audio_dump",
+    "cmd_call_graph",
+    "cmd_decomp_cache",
     "cmd_entity_diff",
     "cmd_ghidra_coverage",
     "cmd_ghidra_snapshot",
     "cmd_ghidra_sync",
+    "cmd_level_preview",
+    "cmd_movies_frames",
     "cmd_movies_info",
     "cmd_new_shim",
     "cmd_plan_trampoline",
     "cmd_plugins_list",
+    "cmd_save_edit",
     "cmd_shim_inspect",
+    "cmd_struct_diff",
     "cmd_test_for_va",
     "cmd_xbe_addr",
     "cmd_xbe_find_floats",
@@ -747,5 +1096,7 @@ __all__ = [
     "cmd_xbe_sections",
     "cmd_xbe_strings",
     "cmd_xbr_diff",
+    "cmd_xbr_edit",
     "cmd_xbr_inspect",
+    "cmd_xrefs",
 ]

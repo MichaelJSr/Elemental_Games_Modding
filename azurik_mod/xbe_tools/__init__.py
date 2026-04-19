@@ -18,9 +18,13 @@ prioritisation rationale.  Shipped tools live in:
 from azurik_mod.xbe_tools.ghidra_client import (
     GhidraClient,
     GhidraClientError,
+    GhidraDecomp,
     GhidraFunction,
     GhidraLabel,
     GhidraProgramInfo,
+    GhidraStruct,
+    GhidraStructField,
+    GhidraXref,
     client_from_env,
 )
 from azurik_mod.xbe_tools.mock_ghidra import MockGhidraServer
@@ -28,9 +32,13 @@ from azurik_mod.xbe_tools.mock_ghidra import MockGhidraServer
 __all__ = [
     "GhidraClient",
     "GhidraClientError",
+    "GhidraDecomp",
     "GhidraFunction",
     "GhidraLabel",
     "GhidraProgramInfo",
+    "GhidraStruct",
+    "GhidraStructField",
+    "GhidraXref",
     "MockGhidraServer",
     "client_from_env",
 ]

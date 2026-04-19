@@ -490,88 +490,98 @@ conversation transcript.
 
 ## Next wave — catalogued candidates (2026-04 pass)
 
-After the Tier 1-3 build-out, below is the updated catalogue
-of tools worth making next.  Ranked by observed friction in
-the April 2026 sessions.  Entries without a ROI score haven't
-accumulated enough usage data yet; they're worth revisiting
-when a concrete use-case surfaces.
+**All ten items (#17 – #26) shipped in the April 2026 pass.**
+Every entry below carries its current CLI surface + Python
+module so readers can jump straight to the code; the design
+notes are preserved as a record of the prioritisation that led
+to the build-out.
 
 ### Authoring workflow
 
-**#17 Save-file editor** (high ROI)
-GUI + CLI for editing Azurik's ``.sav`` / ``SaveMeta.xbx``
-files.  Backends already in ``azurik_mod.save_format``; needs
-a writer path + a TUI/GUI.  Unlocks "patch a specific save
-slot's inventory" workflows for testing + cheaters.  Build
-on top of existing read support.
+**#17 Save-file editor** — **SHIPPED**
+`azurik-mod save edit <in> <out> --set <file>:<line>=<value>`,
+driven by :mod:`azurik_mod.save_format.editor`.  Applies
+declarative edits to text saves (``magic.sav`` / ``loc.sav`` /
+``options.sav``) and copies the rest of the slot through
+unchanged.  Binary saves + signature re-hashing still TODO —
+tracked in ``docs/SAVE_FORMAT.md`` § 7.
 
-**#18 XBR write-back support** (high ROI)
-``xbr_parser.py`` already handles ``--patch`` for single-cell
-writes.  Extend to support structural edits (add records,
-rename entries, patch strings) so level / config mods are
-composable without hand-rolling every byte write.
+**#18 XBR write-back support** — **SHIPPED**
+`azurik-mod xbr edit <in> <out> --set-string 'old=new' --tag <T>`
+(+ `--replace-bytes OFFSET:HEX`).  Conservative same-size
+in-place string / byte replacement via
+:mod:`azurik_mod.xbe_tools.xbr_edit`.  Full structural edits
+(add records, grow string pool) deferred until the pool layout
+is fully reversed.
 
-**#19 Shim test generator** (medium ROI)
-Given a newly-scaffolded feature, synthesise a matching
-``tests/test_<name>.py`` with:
-- A drift-guard pinning the vanilla ``replaced_bytes`` at
-  the hook VA
-- A round-trip ``apply → verify`` test
-- A CLI smoke test invoking ``azurik-mod patch`` end-to-end
-
-Extends ``new-shim`` with an ``--emit-test`` flag.  Removes
-~80% of the boilerplate per new feature.
+**#19 Shim test generator** — **SHIPPED**
+`azurik-mod new-shim <name> --emit-test` extends the scaffolder
+to also write ``test_<name>.py`` with drift-guards for the
+feature registration + ``replaced_bytes`` / hook-VA constants.
+Edit the asserts as the feature solidifies — the goal is to
+FORCE conscious diffs when a constant moves.
 
 ### RE workflow
 
-**#20 Call-graph explorer** (medium ROI)
-Build on :class:`GhidraClient`: given a VA, render the call
-graph N hops deep as a Graphviz DOT or a markdown summary.
-Useful when chasing "what does this function actually do and
-what does it depend on?".  Ghidra has the data; we just need
-a friendlier CLI on top.
+**#20 Call-graph explorer** — **SHIPPED**
+`azurik-mod call-graph <seed...> --depth N --direction
+forward|reverse [--dot graph.dot]` in
+:mod:`azurik_mod.xbe_tools.call_graph`.  BFS over the Ghidra
+xref graph with Graphviz DOT rendering (``dot -Tpng g.dot``
+gives you the picture).  Collapses intra-function CALLs onto
+their enclosing functions so the graph stays legible.
 
-**#21 Xref aggregator** (medium ROI)
-``azurik-mod xrefs 0xVA`` — collect every reference (callers +
-callees + data-refs) and render as a tree.  Exists in Ghidra's
-UI but not on the CLI; baking it into our toolchain means
-agent-driven flows don't have to screen-grab the Ghidra
-window.
+**#21 Xref aggregator** — **SHIPPED**
+`azurik-mod xrefs <VA> --direction in|out --depth N` in
+:mod:`azurik_mod.xbe_tools.xref_aggregator`.  ASCII-tree dump
+of callers/callees around a seed VA; handy when you want *"who
+ultimately invokes gravity_integrate_raw?"* without leaving the
+terminal.  JSON mode feeds structured tooling.
 
-**#22 Decompile cache** (low ROI)
-Persist Ghidra decomp output to ``.cache/ghidra-decomp/`` so
-repeat queries over the same VA don't pay the HTTP / decomp
-roundtrip.  Invalidates on project version bump.  Only
-valuable when investigation volume increases past 10-20
-decomps per session.
+**#22 Decompile cache** — **SHIPPED**
+`azurik-mod decomp-cache <stats|clear|get>` in
+:mod:`azurik_mod.xbe_tools.decomp_cache`.  On-disk memoisation
+of ``GhidraClient.decompile`` keyed by (program_id, VA); cache
+lives under ``~/.cache/azurik-mod/decomps`` (XDG-respecting).
+Saves 50–300 ms per repeat fetch which matters for batch
+operations (struct-diff, call-graph, grep-over-decomps).
 
-**#23 Struct type diff** (low ROI, high later-value)
-As we pin more ``CritterData`` / ``PlayerInputState`` struct
-fields in ``azurik.h``, a tool that diffs against Ghidra's
-current structure layout would catch missed fields + drift.
-Builds on the existing ``ghidra-sync`` infrastructure.
+**#23 Struct type diff** — **SHIPPED**
+`azurik-mod struct-diff [--verbose|--offline]` in
+:mod:`azurik_mod.xbe_tools.struct_diff`.  Parses
+``shims/include/azurik.h`` for ``typedef struct ... { ... }
+NAME;`` blocks (with the ``+0xHH`` comment convention picked up
+from both placement styles) and diffs against every struct in
+the live Ghidra DTM.  Surfaces ``header_only`` /
+``ghidra_only`` / ``size_mismatch`` / ``field_mismatch``
+classes.
 
 ### Asset workflow
 
-**#24 Level previewer** (speculative, high payoff)
-Parse the ``surf`` + ``node`` sections of a level XBR into a
-crude 3D viewer (WebGL / matplotlib).  Not a full renderer —
-just "where is the player spawn, where are the portals, what's
-the level bounds?".  Would reduce "build + boot + walk to
-verify" loops from minutes to seconds.
+**#24 Level previewer** — **SHIPPED**
+`azurik-mod level preview <xbr>` in
+:mod:`azurik_mod.xbe_tools.level_preview`.  Pragmatic
+structural preview — strings + plausible ``(f32,f32,f32)``
+position triples per gameplay tag (``node``, ``surf``,
+``rdms``, ``levl``, …) plus entry-count / byte-count totals.
+A graphical 3D viewer is a natural follow-up; not blocking the
+structured-data use case.
 
-**#25 Asset fingerprint registry** (low ROI, big win when
-drift hunting)
-md5-index every asset in an unpacked ISO.  ``azurik-mod iso-
-verify`` already does this for manifest checking; a persistent
-registry would let us diff against prior builds ("did the
-rebuild of fx.xbr change?").
+**#25 Asset fingerprint registry** — **SHIPPED**
+`azurik-mod assets fingerprint <root> [--out FILE]` +
+`assets fingerprint-diff <before> <after>` in
+:mod:`azurik_mod.xbe_tools.asset_fingerprint`.  SHA-1
+fingerprints for every file under a root (full hash ≤64 MiB,
+sparse hash for larger).  Emit the JSON once, commit it beside
+your mod, and diff later to see exactly what moved.
 
-**#26 Bink frame extractor** (speculative)
-Follow-up to ``movies info``: pull individual frames from a
-``.bik`` file as PNG.  Wants a Bink decoder (use existing
-libbink/FFmpeg?).  Only useful if someone wants to re-skin
-cutscenes.
+**#26 Bink frame extractor** — **SHIPPED (partial)**
+`azurik-mod movies frames <bik> [--info|--dry-run]` in
+:mod:`azurik_mod.xbe_tools.bink_extract`.  Metadata + per-frame
+offset table always available; frame extraction shells out to
+``ffmpeg`` (open-source Bink 1.x decoder) when it's on
+``$PATH``.  Includes ``plan_frame_extraction`` so CI can dry-
+run and surface *"ffmpeg not installed"* cleanly.
 
 ### Deferred from prior passes
 

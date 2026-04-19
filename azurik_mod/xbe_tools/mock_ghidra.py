@@ -13,8 +13,12 @@ Implements the same subset :mod:`ghidra_client` consumes:
 - ``GET  /functions?offset&limit``
 - ``GET  /functions/{addr}``
 - ``PATCH /functions/{addr}``   (rename / set signature)
+- ``GET  /functions/{addr}/decompile``
 - ``POST /memory/{addr}/comments/{kind}``
 - ``GET  /symbols/labels?offset&limit``
+- ``GET  /xrefs?to_addr|from_addr&offset&limit``
+- ``GET  /structs?offset&limit``
+- ``GET  /structs/{name}``
 
 Everything else returns the same ``ENDPOINT_NOT_FOUND`` envelope
 the real plugin emits, so tests catch regressions in the sync
@@ -107,6 +111,12 @@ class MockGhidraServer:
         self.functions: dict[int, _FunctionState] = {}
         self.labels: list[_LabelState] = []
         self.comments: dict[tuple[int, str], str] = {}
+        self.decomps: dict[int, str] = {}
+        # List-of-edges keyed by both endpoints for fast dispatch.
+        # Each edge is stored in the raw JSON shape the plugin
+        # emits so :class:`GhidraXref.from_json` round-trips 1:1.
+        self.xrefs: list[dict] = []
+        self.structs: dict[str, dict] = {}
         self.program_info: dict[str, Any] = {
             "programId": "mock/test.xbe",
             "name": "test.xbe",
@@ -146,6 +156,57 @@ class MockGhidraServer:
         self.labels.append(_LabelState(
             address=address, name=name, namespace=namespace,
             symbol_type=symbol_type, is_primary=is_primary))
+
+    def register_decomp(self, address: int,
+                        decompiled: str) -> None:
+        """Stash canned decompiler output for ``address``.
+
+        Tests that don't care about the decomp body can leave
+        this unset — the decompile endpoint will respond with a
+        ``FUNCTION_NOT_FOUND`` envelope, which matches the
+        plugin's behaviour for unanalysed addresses.
+        """
+        self.decomps[address] = decompiled
+
+    def register_xref(self, *, from_addr: int, to_addr: int,
+                      ref_type: str = "UNCONDITIONAL_CALL",
+                      from_function: dict | None = None,
+                      to_function: dict | None = None,
+                      from_instruction: str | None = None,
+                      ) -> None:
+        """Record one xref edge.  Tests call this to seed the
+        graph before asking the client to traverse it."""
+        self.xrefs.append({
+            "from_addr": f"{from_addr:08x}",
+            "to_addr": f"{to_addr:08x}",
+            "refType": ref_type,
+            "from_instruction": (
+                from_instruction or f"CALL 0x{to_addr:08X}"),
+            "from_function": from_function,
+            "to_function": to_function,
+            "isPrimary": True,
+        })
+
+    def register_struct(self, name: str, *, size: int,
+                        fields: list[dict] | None = None,
+                        category: str = "",
+                        description: str = "") -> None:
+        """Install a struct layout accessible via
+        ``/structs/{name}``.
+
+        Each field dict should have keys ``name``, ``dataType``,
+        ``offset``, ``length`` (plus optional ``comment``).
+        """
+        self.structs[name] = {
+            "name": name,
+            "size": int(size),
+            "fields": list(fields or []),
+            "category": category,
+            "description": description,
+            "numFields": len(fields or []),
+            "path": (f"{category or '/'}/"
+                     f"{name}".replace("//", "/")),
+        }
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -377,6 +438,106 @@ def _make_handler(server: MockGhidraServer) -> type:
                 extra={"offset": offset, "limit": limit,
                        "size": len(items)}))
 
+        def handle_decompile(self, path, query) -> None:
+            parts = path.strip("/").split("/")
+            # /functions/{addr}/decompile
+            try:
+                addr = int(parts[1], 16)
+            except (IndexError, ValueError):
+                self._not_found()
+                return
+            fn = outer.functions.get(addr)
+            if fn is None:
+                self._respond(404, _envelope(
+                    instance=self._instance_url(),
+                    success=False,
+                    error={"message": f"No function at 0x{addr:X}",
+                           "code": "FUNCTION_NOT_FOUND"}))
+                return
+            body = outer.decomps.get(
+                addr, f"// decomp unavailable for 0x{addr:08x}\n")
+            self._respond(200, _envelope(
+                instance=self._instance_url(),
+                result={
+                    "function": {
+                        "address": f"{addr:08x}",
+                        "name": fn.name,
+                    },
+                    "decompiled": body,
+                }))
+
+        def handle_xrefs(self, path, query) -> None:
+            to_addr = query.get("to_addr")
+            from_addr = query.get("from_addr")
+            if not (to_addr or from_addr):
+                self._respond(400, _envelope(
+                    instance=self._instance_url(),
+                    success=False,
+                    error={"message": ("Either to_addr or "
+                                       "from_addr parameter "
+                                       "is required"),
+                           "code": "MISSING_PARAM"}))
+                return
+
+            def _as_int(tok: str) -> int:
+                return int(tok, 16)
+
+            def _match(edge: dict) -> bool:
+                if to_addr is not None:
+                    if _as_int(edge["to_addr"]) != _as_int(to_addr):
+                        return False
+                if from_addr is not None:
+                    if _as_int(edge["from_addr"]) != _as_int(from_addr):
+                        return False
+                return True
+
+            matched = [e for e in outer.xrefs if _match(e)]
+            offset = int(query.get("offset", "0"))
+            limit = int(query.get("limit", "100"))
+            slice_ = matched[offset:offset + limit]
+            self._respond(200, _envelope(
+                instance=self._instance_url(),
+                result={
+                    "to_addr": to_addr or "",
+                    "from_addr": from_addr or "",
+                    "references": slice_,
+                },
+                extra={"offset": offset, "limit": limit,
+                       "size": len(matched)}))
+
+        def handle_structs_list(self, path, query) -> None:
+            offset = int(query.get("offset", "0"))
+            limit = int(query.get("limit", "100"))
+            summaries = [
+                {"name": s["name"],
+                 "size": s["size"],
+                 "category": s["category"],
+                 "description": s["description"],
+                 "numFields": s["numFields"],
+                 "path": s["path"]}
+                for s in outer.structs.values()]
+            slice_ = summaries[offset:offset + limit]
+            self._respond(200, _envelope(
+                instance=self._instance_url(),
+                result=slice_,
+                extra={"offset": offset, "limit": limit,
+                       "size": len(summaries)}))
+
+        def handle_struct_get(self, path, query) -> None:
+            # /structs/{name}
+            name = path.strip("/").split("/", 1)[1]
+            s = outer.structs.get(name)
+            if s is None:
+                self._respond(404, _envelope(
+                    instance=self._instance_url(),
+                    success=False,
+                    error={"message": f"Struct not found: {name}",
+                           "code": "STRUCT_NOT_FOUND"}))
+                return
+            self._respond(200, _envelope(
+                instance=self._instance_url(),
+                result=dict(s)))
+
     # ---- dispatch table: (method, path pattern) → handler-method ---
 
     global _dispatch_table  # reused on handler reinstantiation
@@ -385,9 +546,14 @@ def _make_handler(server: MockGhidraServer) -> type:
         ("GET", "/functions"): Handler.handle_functions_list,
         ("GET", "/functions/{addr}"): Handler.handle_function_get,
         ("PATCH", "/functions/{addr}"): Handler.handle_function_patch,
+        ("GET", "/functions/{addr}/decompile"):
+            Handler.handle_decompile,
         ("POST", "/memory/{addr}/comments/{kind}"):
             Handler.handle_set_comment,
         ("GET", "/symbols/labels"): Handler.handle_labels_list,
+        ("GET", "/xrefs"): Handler.handle_xrefs,
+        ("GET", "/structs"): Handler.handle_structs_list,
+        ("GET", "/structs/{name}"): Handler.handle_struct_get,
     }
     return Handler
 
@@ -409,11 +575,19 @@ def _pattern_of(path: str) -> str:
     if len(parts) == 2 and parts[0] == "functions" and \
             _looks_like_addr(parts[1]):
         return "/functions/{addr}"
+    # /functions/{addr}/decompile
+    if (len(parts) == 3 and parts[0] == "functions"
+            and _looks_like_addr(parts[1])
+            and parts[2] == "decompile"):
+        return "/functions/{addr}/decompile"
     # /memory/{addr}/comments/{kind}
     if (len(parts) == 4 and parts[0] == "memory"
             and parts[2] == "comments"
             and _looks_like_addr(parts[1])):
         return "/memory/{addr}/comments/{kind}"
+    # /structs/{name}
+    if len(parts) == 2 and parts[0] == "structs":
+        return "/structs/{name}"
     return "/" + "/".join(parts)
 
 
