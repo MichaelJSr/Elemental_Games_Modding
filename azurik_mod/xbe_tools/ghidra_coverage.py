@@ -191,14 +191,34 @@ def load_ghidra_snapshot(path: Path) -> tuple[dict[int, str],
 
 
 def _parse_va(raw) -> int | None:
+    """Parse whatever address format a Ghidra snapshot emits.
+
+    Ghidra's plugin serialises internal addresses as bare hex
+    strings with leading zeros (``"00000470"``).  Python's
+    ``int(s, 0)`` base-detect rejects these because leading
+    zeros make the intended base ambiguous, so we try hex
+    first (the format Ghidra always emits) and fall back to
+    base-0 for the odd ``0x``-prefixed entry.
+
+    ``EXTERNAL:...`` labels refer to kernel imports that live
+    outside the XBE image; they legitimately have no VA, so
+    we return ``None`` for those (the coverage report
+    filters them out upstream).
+    """
     if raw is None:
         return None
     if isinstance(raw, int):
         return raw
-    try:
-        return int(str(raw), 0)
-    except ValueError:
+    s = str(raw)
+    if s.startswith("EXTERNAL:") or ":" in s:
         return None
+    try:
+        return int(s, 16)
+    except ValueError:
+        try:
+            return int(s, 0)
+        except ValueError:
+            return None
 
 
 # ---------------------------------------------------------------------------

@@ -298,6 +298,42 @@ class GhidraCoverageLiveClient(unittest.TestCase):
         self.assertNotIn(0x00085700, unlabeled_vas)
 
 
+class GhidraCoverageSnapshotParsing(unittest.TestCase):
+    """Pin the :func:`_parse_va` behaviour that the snapshot
+    loader relies on.  Regression guard for the April 2026 bug
+    where leading-zero hex addresses (``"00000470"``) were
+    rejected because ``int(s, 0)`` treats them as ambiguous —
+    silently dropping 99.98% of labels from coverage reports.
+    """
+
+    def test_hex_strings_with_leading_zeros_accepted(self):
+        from azurik_mod.xbe_tools.ghidra_coverage import _parse_va
+        self.assertEqual(_parse_va("00000470"), 0x470)
+        self.assertEqual(_parse_va("0005C920"), 0x5C920)
+        self.assertEqual(_parse_va("00000004"), 0x4)
+
+    def test_explicit_0x_prefix_accepted(self):
+        from azurik_mod.xbe_tools.ghidra_coverage import _parse_va
+        self.assertEqual(_parse_va("0x5C920"), 0x5C920)
+
+    def test_external_addresses_rejected(self):
+        """Kernel-import labels have ``EXTERNAL:...`` addresses
+        that don't map to XBE VAs — they should parse to None
+        so they're filtered from coverage."""
+        from azurik_mod.xbe_tools.ghidra_coverage import _parse_va
+        self.assertIsNone(_parse_va("EXTERNAL:00000001"))
+
+    def test_malformed_returns_none(self):
+        from azurik_mod.xbe_tools.ghidra_coverage import _parse_va
+        self.assertIsNone(_parse_va("not_hex"))
+        self.assertIsNone(_parse_va(""))
+        self.assertIsNone(_parse_va(None))
+
+    def test_integer_passthrough(self):
+        from azurik_mod.xbe_tools.ghidra_coverage import _parse_va
+        self.assertEqual(_parse_va(0x1234), 0x1234)
+
+
 # ---------------------------------------------------------------------------
 # Live-Ghidra tests — opt-in via env var OR implicit when a port is up
 # ---------------------------------------------------------------------------
