@@ -365,12 +365,38 @@ def cmd_randomize_gems(args):
             level_rng.shuffle(base_types)
             after = Counter(base_types)
 
-            changes = 0
-            for g, new_base in zip(gems, base_types):
+            # Same collision-detection pattern as cmd_randomize's
+            # gem loop — see docs/RANDOMIZER_AUDIT.md.  When a
+            # post-shuffle base doesn't fit the existing field,
+            # we leave the gem at its original name; warn if that
+            # yields duplicate identifiers in the same level.
+            planned_names: dict[int, str] = {}
+            skipped_slots: list[int] = []
+            for i, (g, new_base) in enumerate(zip(gems, base_types)):
                 new_name = new_base + g["gem_suffix"]
-                field_size = max(g["name_len"], len(new_name) + 1)
                 if len(new_name) > g["name_len"]:
+                    skipped_slots.append(i)
+                    planned_names[i] = g["name"]
+                else:
+                    planned_names[i] = new_name
+            if skipped_slots:
+                seen: dict[str, list[int]] = {}
+                for i, n in planned_names.items():
+                    seen.setdefault(n, []).append(i)
+                dupes = {n: ix for n, ix in seen.items() if len(ix) > 1}
+                if dupes:
+                    print(f"  WARNING: {level_name}.xbr — gem "
+                          f"name-length skip produced duplicate "
+                          f"identifiers.  See "
+                          f"docs/RANDOMIZER_AUDIT.md.")
+
+            changes = 0
+            skip_set = set(skipped_slots)
+            for i, (g, new_base) in enumerate(zip(gems, base_types)):
+                if i in skip_set:
                     continue
+                new_name = planned_names[i]
+                field_size = max(g["name_len"], len(new_name) + 1)
                 if g["name"] != new_name:
                     changes += 1
                 offset = g["name_offset"]
@@ -484,11 +510,50 @@ def cmd_randomize(args):
                 level_rng.shuffle(base_types)
                 after = Counter(base_types)
 
-                changes = 0
-                for g, new_base in zip(gems, base_types):
+                # Consistency check: any post-shuffle assignment that
+                # wouldn't fit the gem's name field is skipped with a
+                # ``continue`` below.  Skipping risks a DUPLICATE-NAME
+                # collision — e.g. gem[0]='red_gem' keeps its old name
+                # because 'obsidian_gem' was too long, but gem[1] gets
+                # 'red_gem' assigned from the shuffle, so the level now
+                # has two 'red_gem' entities.  See
+                # docs/RANDOMIZER_AUDIT.md § "gem-skip collisions".
+                #
+                # We detect + warn (rather than silently produce the
+                # collision) so users / contributors see the issue
+                # even if the in-game effect is "invisible" until
+                # gameplay testing.
+                planned_names: dict[int, str] = {}
+                skipped_slots: list[int] = []
+                for i, (g, new_base) in enumerate(zip(gems, base_types)):
                     new_name = new_base + g["gem_suffix"]
                     if len(new_name) > g["name_len"]:
+                        skipped_slots.append(i)
+                        planned_names[i] = g["name"]  # keeps old name
+                    else:
+                        planned_names[i] = new_name
+
+                if skipped_slots:
+                    # Detect collisions: any duplicated value in
+                    # planned_names is a concern.
+                    seen: dict[str, list[int]] = {}
+                    for i, n in planned_names.items():
+                        seen.setdefault(n, []).append(i)
+                    dupes = {n: ix for n, ix in seen.items() if len(ix) > 1}
+                    if dupes:
+                        print(f"  WARNING: {level_name}.xbr — gem "
+                              f"name-length skip produced duplicate "
+                              f"identifiers ({dict(list(dupes.items())[:3])}"
+                              f"{'...' if len(dupes) > 3 else ''}); "
+                              f"consider a different seed.  See "
+                              f"docs/RANDOMIZER_AUDIT.md for the "
+                              f"long-term fix.")
+
+                changes = 0
+                for i, (g, new_base) in enumerate(zip(gems, base_types)):
+                    if i in set(skipped_slots):
                         continue
+                    new_name = planned_names[i]
                     if g["name"] != new_name:
                         changes += 1
                     offset = g["name_offset"]
@@ -576,13 +641,36 @@ def cmd_randomize(args):
                     power_rng.shuffle(trial_elements)
 
                     if has_solver:
-                        # Build shuffle mapping for solver: (level, orig_power_name, new_power_name)
+                        # Build shuffle mapping for solver: (level,
+                        # orig_power_name, new_power_name).
+                        #
+                        # CRITICAL: use the REAL in-game entity name
+                        # (``pu["name"]``), not the synthesised
+                        # canonical ``power_{element}``.  Earlier code
+                        # here built ``orig_canonical =
+                        # f"power_{pu['element']}"`` which silently
+                        # mismatched the ``a3`` power variant — the
+                        # node's vanilla pickup list contains
+                        # ``power_water_a3`` but the canonical name
+                        # is ``power_water``.  When
+                        # ``build_placement_from_shuffle`` looked up
+                        # ``orig_name in vanilla`` it found nothing,
+                        # returned an empty placement dict, and
+                        # ``solve()`` happily reported the VANILLA
+                        # game as solvable — so the check was
+                        # vacuously True for every shuffle and the
+                        # solvability guarantee was a lie.  See
+                        # ``docs/RANDOMIZER_AUDIT.md`` for the full
+                        # trace.  New name stays canonical because
+                        # the shuffle's ``trial_elements`` is a
+                        # permutation of element keywords, not real
+                        # entity names.
                         power_mapping = []
                         for pu, new_elem in zip(powerups, trial_elements):
-                            # Map to canonical solver names (power_water, not power_water_a3)
-                            orig_canonical = f"power_{pu['element']}"
+                            orig_real = pu["name"]          # keep a3 suffix!
                             new_canonical = f"power_{new_elem}"
-                            power_mapping.append((pu["level"], orig_canonical, new_canonical))
+                            power_mapping.append(
+                                (pu["level"], orig_real, new_canonical))
 
                         if solver.check_power_placement(power_mapping):
                             if attempt > 0:

@@ -2,6 +2,92 @@
 
 ## Unreleased
 
+### Deep randomizer audit — 2 CRITICAL bugs fixed + extension roadmap
+
+Full correctness + robustness audit of the randomizer subsystem
+(``azurik_mod/randomizer/``) in preparation for the user's planned
+heavy extension work.  Two critical bugs found + fixed; several
+known-but-not-yet-fixed bugs documented as pinned contract tests
+so they can't silently change; complete extension roadmap in a
+new top-level doc.  306 tests passing (+10 new).
+
+#### CRITICAL — power-placement solvability check was vacuous
+
+``cmd_randomize``'s power-shuffle path built the solver-check
+mapping with a synthesised canonical name
+(``f"power_{pu['element']}"``) instead of the real entity name
+(``pu["name"]``).  Powers named with the ``_a3`` suffix
+(``power_water_a3``, the A3-level water power) never matched
+their real node's vanilla pickup list, so
+``build_placement_from_shuffle`` returned an empty placement dict
+and ``solve()`` happily reported the VANILLA game as solvable —
+every shuffle passed regardless of whether it was actually
+winnable.
+
+Proof of impact: the SAME placement that canonical-naming proves
+"solvable" was rejected by the fixed code.  E.g. moving the A3
+water power to ``power_life`` softlocks the game (no water power
+remains in a reachable node); buggy check said OK, fixed check
+correctly rejects.
+
+Every ``cmd_randomize --powers`` invocation that used the broken
+solver check shipped with a silently-bypassed solvability
+guarantee.  Fix: pass ``pu["name"]`` (the real entity name) so
+the lookup succeeds.
+
+#### HIGH — gem-shuffle skip produced identifier collisions
+
+When a post-shuffle gem base (e.g. ``obsidian``) didn't fit the
+target gem's existing field length, the code ``continue``'d —
+leaving that gem at its original name while the SHUFFLE had
+already rotated other names into place.  Result: two gems in the
+same level could end up with the same identifier.
+
+Fixed by switching to a two-pass pattern (``planned_names`` /
+``skipped_slots``) that detects post-skip duplicates and emits a
+clear ``WARNING`` with the collision set.  Applies to both
+``cmd_randomize`` (unified gem path) and ``cmd_randomize_gems``
+(legacy).  The proper long-term fix (size-aware shuffle) is
+tracked as roadmap item G1.
+
+#### New top-level doc: ``docs/RANDOMIZER_AUDIT.md``
+
+Comprehensive audit output covering:
+
+- **Pipeline correctness** — walk of every step in
+  ``cmd_randomize_full``, assumptions, failure modes, and
+  whether the output is validated before the next step.
+- **Fixed in this round** — the two bugs above with proofs
+  and before/after snippets.
+- **9 known bugs** (R1..R9) — each with file:line, severity,
+  rationale, and proposed fix.  Pinned as contract tests so a
+  future contributor fixing them must update the doc.
+- **Magic constants + VA fragility** — every hardcoded table
+  in ``shufflers.py`` with a risk assessment + long-term fix
+  recommendation.
+- **Solver coverage gaps** — why ``logic_db.json`` can lie
+  about solvability + a CI cross-reference idea.
+- **Determinism analysis** — what IS stable across seeds,
+  what IS NOT stable across flag sets.
+- **Extension roadmap** — five prioritised refactoring targets
+  (P1..P5) with effort estimates for the user's planned
+  heavy extension work.
+
+#### Regression tests (``tests/test_randomizer_audit.py``, 10 tests)
+
+- 4 tests pin the power-placement fix (empty-placement-from-
+  canonical-name baseline, non-empty-from-real-name, buggy path
+  vacuously passes while real path correctly rejects, source
+  uses ``pu["name"]``).
+- 2 tests pin the gem collision check in both ``cmd_randomize``
+  and ``cmd_randomize_gems``.
+- 2 tests guarantee the audit doc exists + is cross-linked from
+  the code (so the roadmap stays discoverable).
+- 2 tests pin known-but-NOT-yet-fixed bugs as contract tests
+  (R4 inventory-is-set, R6 unconditional-level-write) so the
+  next contributor fixing them sees a clear "update the audit
+  doc" prompt in the test failure.
+
 ### Optimization + developer-ergonomics pass
 
 Round of surgical optimizations + quality-of-life refinements
