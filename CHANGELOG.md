@@ -2,6 +2,97 @@
 
 ## Unreleased
 
+### Dead-code + orphan-wiring audit — critical fix + cleanup
+
+Comprehensive sweep of `azurik_mod/`, `gui/`, and `scripts/` for
+dead code, orphan wiring (like the Entity Editor bug), and stale
+migration remnants.  Report in this commit + regression tests in
+`tests/test_audit_regressions.py` (9 new tests; 286 total, up
+from 277).
+
+#### Critical bug fix
+
+- **Connection-shuffler `NameError` crash** (`cmd_randomize_full`
+  step 6).  The connections-randomisation path at
+  `azurik_mod/randomizer/commands.py:1054-1057` references
+  `EXCLUDE_TRANSITIONS` and `VALID_DEST_LEVELS` without having
+  imported them from `shufflers.py`.  With default CLI flags
+  (`--no-connections` NOT passed), this path runs on EVERY
+  `randomize-full` invocation and would raise `NameError` as
+  soon as any level transition was scanned.  Adding the two
+  imports + regression tests that pin them resolvable through
+  `commands` module globals.
+
+#### Orphan wiring cleanup
+
+- **`build_request` pub/sub path removed** — `BuildPage`
+  subscribed but no page ever published.  `_on_build_request`
+  handler and the subscribe() call are both deleted; the
+  single build entry point is now the Start-build button
+  (which has always been the only real trigger).
+- **`build_done` event is now actually published** — previously
+  the `app._sync_status` subscriber wired into this event
+  never ran because `BuildPage._handle_done` forgot to emit.
+  Emitted now on every build completion (success or failure)
+  so the status bar refreshes with `last_seed` / `last_output`.
+
+#### Dead code removed
+
+- **`commands.py` unused imports**: `_power_element`,
+  `_frag_parts`, `_gem_base_type` were imported from
+  `shufflers.py` but never used.  Removed.
+- **`AppState.output_dir` field + `set_output` method**: a
+  migration remnant — the output-path UX moved into the
+  Project page per-build, with `RandomizerConfig.output_path`
+  carrying the final value.  No callers; removed.
+- **`PatchesPage.get_pack_flags` / `get_pack_params`**: dead
+  accessors.  The Build page reads `AppState.enabled_packs`
+  and `AppState.pack_params` directly; the widget-side getters
+  had zero callers.
+
+#### Regression guards
+
+`tests/test_audit_regressions.py` pins every fix:
+
+- Connection-shuffler imports are resolvable through
+  `commands` module globals, and the three dead imports stay
+  out.
+- `BuildPage._handle_done` source literally contains
+  `bus.emit("build_done"`.
+- `build_request` subscribe line is gone AND the orphan
+  handler is gone.
+- `AppState.output_dir` / `set_output` / PatchesPage getters
+  stay removed.  Each test includes a 3-line rationale so
+  anyone re-adding the symbol gets a clear "here's why this
+  was dead, here's what to wire" message.
+
+#### Preserved as intentional standalone / utility code
+
+The audit flagged these but they're NOT dead — they're
+intentional standalone surfaces:
+
+- `azurik_mod/randomizer/level_editor.py` +
+  `parse_level_toc.py` — standalone CLI utilities, not
+  imported by the main pipeline.
+- `azurik_mod/randomizer/solver.py` query helpers
+  (`get_randomizer_groups`, `get_all_pickup_locations`, etc.)
+  — used by solver's `__main__` block.
+- `azurik_mod/config/keyed_tables.py` helpers — used by the
+  module's `main()` for script-mode inspection.
+- `scripts/*` directory — RE / analysis utilities
+  documented in `MODDING_GUIDE.md`, not invoked by the build
+  pipeline.
+
+#### Docstring fixes
+
+- `AppState` bus-event docstring now lists only the events
+  that are actually emitted + their real subscribers (was
+  listing phantom `output_changed`, `packs_changed` watchers).
+- `RandomizerConfig.config_edits` docstring updated to
+  reference the Entity Editor (which DOES populate it via
+  the Build page merge) instead of the Config Editor (which
+  is read-only).
+
 ### Entity Editor — critical build-wire fix + UX refinements
 
 The Entity Editor tab had a **silent orphan bug**: users could make

@@ -75,9 +75,7 @@ class PatchesPage(Page):
                     slider.pack(fill=tk.X, pady=(2, 8))
                     self._sliders[(pack.name, pp.name)] = slider
 
-    def get_pack_flags(self) -> dict[str, bool]:
-        return {n: v.get() for n, v in self._vars.items()}
-
-    def get_pack_params(self) -> dict[str, dict[str, float]]:
-        return {k: dict(v) for k, v in
-                getattr(self.app.state, "pack_params", {}).items()}
+    # Pack flags / params are mirrored directly into ``AppState``
+    # (see ``enabled_packs`` / ``pack_params``); the Build page reads
+    # from ``AppState`` rather than reaching back into this widget, so
+    # there are no ``get_pack_*`` accessors on this class.

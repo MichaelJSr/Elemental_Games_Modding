@@ -68,19 +68,22 @@ class EventBus:
 class AppState:
     """Shared state surface consumed by every page.
 
-    `bus` is where pages announce changes:
+    `bus` is where pages announce changes.  Live events + subscribers:
 
-        ``iso_changed`` payload: Path | None
-        ``output_changed`` payload: Path | None
+        ``iso_changed``   payload: Path | None
+                          subscribers: app._sync_status (status bar)
         ``packs_changed`` payload: dict[str, bool]
-        ``build_started`` payload: RandomizerConfig
-        ``build_log`` payload: str
-        ``build_done`` payload: BuildResult
+                          subscribers: none currently (pages read
+                          ``enabled_packs`` directly at build time)
+        ``build_done``    payload: BuildResult
+                          subscribers: app._sync_status (refresh the
+                          status bar with last_seed / last_output)
         ``theme_changed`` payload: "dark" | "light"
+                          subscribers: none; Settings page persists
+                          the choice to disk directly
     """
 
     iso_path: Path | None = None
-    output_dir: Path | None = None
     last_seed: int | None = None
     last_output: Path | None = None
     enabled_packs: dict[str, bool] = field(default_factory=dict)
@@ -99,9 +102,11 @@ class AppState:
         self.iso_path = path
         self.bus.emit("iso_changed", path)
 
-    def set_output(self, path: Path | None) -> None:
-        self.output_dir = path
-        self.bus.emit("output_changed", path)
+    # NB: output-directory state used to live on this class but the
+    # output-path UX moved entirely into the Project page — each build
+    # picks its own output filename adjacent to the source ISO and
+    # ``RandomizerConfig.output_path`` carries the final value into the
+    # pipeline.  No global output-dir bus event is emitted now.
 
     def set_pack(self, name: str, enabled: bool) -> None:
         self.enabled_packs[name] = enabled
@@ -128,8 +133,12 @@ class RandomizerConfig:
     on a `RandomizerConfig` instance:
 
     * ``config_edits``   — dict passed as ``--config-mod`` JSON.  The
-                           Config Editor tab is WIP and will populate
-                           this once its edit buffer is finalised.
+                           Entity Editor tab's ``get_pending_mod()``
+                           output is merged into this by the Build
+                           page at build time (see
+                           ``BuildPage._merge_config_edits``); the
+                           Config Editor tab is read-only and does
+                           not contribute edits here today.
     * ``force_unsolvable`` — passes ``--force`` to the randomizer, for
                            rebuilding unsolvable seeds on purpose.  The
                            Build page sets this at runtime when the

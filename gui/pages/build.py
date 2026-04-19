@@ -92,8 +92,13 @@ class BuildPage(Page):
         self._log = LogBox(self._body, height=22)
         self._log.pack(fill=tk.BOTH, expand=True)
 
-        # Subscribe: Randomize page emits `build_request` with a RandomizerConfig.
-        self.app.state.bus.subscribe("build_request", self._on_build_request)
+        # NB: an earlier revision wired a ``build_request`` pub/sub path
+        # from the Randomize page that would auto-switch to this page
+        # and kick off a build.  That emitter was removed when the
+        # "Build randomized ISO" button was folded back into the main
+        # Start-build flow here; the subscription is no longer needed.
+        # The only path into ``start_build`` is the user clicking the
+        # big "Start build" button at the top of this page.
 
     # --- Public API -----------------------------------------------------
 
@@ -252,11 +257,6 @@ class BuildPage(Page):
             return
         _open_in_file_manager(path)
 
-    def _on_build_request(self, payload) -> None:
-        """Randomize page published `build_request` → kick off a build."""
-        self.app.show_page("build")
-        self.start_build(payload)
-
     def _poll_queue(self) -> None:
         if self._msg_queue is None:
             return
@@ -285,6 +285,13 @@ class BuildPage(Page):
             self._open_last_btn.configure(state=tk.NORMAL)
             self._log.append(
                 f"\n[log file: {self._last_log_path}]\n")
+
+        # Publish ``build_done`` so other pages / app-level listeners
+        # (status bar, toast, telemetry, etc.) can react without this
+        # page knowing about any of them.  Subscribers live in
+        # ``gui/app.py``'s `_sync_status` handler.  Emitted BEFORE the
+        # force-retry branch so consumers see every attempt.
+        self.app.state.bus.emit("build_done", result)
 
         if self._pending_force and not result.success:
             if messagebox.askyesno(
