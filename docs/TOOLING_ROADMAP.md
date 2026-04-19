@@ -1,0 +1,265 @@
+# Tooling Roadmap
+
+Prioritised catalogue of tools worth building to accelerate Azurik
+reverse-engineering, patch authoring, and modding.  Each entry is
+ranked by **ROI** (value per hour of effort based on observed
+friction in real sessions), with a short justification and a
+concrete shape-of-the-API sketch.
+
+The entries in Tier 1 are shipped; Tier 2 is planned; Tier 3 is
+speculative.  Contributions welcome — pick an item and open a PR.
+
+---
+
+## Tier 1 — Shipped
+
+### 1. `azurik-mod xbe` — XBE swiss-army CLI
+
+Status: **shipped** (see `azurik_mod/xbe_tools/commands.py`).
+
+Replaces the bespoke Python one-liners I kept rewriting across
+every RE session.  Unified subcommand with verbs:
+
+- `addr <hex>` — VA ↔ file-offset conversion (both directions,
+  auto-detected from value or forced with `--from`)
+- `hexdump <addr>` — hex + ASCII context, optionally with
+  disassembly overlay
+- `find-refs <addr|--string>` — every `.text` instruction that
+  pushes this VA as an imm32 (PUSH / MOV r32 / FF 25 thunk),
+  de-duplicated, with decoded asm context
+- `find-floats <min> <max>` — every IEEE 754 float32 / float64
+  in `.rdata` whose value lies in ``[min, max]``
+- `sections` — XBE section table (name, VA, size, flags)
+- `strings <pattern>` — locate strings by substring / regex,
+  show VA + first 3 callers
+
+Each verb works against either an unpacked `default.xbe` or an
+ISO (auto-extracts via `xdvdfs copy-out`).
+
+**Replaced workflow cost**: ~15–30 min per RE session writing
+ad-hoc scanners.  Now one shell command.
+
+### 2. `azurik-mod ghidra-coverage` — knowledge gap report
+
+Status: **shipped** (see `azurik_mod/xbe_tools/ghidra_coverage.py`).
+
+Cross-references three knowledge sources we maintain in Python
+(`vanilla_symbols.py`, `azurik.h` VA anchors, randomizer scan
+targets, patch-site registry) against an optional Ghidra snapshot
+to report:
+
+- **Knowledge without label** — VAs we've documented where
+  Ghidra still shows `FUN_xxxxxxxx`
+- **Label without knowledge** — Ghidra has a nice name; Python
+  side doesn't reference it yet (candidates for vanilla_symbols)
+- **Everything we track** — quick overview of the ~60 named
+  VAs, the ~50 vanilla-symbol functions, the ~35 shim anchors
+
+Works fully offline; if a Ghidra snapshot JSON isn't provided
+it runs the Python-side-only audit.
+
+### 3. `azurik-mod shim-inspect` — compiled-object preview
+
+Status: **shipped** (see `azurik_mod/xbe_tools/shim_inspect.py`).
+
+Given a ``shims/build/<name>.o`` or a feature folder, emit the
+exact bytes that will land in the XBE after the COFF loader
+relocates the section.  Includes:
+
+- Section layout (size per section, total bytes)
+- Symbol table (name, section, value, storage class, with
+  calling-convention inferred from stdcall ``@N`` suffixes)
+- Relocation table (type, offset, target-symbol)
+- Raw bytes + Capstone disassembly per section
+
+Catches "did my ``_Static_assert`` trigger?", "is my REL32
+targeting the right symbol?", and "how big will this be after
+the loader lays it out?" WITHOUT a full build-and-patch cycle.
+
+---
+
+## Tier 2 — Planned (high ROI)
+
+### 4. Ghidra knowledge-sync — push Python-side annotations to MCP
+
+One-way sync that takes every VA anchor in `azurik.h`, every
+`VanillaSymbol`, every documented patch site, and writes them
+back into the open Ghidra project via the MCP's
+`functions_rename` + `comments_set` + `data_create` tools.
+
+Effect: open any of those VAs in Ghidra and see:
+
+- Function renamed from `FUN_00085700` → `gravity_integrate`
+- Docstring-as-plate-comment explaining the ABI
+- Struct fields applied to the `this` pointer
+
+**Sketch**:
+
+```bash
+azurik-mod ghidra-sync --dry-run
+azurik-mod ghidra-sync --apply      # writes to :8193
+azurik-mod ghidra-sync --apply --port 8193
+```
+
+Dry-run is critical — Ghidra project state is precious.
+
+### 5. Trampoline planner
+
+Given a patch-site VA, produce an authoring report:
+
+- How many bytes need to be replaced (walks instruction
+  boundaries via Capstone, so you can't accidentally split a
+  multi-byte insn)
+- Current bytes shown as asm + hex
+- Registers live at the site (from Ghidra decompilation)
+- Expected return type / calling convention
+- A pre-filled trampoline site declaration ready to paste into
+  a `patches/<name>/__init__.py`
+
+```bash
+azurik-mod plan-trampoline 0x5F6E5
+# → "Replace 5 bytes (CALL rel32); preserves AL, stdcall N=8,
+#    registers clobbered by callee:  EAX, ECX, EDX"
+```
+
+**Why it matters**: I've mis-sized trampolines twice.  The
+`_Static_assert(sizeof(trampoline_bytes) == 5)` catches it at
+compile time but the rebuild cycle is still 30+ seconds.
+
+### 6. Shim scaffolder with ABI picker
+
+Extend `shims/toolchain/new_shim.sh` to:
+
+- Ask the user for the hook-site VA
+- Fetch that function's signature / calling convention from the
+  open Ghidra instance via MCP
+- Generate a correctly-annotated C template (`__attribute__((stdcall))`,
+  proper register-clobber list, matching return type)
+- Pre-fill the feature folder with a working `__init__.py`
+  referencing a plausible `TrampolinePatch` site
+
+```bash
+shims/toolchain/new_shim.sh qol_speedy_boot --hook 0x5F6E5
+```
+
+### 7. XBR record-layout inspector
+
+Given an XBR file + a TOC entry tag (e.g. `surf`), dump the
+first N records with guessed field types based on byte-level
+heuristics (is this 4 bytes a plausible float? int? pointer?).
+Speeds up RE of per-level record layouts (critical for the
+randomizer's deeper passes).
+
+```bash
+azurik-mod xbr inspect w1.xbr --tag surf --entries 3
+```
+
+### 8. Entity descriptor diff
+
+`azurik-mod entity diff garret4 critter_spider` — side-by-side
+field compare across two `characters.xbr` or `config.xbr`
+entries.  Use case: "why does this enemy have 5× the HP of
+that one?" answered in one command.
+
+### 9. Test selector by VA / pack / shim
+
+`azurik-mod test-for-va 0x85F62` — runs only the pytest cases
+whose source mentions this VA.  Helps when iterating on a
+single patch without blowing through the full 429-test suite
+every time.
+
+Implementation: scan test files, grep for VA hex, run matching
+tests.
+
+### 10. VA-drift pin helper
+
+A `@pin_va(0x85F62, "d9 05 08 00 1f 00")` pytest decorator that
+reads the vanilla XBE at test time and asserts the bytes at the
+given VA match the expected pattern.  Already implemented
+ad-hoc in several tests — centralise it into one helper with
+nice failure messages.
+
+---
+
+## Tier 3 — Speculative (moderate or delayed ROI)
+
+### 11. RE session recorder
+
+Capture every Ghidra MCP call + response during an exploration
+session to `docs/re-sessions/<date>.md` as an annotated journal.
+Makes "what did we figure out last month?" a grep instead of a
+transcript archaeology expedition.
+
+### 12. Level XBR diff tool
+
+`azurik-mod xbr diff w1.xbr w1_modded.xbr` — structural diff of
+two level files showing added/removed entities, moved portals,
+changed pickups.  Essential if multi-file mods ever become a
+thing.
+
+### 13. Bink movie metadata dumper
+
+Parse `movies/*.bik` headers: resolution, frame count, duration,
+audio codec.  Low code cost, occasional RE value when
+rebalancing boot-time cutscenes.
+
+### 14. Audio asset dump (from `wave` tags in `fx.xbr`)
+
+Extract the embedded audio blobs from `fx.xbr`'s `wave` TOC
+entries.  Unlocks sound-replacement mods.  Not useful until
+someone decodes the wave header format.
+
+### 15. Ghidra snapshot exporter
+
+Dump every function name / label / comment / struct from the
+open Ghidra project to a JSON file committed in
+`docs/ghidra-snapshot.json`.  Gives us:
+
+- Offline reference when Ghidra isn't running
+- Diff over time (did someone auto-analyze-overwrite my nice
+  names?)
+- Input to the coverage-report tool (#2) when not attached to
+  a live MCP
+
+Risk: snapshot file could become massive (10k+ functions).
+Probably scope to just named + commented symbols.
+
+### 16. Plugin-pack distribution
+
+Turn each feature folder into a PyPI-installable plugin (entry-
+point group `azurik_mod.patches`) so third-party modders can
+ship their packs as standalone installables rather than
+upstream PRs.
+
+---
+
+## Scoring methodology
+
+- **Value** — estimated minutes saved per session × sessions-per-
+  month, measured against the times I actually reached for the
+  functionality and had to improvise
+- **Cost** — rough hours to implement + maintain
+- **ROI** — Value / Cost, normalized to a 1–10 scale
+
+| # | Tool                        | Value | Cost | ROI | Status   |
+|---|-----------------------------|-------|------|-----|----------|
+| 1 | `xbe` swiss-army CLI        | 9     | 2    | 10  | shipped  |
+| 2 | `ghidra-coverage`           | 7     | 2    | 9   | shipped  |
+| 3 | `shim-inspect`              | 6     | 2    | 8   | shipped  |
+| 4 | Ghidra knowledge-sync       | 9     | 3    | 10  | planned  |
+| 5 | Trampoline planner          | 7     | 2    | 9   | planned  |
+| 6 | Shim scaffolder w/ ABI      | 6     | 2    | 8   | planned  |
+| 7 | XBR layout inspector        | 5     | 3    | 7   | planned  |
+| 8 | Entity diff                 | 4     | 1    | 7   | planned  |
+| 9 | Test selector               | 4     | 1    | 7   | planned  |
+|10 | VA-drift pin helper         | 3     | 1    | 6   | planned  |
+|11 | RE session recorder         | 5     | 4    | 5   | maybe    |
+|12 | Level XBR diff              | 3     | 2    | 5   | maybe    |
+|13 | Bink metadata               | 2     | 1    | 4   | maybe    |
+|14 | Audio asset dump            | 3     | 4    | 3   | speculative |
+|15 | Ghidra snapshot exporter    | 5     | 2    | 6   | maybe    |
+|16 | Plugin pack distribution    | 4     | 3    | 5   | speculative |
+
+The top three shipped today deliver ≥25 minutes of saved time
+per RE session, based on real measurement against the
+conversation transcript.

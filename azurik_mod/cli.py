@@ -375,6 +375,139 @@ def main() -> None:
     p_iso.add_argument("--limit", type=int, default=None,
         help="Stop after N integrity issues (default: report all)")
 
+    # ------------------------------------------------------------------
+    # xbe (reverse-engineering swiss-army knife)
+    # See docs/TOOLING_ROADMAP.md for rationale.
+    # ------------------------------------------------------------------
+    p_xbe = sub.add_parser(
+        "xbe",
+        help="Inspect default.xbe — address arithmetic, hexdump, "
+             "reference finder, float / string scanners",
+        description=(
+            "Thin CLI around azurik_mod.xbe_tools.xbe_scan.  Every\n"
+            "verb accepts --iso PATH.iso (extracts via xdvdfs) or\n"
+            "--xbe PATH.xbe (raw file).  Add --json for machine-\n"
+            "readable output.\n\n"
+            "Common recipes:\n"
+            "  xbe addr 0x85700                       VA → file offset\n"
+            "  xbe addr 0x75700 --from file           file → VA\n"
+            "  xbe hexdump 0x19C1AC --length 64       byte context\n"
+            "  xbe find-refs --va 0x19C1AC            who pushes this VA?\n"
+            "  xbe find-refs --string fx_magic_timer  locate + find-refs in one go\n"
+            "  xbe find-floats 9.7 9.9                gravity constants\n"
+            "  xbe strings 'levels/water'             grep strings .rdata\n"
+            "  xbe sections                           dump section table\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _xbe_sub = p_xbe.add_subparsers(dest="xbe_command", required=True)
+
+    def _add_source_args(p):
+        p.add_argument("--iso", help="Path to Azurik ISO (extracts XBE)")
+        p.add_argument("--xbe", help="Path to raw default.xbe")
+        p.add_argument("--json", action="store_true",
+            help="Emit JSON instead of human-readable text")
+
+    p_addr = _xbe_sub.add_parser("addr",
+        help="Resolve a number to (VA, file offset, section)")
+    _add_source_args(p_addr)
+    p_addr.add_argument("value",
+        help="Hex (0x...) or decimal number to resolve")
+    p_addr.add_argument("--from", dest="from_",
+        choices=("auto", "va", "file"), default="auto",
+        help="Force treating the input as a VA or file offset "
+             "(default: auto — guess from magnitude)")
+
+    p_hex = _xbe_sub.add_parser("hexdump",
+        help="Hexdump bytes starting at a VA or file offset")
+    _add_source_args(p_hex)
+    p_hex.add_argument("address",
+        help="VA (default) or file offset (with --file) to start at")
+    p_hex.add_argument("--length", type=int, default=64,
+        help="How many bytes to dump (default 64)")
+    p_hex.add_argument("--file", action="store_true",
+        help="Treat the address as a file offset instead of a VA")
+
+    p_refs = _xbe_sub.add_parser("find-refs",
+        help="Find .text instructions that push a VA as imm32")
+    _add_source_args(p_refs)
+    p_refs.add_argument("--va",
+        help="Target VA to search for (hex 0x... or decimal)")
+    p_refs.add_argument("--string",
+        help="Locate this string's VA first, then find refs to it")
+
+    p_flt = _xbe_sub.add_parser("find-floats",
+        help="Find float/double constants in .rdata in a value range")
+    _add_source_args(p_flt)
+    p_flt.add_argument("min", help="Lower bound (inclusive)")
+    p_flt.add_argument("max", help="Upper bound (inclusive)")
+    p_flt.add_argument("--width", choices=("float", "double", "both"),
+        default="both",
+        help="Restrict to float32 / float64 / both (default both)")
+
+    p_str = _xbe_sub.add_parser("strings",
+        help="Find printable ASCII strings in .rdata / .data")
+    _add_source_args(p_str)
+    p_str.add_argument("pattern",
+        help="Substring (default) or regex (with --regex)")
+    p_str.add_argument("--regex", action="store_true",
+        help="Treat PATTERN as a Python regex")
+    p_str.add_argument("--min-len", type=int, default=4,
+        help="Ignore matches shorter than this (default 4)")
+    p_str.add_argument("--limit", type=int, default=200,
+        help="Cap results at N (default 200)")
+
+    p_sec = _xbe_sub.add_parser("sections",
+        help="Dump the XBE section table")
+    _add_source_args(p_sec)
+
+    # ------------------------------------------------------------------
+    # ghidra-coverage — knowledge-vs-labeled gap report
+    # ------------------------------------------------------------------
+    p_gc = sub.add_parser(
+        "ghidra-coverage",
+        help="Audit what we know vs what Ghidra labels",
+        description=(
+            "Cross-references our azurik.h VA anchors + vanilla_symbols\n"
+            "+ patch-site registry against an optional Ghidra snapshot\n"
+            "JSON.  Lists VAs we document but Ghidra still shows FUN_*\n"
+            "for (prime sync candidates) + Ghidra labels the Python side\n"
+            "doesn't track yet (promotion candidates).\n\n"
+            "Runs Python-side-only when no snapshot is given; pass\n"
+            "--snapshot PATH.json to activate the full diff."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_gc.add_argument("--snapshot",
+        help="Path to a Ghidra snapshot JSON "
+             "(schema documented in azurik_mod/xbe_tools/ghidra_coverage.py)")
+    p_gc.add_argument("--json", action="store_true",
+        help="Emit JSON instead of the human-readable report")
+
+    # ------------------------------------------------------------------
+    # shim-inspect — preview bytes a compiled shim .o will emit
+    # ------------------------------------------------------------------
+    p_si = sub.add_parser(
+        "shim-inspect",
+        help="Inspect a compiled shim object (bytes / relocations / symbols)",
+        description=(
+            "Parses a PE-COFF .o (as produced by the shim build\n"
+            "pipeline) and reports section sizes, the symbol table,\n"
+            "and every relocation.  Use this to verify a shim's\n"
+            "trampoline fits the budget and that its external symbols\n"
+            "match vanilla_symbols expectations BEFORE running a full\n"
+            "build+patch cycle.\n\n"
+            "Accepts either an explicit .o path or a feature folder\n"
+            "(azurik_mod/patches/<name>/) — in the latter case the\n"
+            "pack's ShimSource determines which .o to load."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_si.add_argument("target",
+        help="Path to a .o file OR a feature folder")
+    p_si.add_argument("--json", action="store_true",
+        help="Emit JSON instead of the human-readable report")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -393,6 +526,9 @@ def main() -> None:
         "verify-patches": cmd_verify_patches,
         "save": _dispatch_save,
         "iso-verify": _dispatch_iso_verify,
+        "xbe": _dispatch_xbe,
+        "ghidra-coverage": _dispatch_ghidra_coverage,
+        "shim-inspect": _dispatch_shim_inspect,
     }
     dispatch[args.command](args)
 
@@ -400,6 +536,40 @@ def main() -> None:
 def _dispatch_iso_verify(args) -> None:
     from azurik_mod.assets.commands import cmd_iso_verify
     cmd_iso_verify(args)
+
+
+def _dispatch_xbe(args) -> None:
+    """Route the ``xbe`` subcommand to the right verb handler."""
+    from azurik_mod.xbe_tools.commands import (
+        cmd_xbe_addr,
+        cmd_xbe_find_floats,
+        cmd_xbe_find_refs,
+        cmd_xbe_hexdump,
+        cmd_xbe_sections,
+        cmd_xbe_strings,
+    )
+    verbs = {
+        "addr": cmd_xbe_addr,
+        "hexdump": cmd_xbe_hexdump,
+        "find-refs": cmd_xbe_find_refs,
+        "find-floats": cmd_xbe_find_floats,
+        "strings": cmd_xbe_strings,
+        "sections": cmd_xbe_sections,
+    }
+    verb = verbs.get(args.xbe_command)
+    if verb is None:
+        raise SystemExit(f"unknown xbe verb: {args.xbe_command!r}")
+    verb(args)
+
+
+def _dispatch_ghidra_coverage(args) -> None:
+    from azurik_mod.xbe_tools.commands import cmd_ghidra_coverage
+    cmd_ghidra_coverage(args)
+
+
+def _dispatch_shim_inspect(args) -> None:
+    from azurik_mod.xbe_tools.commands import cmd_shim_inspect
+    cmd_shim_inspect(args)
 
 
 def _dispatch_save(args) -> None:

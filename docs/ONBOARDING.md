@@ -237,6 +237,66 @@ Key files behind each step:
 | XBE section surgery         | `azurik_mod/patching/xbe.py`                        |
 | Kernel import stubs (D1)    | `azurik_mod/patching/shim_session.py`               |
 
+## 5a. Reverse-engineering toolkit
+
+Three CLI verbs accelerate the common RE workflows — skip the
+bespoke Python one-liners and use these instead.
+
+### `azurik-mod xbe` — work at the XBE byte/VA level
+
+```bash
+# VA ↔ file-offset (auto-detected by magnitude)
+azurik-mod xbe addr 0x85700 --xbe default.xbe
+
+# "Who pushes this VA as imm32?" — the single most useful RE verb
+azurik-mod xbe find-refs --string fx_magic_timer --xbe default.xbe
+
+# Find a float constant anywhere in .rdata
+azurik-mod xbe find-floats 9.7 9.9 --xbe default.xbe --width float
+
+# Byte context around a VA
+azurik-mod xbe hexdump 0x19C1AC --length 64 --xbe default.xbe
+
+# Strings with regex support
+azurik-mod xbe strings 'levels/water/' --xbe default.xbe
+
+# Section table dump
+azurik-mod xbe sections --xbe default.xbe
+```
+
+Every verb accepts `--iso PATH.iso` instead of `--xbe` (auto-
+extracts via `xdvdfs`) and `--json` for machine-readable output.
+Full reference: [`docs/TOOLING_ROADMAP.md`](TOOLING_ROADMAP.md).
+
+### `azurik-mod ghidra-coverage` — knowledge gap report
+
+Cross-references our Python-side knowledge (`azurik.h` VA
+anchors + `vanilla_symbols.py` entries + every registered patch
+site) against an optional Ghidra snapshot:
+
+```bash
+azurik-mod ghidra-coverage                # offline inventory
+azurik-mod ghidra-coverage --snapshot ghidra.json  # diff mode
+```
+
+Lists VAs we document but Ghidra still shows `FUN_*` for — your
+next Ghidra knowledge-sync pass starts with that list.
+
+### `azurik-mod shim-inspect` — preview what bytes a `.o` emits
+
+```bash
+# Inspect by feature folder (resolves to shims/build/<name>.o)
+azurik-mod shim-inspect azurik_mod/patches/qol_skip_logo
+
+# Or pass the .o directly
+azurik-mod shim-inspect shims/build/qol_skip_logo.o
+```
+
+Reports section sizes, every symbol (global / external /
+internal), and every relocation with its target.  Catches
+`_Static_assert` failures, wrong REL32 targets, and "is my
+trampoline <= 5 bytes?" questions without a full build cycle.
+
 ## 6. Where do I look when...
 
 | Symptom                                           | Start reading                            |
