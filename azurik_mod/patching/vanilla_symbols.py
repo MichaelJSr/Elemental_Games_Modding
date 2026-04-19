@@ -673,6 +673,1930 @@ register(VanillaSymbol(
 ))
 
 
+
+# ---------------------------------------------------------------------------
+# Bulk Xbox kernel / XDK / C-runtime coverage (April 2026 expansion)
+# ---------------------------------------------------------------------------
+#
+# 242 entries below were auto-generated from the Ghidra snapshot +
+# audited against the ``test_va_audit`` prologue drift guard.  Each
+# call's ABI was inferred as follows:
+#
+#   - Cdecl for C-runtime / MSVC-internal names (``_foo`` / ``__foo``)
+#     and any varargs signature.
+#   - Stdcall for Xbox SDK / Win32 APIs (X*, Xc*, Xe*, Xapi*, D3D*,
+#     Mm*, Ke*, Rtl*, plus a hand-curated Win32 set).
+#   - Stack-arg bytes = sum of 4-byte slots (8 for ``long long`` /
+#     ``double`` params).
+#
+# Shim authors: the matching extern declarations live in
+# ``shims/include/azurik_vanilla.h``.  If a name you want isn't
+# here, add it + its extern together, then run
+# ``pytest tests/test_vanilla_thunks.py tests/test_va_audit.py``.
+
+
+register(VanillaSymbol(
+    name="XapiSelectCachePartition",
+    va=0x000DFE7B,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc="Auto-generated stdcall(12) entry for ``XapiSelectCachePartition``. Ghidra signature: ``int XapiSelectCachePartition(int param_1, uint * param_2, undefined4 * param_3)``",
+))
+
+register(VanillaSymbol(
+    name="XMountUtilityDrive",
+    va=0x000E007F,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``XMountUtilityDrive``. Ghidra signature: ``undefined1 XMountUtilityDrive(int param_1)``",
+))
+
+register(VanillaSymbol(
+    name="XMountAlternateTitleA",
+    va=0x000E016A,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc="Auto-generated stdcall(12) entry for ``XMountAlternateTitleA``. Ghidra signature: ``undefined4 XMountAlternateTitleA(byte * param_1, dword param_2, char * param_3)``",
+))
+
+register(VanillaSymbol(
+    name="XUnmountAlternateTitleA",
+    va=0x000E02CF,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``XUnmountAlternateTitleA``. Ghidra signature: ``undefined XUnmountAlternateTitleA(byte param_1)``",
+))
+
+register(VanillaSymbol(
+    name="XMUNameFromDriveLetter",
+    va=0x000E0466,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc="Auto-generated stdcall(12) entry for ``XMUNameFromDriveLetter``. Ghidra signature: ``undefined4 XMUNameFromDriveLetter(undefined4 param_1, undefined4 param_2, undefined4 param_3)``",
+))
+
+register(VanillaSymbol(
+    name="MoveFileA",
+    va=0x000E06B4,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``MoveFileA``. Ghidra signature: ``undefined4 MoveFileA(undefined4 param_1, undefined4 param_2)``",
+))
+
+register(VanillaSymbol(
+    name="OpenEventA",
+    va=0x000E0D04,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc="Auto-generated stdcall(12) entry for ``OpenEventA``. Ghidra signature: ``int OpenEventA(undefined4 param_1, undefined4 param_2, int param_3)``",
+))
+
+register(VanillaSymbol(
+    name="PulseEvent",
+    va=0x000E0D9E,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``PulseEvent``. Ghidra signature: ``bool PulseEvent(undefined4 param_1)``",
+))
+
+register(VanillaSymbol(
+    name="CreateMutexA",
+    va=0x000E0E9B,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc="Auto-generated stdcall(12) entry for ``CreateMutexA``. Ghidra signature: ``int CreateMutexA(undefined4 param_1, undefined4 param_2, int param_3)``",
+))
+
+register(VanillaSymbol(
+    name="SignalObjectAndWait",
+    va=0x000E0FB3,
+    calling_convention="stdcall",
+    arg_bytes=16,
+    doc="Auto-generated stdcall(16) entry for ``SignalObjectAndWait``. Ghidra signature: ``int SignalObjectAndWait(undefined4 param_1, undefined4 param_2, uint param_3, int param_4)``",
+))
+
+register(VanillaSymbol(
+    name="XCalculateSignatureBegin",
+    va=0x000E2BC9,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``XCalculateSignatureBegin``. Ghidra signature: ``undefined4 * XCalculateSignatureBegin(undefined4 param_1)``",
+))
+
+register(VanillaSymbol(
+    name="XapiSetLastNTError",
+    va=0x000E2DFD,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``XapiSetLastNTError``. Ghidra signature: ``undefined4 XapiSetLastNTError(undefined4 param_1)``",
+))
+
+register(VanillaSymbol(
+    name="GetOverlappedResult",
+    va=0x000E2F40,
+    calling_convention="stdcall",
+    arg_bytes=16,
+    doc="Auto-generated stdcall(16) entry for ``GetOverlappedResult``. Ghidra signature: ``undefined4 GetOverlappedResult(int param_1, int * param_2, int * param_3, int param_4)``",
+))
+
+register(VanillaSymbol(
+    name="XapiMapLetterToDirectory",
+    va=0x000E66A4,
+    calling_convention="stdcall",
+    arg_bytes=24,
+    doc="Auto-generated stdcall(24) entry for ``XapiMapLetterToDirectory``. Ghidra signature: ``int XapiMapLetterToDirectory(undefined4 param_1, ushort * param_2, char * param_3, int param_4, short * param_5, XBE_SECTION_HEADER * param_6)``",
+))
+
+register(VanillaSymbol(
+    name="XapiInitProcess",
+    va=0x000E6A92,
+    calling_convention="stdcall",
+    arg_bytes=0,
+    doc="Auto-generated stdcall(0) entry for ``XapiInitProcess``. Ghidra signature: ``undefined XapiInitProcess()``",
+))
+
+register(VanillaSymbol(
+    name="XapiFormatObjectAttributes",
+    va=0x000E705E,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc="Auto-generated stdcall(12) entry for ``XapiFormatObjectAttributes``. Ghidra signature: ``undefined XapiFormatObjectAttributes(undefined4 param_1, undefined4 param_2, undefined4 param_3)``",
+))
+
+register(VanillaSymbol(
+    name="cinit",
+    va=0x000E72DC,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``_cinit``. Ghidra signature: ``undefined cinit()``",
+))
+
+register(VanillaSymbol(
+    name="rtinit",
+    va=0x000E7334,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``_rtinit``. Ghidra signature: ``undefined rtinit()``",
+))
+
+register(VanillaSymbol(
+    name="XapiCallThreadNotifyRoutines",
+    va=0x000E735D,
+    calling_convention="stdcall",
+    arg_bytes=0,
+    doc="Auto-generated stdcall(0) entry for ``XapiCallThreadNotifyRoutines``. Ghidra signature: ``undefined XapiCallThreadNotifyRoutines()``",
+))
+
+register(VanillaSymbol(
+    name="UnhandledExceptionFilter",
+    va=0x000E7395,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``UnhandledExceptionFilter``. Ghidra signature: ``undefined4 UnhandledExceptionFilter(undefined4 param_1)``",
+))
+
+register(VanillaSymbol(
+    name="SetThreadPriority",
+    va=0x000E73B2,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``SetThreadPriority``. Ghidra signature: ``undefined4 SetThreadPriority(undefined4 param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="GetThreadPriority",
+    va=0x000E7404,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``GetThreadPriority``. Ghidra signature: ``int GetThreadPriority(undefined4 param_1)``",
+))
+
+register(VanillaSymbol(
+    name="SetThreadPriorityBoost",
+    va=0x000E7458,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``SetThreadPriorityBoost``. Ghidra signature: ``bool SetThreadPriorityBoost(undefined4 param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="RaiseException",
+    va=0x000E752B,
+    calling_convention="stdcall",
+    arg_bytes=16,
+    doc="Auto-generated stdcall(16) entry for ``RaiseException``. Ghidra signature: ``undefined RaiseException(undefined4 param_1, uint param_2, uint param_3, undefined4 * param_4)``",
+))
+
+register(VanillaSymbol(
+    name="ExitThread",
+    va=0x000E75C4,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``ExitThread``. Ghidra signature: ``undefined ExitThread(undefined4 param_1)``",
+))
+
+register(VanillaSymbol(
+    name="GetExitCodeThread",
+    va=0x000E75D6,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``GetExitCodeThread``. Ghidra signature: ``undefined4 GetExitCodeThread(int param_1, undefined4 * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="XRegisterThreadNotifyRoutine",
+    va=0x000E76BD,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``XRegisterThreadNotifyRoutine``. Ghidra signature: ``undefined XRegisterThreadNotifyRoutine(int param_1)``",
+))
+
+register(VanillaSymbol(
+    name="CreateThread",
+    va=0x000E77A5,
+    calling_convention="stdcall",
+    arg_bytes=24,
+    doc="Auto-generated stdcall(24) entry for ``CreateThread``. Ghidra signature: ``dword CreateThread(undefined4 param_1, dword param_2, undefined4 param_3, undefined4 param_4, uint param_5, undefined4 param_6)``",
+))
+
+register(VanillaSymbol(
+    name="XGetSectionSize",
+    va=0x000E7A90,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``XGetSectionSize``. Ghidra signature: ``undefined4 XGetSectionSize(int param_1)``",
+))
+
+register(VanillaSymbol(
+    name="XAutoPowerDownResetTimer",
+    va=0x000E7A9A,
+    calling_convention="stdcall",
+    arg_bytes=0,
+    doc="Auto-generated stdcall(0) entry for ``XAutoPowerDownResetTimer``. Ghidra signature: ``undefined XAutoPowerDownResetTimer()``",
+))
+
+register(VanillaSymbol(
+    name="ExQueryNonVolatileSetting",
+    va=0x000E7E0E,
+    calling_convention="stdcall",
+    arg_bytes=20,
+    doc="Auto-generated stdcall(20) entry for ``ExQueryNonVolatileSetting``. Ghidra signature: ``NTSTATUS ExQueryNonVolatileSetting(XBX_ULONG ValueIndex, XBX_PULONG Type, XBX_PVOID Value, XBX_ULONG ValueLength, XBX_PULONG ResultLength)``",
+))
+
+register(VanillaSymbol(
+    name="_onexit_lk",
+    va=0x000EB278,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__onexit_lk``. Ghidra signature: ``undefined _onexit_lk()``",
+))
+
+register(VanillaSymbol(
+    name="__onexitinit",
+    va=0x000EB2F8,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``___onexitinit``. Ghidra signature: ``undefined4 __onexitinit()``",
+))
+
+register(VanillaSymbol(
+    name="_onexit",
+    va=0x000EB320,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__onexit``. Ghidra signature: ``undefined4 _onexit()``",
+))
+
+register(VanillaSymbol(
+    name="atexit",
+    va=0x000EB358,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``_atexit``. Ghidra signature: ``int atexit(__func * __func)``",
+))
+
+register(VanillaSymbol(
+    name="_fclose_lk",
+    va=0x000EB495,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__fclose_lk``. Ghidra signature: ``undefined4 _fclose_lk(int * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_abstract_cw",
+    va=0x000EBC8E,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__abstract_cw``. Ghidra signature: ``uint _abstract_cw()``",
+))
+
+register(VanillaSymbol(
+    name="_hw_cw",
+    va=0x000EBD20,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__hw_cw``. Ghidra signature: ``uint _hw_cw()``",
+))
+
+register(VanillaSymbol(
+    name="_control87",
+    va=0x000EBE0C,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__control87``. Ghidra signature: ``uint _control87(uint param_1, uint param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_controlfp",
+    va=0x000EBE3E,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__controlfp``. Ghidra signature: ``undefined _controlfp(uint param_1, uint param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_fsopen",
+    va=0x000EC09F,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__fsopen``. Ghidra signature: ``undefined4 _fsopen()``",
+))
+
+register(VanillaSymbol(
+    name="_dosmaperr",
+    va=0x000EC190,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__dosmaperr``. Ghidra signature: ``undefined _dosmaperr(uint param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_wcsdup",
+    va=0x000EC203,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__wcsdup``. Ghidra signature: ``wchar_t * _wcsdup(wchar_t * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_copysign",
+    va=0x000EC288,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__copysign``. Ghidra signature: ``double _copysign(double __x, double __y)``",
+))
+
+register(VanillaSymbol(
+    name="_chgsign",
+    va=0x000EC2A9,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__chgsign``. Ghidra signature: ``float10 _chgsign(undefined4 param_1, uint param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_allmul",
+    va=0x000EC8E0,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__allmul``. Ghidra signature: ``longlong _allmul(uint param_1, int param_2, uint param_3, int param_4)``",
+))
+
+register(VanillaSymbol(
+    name="_SEH_epilog",
+    va=0x000ECC91,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__SEH_epilog``. Ghidra signature: ``undefined _SEH_epilog()``",
+))
+
+register(VanillaSymbol(
+    name="_global_unwind2",
+    va=0x000ECCA4,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__global_unwind2``. Ghidra signature: ``undefined _global_unwind2(undefined4 param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_local_unwind2",
+    va=0x000ECCE6,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__local_unwind2``. Ghidra signature: ``undefined _local_unwind2(int param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_aullshr",
+    va=0x000ECDA0,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__aullshr``. Ghidra signature: ``ulonglong _aullshr(byte param_1, uint param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_aullrem",
+    va=0x000ECDC0,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__aullrem``. Ghidra signature: ``undefined8 _aullrem(uint param_1, uint param_2, uint param_3, uint param_4)``",
+))
+
+register(VanillaSymbol(
+    name="wcsncpy",
+    va=0x000ECE35,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``_wcsncpy``. Ghidra signature: ``wchar_t * wcsncpy(wchar_t * __dest, wchar_t * __src, size_t __n)``",
+))
+
+register(VanillaSymbol(
+    name="_aulldiv",
+    va=0x000ECF20,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__aulldiv``. Ghidra signature: ``undefined8 _aulldiv(uint param_1, uint param_2, uint param_3, uint param_4)``",
+))
+
+register(VanillaSymbol(
+    name="_allshr",
+    va=0x000ECF90,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__allshr``. Ghidra signature: ``undefined8 _allshr(byte param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_alldiv",
+    va=0x000ED000,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__alldiv``. Ghidra signature: ``undefined8 _alldiv(uint param_1, uint param_2, uint param_3, uint param_4)``",
+))
+
+register(VanillaSymbol(
+    name="_wcsicmp",
+    va=0x000ED0AA,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__wcsicmp``. Ghidra signature: ``int _wcsicmp(ushort * param_1, ushort * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="wcscpy",
+    va=0x000ED15C,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``_wcscpy``. Ghidra signature: ``wchar_t * wcscpy(wchar_t * __dest, wchar_t * __src)``",
+))
+
+register(VanillaSymbol(
+    name="isalpha",
+    va=0x000ED399,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``_isalpha``. Ghidra signature: ``int isalpha(int param_1)``",
+))
+
+register(VanillaSymbol(
+    name="isdigit",
+    va=0x000ED419,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``_isdigit``. Ghidra signature: ``int isdigit(int param_1)``",
+))
+
+register(VanillaSymbol(
+    name="isspace",
+    va=0x000ED470,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``_isspace``. Ghidra signature: ``int isspace(int param_1)``",
+))
+
+register(VanillaSymbol(
+    name="isalnum",
+    va=0x000ED4C2,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``_isalnum``. Ghidra signature: ``int isalnum(int param_1)``",
+))
+
+register(VanillaSymbol(
+    name="seh_longjmp_unwind",
+    va=0x000ED6C9,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``_seh_longjmp_unwind``. Ghidra signature: ``undefined seh_longjmp_unwind(int param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_flsbuf",
+    va=0x000ED997,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__flsbuf``. Ghidra signature: ``uint _flsbuf(byte param_1, int * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="write_char",
+    va=0x000EDAB0,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``_write_char``. Ghidra signature: ``undefined write_char(int * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="write_multi_char",
+    va=0x000EDAE3,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``_write_multi_char``. Ghidra signature: ``undefined write_multi_char(undefined4 param_1, int param_2, int * param_3)``",
+))
+
+register(VanillaSymbol(
+    name="write_string",
+    va=0x000EDB07,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``_write_string``. Ghidra signature: ``undefined write_string(int param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_close",
+    va=0x000EEB6D,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__close``. Ghidra signature: ``undefined4 _close()``",
+))
+
+register(VanillaSymbol(
+    name="_freebuf",
+    va=0x000EEC08,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__freebuf``. Ghidra signature: ``undefined _freebuf(undefined4 * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_flush",
+    va=0x000EEC33,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__flush``. Ghidra signature: ``undefined4 _flush(int * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_fflush_lk",
+    va=0x000EEC90,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__fflush_lk``. Ghidra signature: ``int _fflush_lk(int * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="flsall",
+    va=0x000EECBE,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``_flsall``. Ghidra signature: ``undefined4 flsall()``",
+))
+
+register(VanillaSymbol(
+    name="_flushall",
+    va=0x000EEDE3,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__flushall``. Ghidra signature: ``undefined _flushall()``",
+))
+
+register(VanillaSymbol(
+    name="_lock_file",
+    va=0x000EEEAF,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__lock_file``. Ghidra signature: ``undefined _lock_file(uint param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_lock_file2",
+    va=0x000EEEDE,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__lock_file2``. Ghidra signature: ``undefined _lock_file2(int param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_unlock_file",
+    va=0x000EEF01,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__unlock_file``. Ghidra signature: ``undefined _unlock_file(uint param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_unlock_file2",
+    va=0x000EEF30,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__unlock_file2``. Ghidra signature: ``undefined _unlock_file2(int param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_hextodec",
+    va=0x000EF1EB,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__hextodec``. Ghidra signature: ``uint _hextodec()``",
+))
+
+register(VanillaSymbol(
+    name="_inc",
+    va=0x000EF21D,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__inc``. Ghidra signature: ``uint _inc(undefined4 param_1, undefined4 * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_errcode",
+    va=0x000F02CE,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__errcode``. Ghidra signature: ``int _errcode(byte param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_umatherr",
+    va=0x000F02FB,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__umatherr``. Ghidra signature: ``float10 _umatherr(int param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_handle_qnan1",
+    va=0x000F0399,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__handle_qnan1``. Ghidra signature: ``float10 _handle_qnan1(int param_1, double param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_handle_qnan2",
+    va=0x000F03EC,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__handle_qnan2``. Ghidra signature: ``float10 _handle_qnan2(int param_1, double param_2, double param_3)``",
+))
+
+register(VanillaSymbol(
+    name="_set_exp",
+    va=0x000F05AF,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__set_exp``. Ghidra signature: ``float10 _set_exp(undefined8 param_1, short param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_set_bexp",
+    va=0x000F0618,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__set_bexp``. Ghidra signature: ``float10 _set_bexp(undefined8 param_1, short param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_sptype",
+    va=0x000F063D,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__sptype``. Ghidra signature: ``undefined4 _sptype(int param_1, uint param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_ctrlfp",
+    va=0x000F0765,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__ctrlfp``. Ghidra signature: ``int _ctrlfp()``",
+))
+
+register(VanillaSymbol(
+    name="_filbuf",
+    va=0x000F07E2,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__filbuf``. Ghidra signature: ``uint _filbuf(undefined4 * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_read",
+    va=0x000F0A8C,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__read``. Ghidra signature: ``undefined4 _read()``",
+))
+
+register(VanillaSymbol(
+    name="_stbuf",
+    va=0x000F0B37,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__stbuf``. Ghidra signature: ``undefined4 _stbuf(int * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_ftbuf",
+    va=0x000F0BBF,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__ftbuf``. Ghidra signature: ``undefined _ftbuf(int param_1, int * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_write",
+    va=0x000F0D74,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__write``. Ghidra signature: ``undefined4 _write()``",
+))
+
+register(VanillaSymbol(
+    name="_openfile",
+    va=0x000F1374,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__openfile``. Ghidra signature: ``undefined4 * _openfile(undefined4 param_1, char * param_2, undefined4 param_3, undefined4 * param_4)``",
+))
+
+register(VanillaSymbol(
+    name="_getstream",
+    va=0x000F14DC,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__getstream``. Ghidra signature: ``undefined4 * _getstream()``",
+))
+
+register(VanillaSymbol(
+    name="_forcdecpt",
+    va=0x000F1831,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__forcdecpt``. Ghidra signature: ``undefined _forcdecpt(char * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_fassign",
+    va=0x000F18EE,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__fassign``. Ghidra signature: ``undefined _fassign(uint param_1, uint * param_2, byte * param_3)``",
+))
+
+register(VanillaSymbol(
+    name="_cfltcvt",
+    va=0x000F1BDE,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__cfltcvt``. Ghidra signature: ``undefined _cfltcvt(undefined4 * param_1, char * param_2, int param_3, uint param_4, int param_5)``",
+))
+
+register(VanillaSymbol(
+    name="_trandisp1",
+    va=0x000F1C30,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__trandisp1``. Ghidra signature: ``undefined _trandisp1(undefined4 param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_trandisp2",
+    va=0x000F1C97,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__trandisp2``. Ghidra signature: ``undefined _trandisp2(undefined4 param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_startOneArgErrorHandling",
+    va=0x000F1E13,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__startOneArgErrorHandling``. Ghidra signature: ``float10 _startOneArgErrorHandling(undefined4 param_1, int param_2, ushort param_3, undefined4 param_4, undefined4 param_5, undefined4 param_6)``",
+))
+
+register(VanillaSymbol(
+    name="_fload_withFB",
+    va=0x000F1E95,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__fload_withFB``. Ghidra signature: ``uint _fload_withFB(undefined4 param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_math_exit",
+    va=0x000F1EFB,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__math_exit``. Ghidra signature: ``undefined _math_exit(undefined4 param_1, int param_2, undefined4 param_3, undefined4 param_4, undefined4 param_5)``",
+))
+
+register(VanillaSymbol(
+    name="_lseek",
+    va=0x000F23F8,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__lseek``. Ghidra signature: ``undefined4 _lseek()``",
+))
+
+register(VanillaSymbol(
+    name="_getbuf",
+    va=0x000F252B,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__getbuf``. Ghidra signature: ``undefined _getbuf(undefined4 * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_isatty",
+    va=0x000F256F,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__isatty``. Ghidra signature: ``byte _isatty(uint param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_aulldvrm",
+    va=0x000F25D0,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__aulldvrm``. Ghidra signature: ``undefined8 _aulldvrm(uint param_1, uint param_2, uint param_3, uint param_4)``",
+))
+
+register(VanillaSymbol(
+    name="_get_osfhandle",
+    va=0x000F28B5,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__get_osfhandle``. Ghidra signature: ``undefined4 _get_osfhandle(uint param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_unlock_fhandle",
+    va=0x000F2969,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__unlock_fhandle``. Ghidra signature: ``undefined _unlock_fhandle(uint param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_ZeroTail",
+    va=0x000F34C8,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__ZeroTail``. Ghidra signature: ``undefined4 _ZeroTail(int param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_IncMan",
+    va=0x000F34FA,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__IncMan``. Ghidra signature: ``undefined _IncMan(int param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_RoundMan",
+    va=0x000F3547,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__RoundMan``. Ghidra signature: ``undefined4 _RoundMan(int param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_CopyMan",
+    va=0x000F35B9,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__CopyMan``. Ghidra signature: ``undefined _CopyMan(int param_1, undefined4 * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_IsZeroMan",
+    va=0x000F35E0,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__IsZeroMan``. Ghidra signature: ``undefined4 _IsZeroMan(int param_1)``",
+))
+
+register(VanillaSymbol(
+    name="_ShrMan",
+    va=0x000F35F9,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__ShrMan``. Ghidra signature: ``undefined _ShrMan(int param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_ld12cvt",
+    va=0x000F3674,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__ld12cvt``. Ghidra signature: ``undefined4 _ld12cvt(ushort * param_1, uint * param_2, int * param_3)``",
+))
+
+register(VanillaSymbol(
+    name="_ld12told",
+    va=0x000F37F8,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__ld12told``. Ghidra signature: ``undefined4 _ld12told(ushort * param_1, undefined4 * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_sopen",
+    va=0x000F410B,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__sopen``. Ghidra signature: ``undefined4 _sopen()``",
+))
+
+register(VanillaSymbol(
+    name="__dtold",
+    va=0x000F4214,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``___dtold``. Ghidra signature: ``undefined __dtold(uint * param_1, uint * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_flswbuf",
+    va=0x000F441A,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__flswbuf``. Ghidra signature: ``undefined2 _flswbuf(undefined2 param_1, int * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="__addl",
+    va=0x000F4542,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``___addl``. Ghidra signature: ``undefined4 __addl(uint param_1, uint param_2, uint * param_3)``",
+))
+
+register(VanillaSymbol(
+    name="__add_12",
+    va=0x000F4563,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``___add_12``. Ghidra signature: ``undefined __add_12(uint * param_1, uint * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="__shl_12",
+    va=0x000F45C1,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``___shl_12``. Ghidra signature: ``undefined __shl_12(uint * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="__shr_12",
+    va=0x000F45EF,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``___shr_12``. Ghidra signature: ``undefined __shr_12(uint * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="MmFreeContiguousMemory",
+    va=0x000F4F09,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``MmFreeContiguousMemory``. Ghidra signature: ``void MmFreeContiguousMemory(XBX_PVOID BaseAddress)``",
+))
+
+register(VanillaSymbol(
+    name="GetTimeZoneInformation",
+    va=0x000F53D1,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``GetTimeZoneInformation``. Ghidra signature: ``undefined4 GetTimeZoneInformation(int * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="OutputDebugStringW",
+    va=0x000F568A,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``OutputDebugStringW``. Ghidra signature: ``undefined OutputDebugStringW(undefined4 param_1)``",
+))
+
+register(VanillaSymbol(
+    name="RtlUnwind",
+    va=0x000F56DC,
+    calling_convention="stdcall",
+    arg_bytes=16,
+    doc="Auto-generated stdcall(16) entry for ``RtlUnwind``. Ghidra signature: ``void RtlUnwind(XBX_PVOID TargetFrame, XBX_PVOID TargetIp, PEXCEPTION_RECORD ExceptionRecord, XBX_PVOID ReturnValue)``",
+))
+
+register(VanillaSymbol(
+    name="XGWriteSurfaceOrTextureToXPR",
+    va=0x000F5717,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc="Auto-generated stdcall(12) entry for ``XGWriteSurfaceOrTextureToXPR``. Ghidra signature: ``undefined4 XGWriteSurfaceOrTextureToXPR(uint * param_1, uint param_2, int param_3)``",
+))
+
+register(VanillaSymbol(
+    name="_itoa",
+    va=0x000F5AF3,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__itoa``. Ghidra signature: ``void * _itoa(int param_1, void * param_2, uint param_3)``",
+))
+
+register(VanillaSymbol(
+    name="_ltoa",
+    va=0x000F5B1D,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__ltoa``. Ghidra signature: ``void * _ltoa(int param_1, void * param_2, uint param_3)``",
+))
+
+register(VanillaSymbol(
+    name="longjmp",
+    va=0x000F5C18,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``_longjmp``. Ghidra signature: ``void longjmp(__jmp_buf_tag * __env, int __val)``",
+))
+
+register(VanillaSymbol(
+    name="_setjmp3",
+    va=0x000F5C94,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__setjmp3``. Ghidra signature: ``undefined4 _setjmp3(undefined4 * param_1, int param_2, int param_3, undefined4 param_4)``",
+))
+
+register(VanillaSymbol(
+    name="rt_probe_read4",
+    va=0x000F5D0F,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``_rt_probe_read4``. Ghidra signature: ``undefined rt_probe_read4()``",
+))
+
+register(VanillaSymbol(
+    name="_cintrindisp2",
+    va=0x000F5FDC,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__cintrindisp2``. Ghidra signature: ``undefined _cintrindisp2(undefined4 param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_cintrindisp1",
+    va=0x000F601A,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__cintrindisp1``. Ghidra signature: ``undefined _cintrindisp1(undefined4 param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_ctrandisp2",
+    va=0x000F6057,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__ctrandisp2``. Ghidra signature: ``undefined _ctrandisp2(uint param_1, int param_2, uint param_3, int param_4)``",
+))
+
+register(VanillaSymbol(
+    name="_ctrandisp1",
+    va=0x000F61ED,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__ctrandisp1``. Ghidra signature: ``undefined _ctrandisp1(uint param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="_fload",
+    va=0x000F6220,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="Auto-generated cdecl(0) entry for ``__fload``. Ghidra signature: ``float10 _fload(uint param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_GetDeviceCaps",
+    va=0x0011D5D0,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_GetDeviceCaps``. Ghidra signature: ``undefined D3DDevice_GetDeviceCaps(undefined4 * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetGammaRamp",
+    va=0x0011D630,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_SetGammaRamp``. Ghidra signature: ``undefined D3DDevice_SetGammaRamp(byte param_1, undefined4 * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_GetGammaRamp",
+    va=0x0011D690,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_GetGammaRamp``. Ghidra signature: ``undefined D3DDevice_GetGammaRamp(undefined4 * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_CreateTexture",
+    va=0x0011D6C0,
+    calling_convention="stdcall",
+    arg_bytes=28,
+    doc="Auto-generated stdcall(28) entry for ``D3DDevice_CreateTexture``. Ghidra signature: ``undefined D3DDevice_CreateTexture(uint param_1, uint param_2, uint param_3, uint param_4, uint param_5, undefined4 param_6, undefined4 * param_7)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_CreateVolumeTexture",
+    va=0x0011D6F0,
+    calling_convention="stdcall",
+    arg_bytes=32,
+    doc="Auto-generated stdcall(32) entry for ``D3DDevice_CreateVolumeTexture``. Ghidra signature: ``undefined D3DDevice_CreateVolumeTexture(uint param_1, uint param_2, uint param_3, uint param_4, uint param_5, uint param_6, undefined4 param_7, undefined4 * param_8)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_CreateCubeTexture",
+    va=0x0011D720,
+    calling_convention="stdcall",
+    arg_bytes=24,
+    doc="Auto-generated stdcall(24) entry for ``D3DDevice_CreateCubeTexture``. Ghidra signature: ``undefined D3DDevice_CreateCubeTexture(uint param_1, uint param_2, uint param_3, uint param_4, undefined4 param_5, undefined4 * param_6)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetTransform",
+    va=0x0011D7B0,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_SetTransform``. Ghidra signature: ``undefined D3DDevice_SetTransform(int param_1, uint * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_MultiplyTransform",
+    va=0x0011D8F0,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_MultiplyTransform``. Ghidra signature: ``undefined D3DDevice_MultiplyTransform(int param_1, float * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_Release",
+    va=0x0011DB30,
+    calling_convention="stdcall",
+    arg_bytes=0,
+    doc="Auto-generated stdcall(0) entry for ``D3DDevice_Release``. Ghidra signature: ``undefined D3DDevice_Release()``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_BlockOnFence",
+    va=0x0011DB80,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_BlockOnFence``. Ghidra signature: ``undefined D3DDevice_BlockOnFence(uint param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_GetVisibilityTestResult",
+    va=0x0011DC10,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc="Auto-generated stdcall(12) entry for ``D3DDevice_GetVisibilityTestResult``. Ghidra signature: ``undefined4 D3DDevice_GetVisibilityTestResult(uint param_1, undefined4 * param_2, undefined4 * param_3)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_BlockUntilVerticalBlank",
+    va=0x0011DC90,
+    calling_convention="stdcall",
+    arg_bytes=0,
+    doc="Auto-generated stdcall(0) entry for ``D3DDevice_BlockUntilVerticalBlank``. Ghidra signature: ``undefined D3DDevice_BlockUntilVerticalBlank()``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_InsertFence",
+    va=0x0011DF00,
+    calling_convention="stdcall",
+    arg_bytes=0,
+    doc="Auto-generated stdcall(0) entry for ``D3DDevice_InsertFence``. Ghidra signature: ``undefined D3DDevice_InsertFence()``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_GetDisplayMode",
+    va=0x0011E530,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_GetDisplayMode``. Ghidra signature: ``undefined D3DDevice_GetDisplayMode(undefined4 * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_Reset",
+    va=0x0011E590,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_Reset``. Ghidra signature: ``int D3DDevice_Reset(uint * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetRenderTarget",
+    va=0x0011E650,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_SetRenderTarget``. Ghidra signature: ``undefined D3DDevice_SetRenderTarget(uint * param_1, uint * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_GetBackBuffer",
+    va=0x0011E8B0,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc="Auto-generated stdcall(12) entry for ``D3DDevice_GetBackBuffer``. Ghidra signature: ``undefined D3DDevice_GetBackBuffer(int param_1, undefined4 param_2, undefined4 * param_3)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_CopyRects",
+    va=0x0011E940,
+    calling_convention="stdcall",
+    arg_bytes=20,
+    doc="Auto-generated stdcall(20) entry for ``D3DDevice_CopyRects``. Ghidra signature: ``undefined D3DDevice_CopyRects(int param_1, uint * param_2, uint param_3, int param_4, uint * param_5)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_GetRenderTarget",
+    va=0x0011EDB0,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_GetRenderTarget``. Ghidra signature: ``undefined4 D3DDevice_GetRenderTarget(undefined4 * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_GetDepthStencilSurface",
+    va=0x0011EDD0,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_GetDepthStencilSurface``. Ghidra signature: ``undefined4 D3DDevice_GetDepthStencilSurface(undefined4 * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetViewport",
+    va=0x0011EE00,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_SetViewport``. Ghidra signature: ``undefined D3DDevice_SetViewport(uint * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetLight",
+    va=0x0011EF60,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_SetLight``. Ghidra signature: ``undefined4 D3DDevice_SetLight(float param_1, int * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetTexture",
+    va=0x0011F260,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_SetTexture``. Ghidra signature: ``undefined D3DDevice_SetTexture(int param_1, uint * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetIndices",
+    va=0x0011F480,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_SetIndices``. Ghidra signature: ``undefined D3DDevice_SetIndices(uint * param_1, undefined4 param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_BeginVisibilityTest",
+    va=0x0011F5A0,
+    calling_convention="stdcall",
+    arg_bytes=0,
+    doc="Auto-generated stdcall(0) entry for ``D3DDevice_BeginVisibilityTest``. Ghidra signature: ``undefined D3DDevice_BeginVisibilityTest()``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_EndVisibilityTest",
+    va=0x0011F5D0,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_EndVisibilityTest``. Ghidra signature: ``undefined4 D3DDevice_EndVisibilityTest(uint param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_GetDisplayFieldStatus",
+    va=0x0011F630,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_GetDisplayFieldStatus``. Ghidra signature: ``undefined D3DDevice_GetDisplayFieldStatus(int * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetTile",
+    va=0x0011F890,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_SetTile``. Ghidra signature: ``undefined D3DDevice_SetTile(uint param_1, uint * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetScissors",
+    va=0x0011FB60,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc="Auto-generated stdcall(12) entry for ``D3DDevice_SetScissors``. Ghidra signature: ``undefined D3DDevice_SetScissors(uint param_1, uint param_2, uint * param_3)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_PersistDisplay",
+    va=0x0011FCF0,
+    calling_convention="stdcall",
+    arg_bytes=0,
+    doc="Auto-generated stdcall(0) entry for ``D3DDevice_PersistDisplay``. Ghidra signature: ``int D3DDevice_PersistDisplay()``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetRenderState_Simple",
+    va=0x0011FEB0,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_SetRenderState_Simple``. Ghidra signature: ``undefined D3DDevice_SetRenderState_Simple(undefined4 param_1, undefined4 param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetRenderState_Deferred",
+    va=0x0011FEE0,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_SetRenderState_Deferred``. Ghidra signature: ``undefined D3DDevice_SetRenderState_Deferred(int param_1, undefined4 param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetRenderStateNotInline",
+    va=0x0011FF00,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_SetRenderStateNotInline``. Ghidra signature: ``undefined D3DDevice_SetRenderStateNotInline(int param_1, undefined4 param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetRenderState_FogColor",
+    va=0x001201E0,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_SetRenderState_FogColor``. Ghidra signature: ``undefined D3DDevice_SetRenderState_FogColor(uint param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetRenderState_CullMode",
+    va=0x00120230,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_SetRenderState_CullMode``. Ghidra signature: ``undefined D3DDevice_SetRenderState_CullMode(int param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetRenderState_TextureFactor",
+    va=0x00120310,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_SetRenderState_TextureFactor``. Ghidra signature: ``undefined D3DDevice_SetRenderState_TextureFactor(undefined4 param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetRenderState_LineWidth",
+    va=0x00120360,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_SetRenderState_LineWidth``. Ghidra signature: ``undefined D3DDevice_SetRenderState_LineWidth(float param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetRenderState_Dxt1NoiseEnable",
+    va=0x001203C0,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_SetRenderState_Dxt1NoiseEnable``. Ghidra signature: ``undefined D3DDevice_SetRenderState_Dxt1NoiseEnable(uint param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetRenderState_FillMode",
+    va=0x00120510,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_SetRenderState_FillMode``. Ghidra signature: ``undefined D3DDevice_SetRenderState_FillMode(undefined4 param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetTextureState_TexCoordIndex",
+    va=0x00120640,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_SetTextureState_TexCoordIndex``. Ghidra signature: ``undefined D3DDevice_SetTextureState_TexCoordIndex(int param_1, uint param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetTextureState_BumpEnv",
+    va=0x00120720,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc="Auto-generated stdcall(12) entry for ``D3DDevice_SetTextureState_BumpEnv``. Ghidra signature: ``undefined D3DDevice_SetTextureState_BumpEnv(uint param_1, int param_2, undefined4 param_3)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetTextureState_BorderColor",
+    va=0x00120780,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_SetTextureState_BorderColor``. Ghidra signature: ``undefined D3DDevice_SetTextureState_BorderColor(int param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetTextureState_ColorKeyColor",
+    va=0x001207C0,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_SetTextureState_ColorKeyColor``. Ghidra signature: ``undefined D3DDevice_SetTextureState_ColorKeyColor(int param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetTextureStageStateNotInline",
+    va=0x00120810,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc="Auto-generated stdcall(12) entry for ``D3DDevice_SetTextureStageStateNotInline``. Ghidra signature: ``undefined D3DDevice_SetTextureStageStateNotInline(uint param_1, int param_2, uint param_3)``",
+))
+
+register(VanillaSymbol(
+    name="D3D_CommonSetDebugRegisters",
+    va=0x00120D20,
+    calling_convention="stdcall",
+    arg_bytes=0,
+    doc="Auto-generated stdcall(0) entry for ``D3D_CommonSetDebugRegisters``. Ghidra signature: ``undefined D3D_CommonSetDebugRegisters()``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetRenderState_ZEnable",
+    va=0x00120DF0,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_SetRenderState_ZEnable``. Ghidra signature: ``undefined D3DDevice_SetRenderState_ZEnable(int param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetRenderState_OcclusionCullEnable",
+    va=0x00120F80,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_SetRenderState_OcclusionCullEnable``. Ghidra signature: ``undefined D3DDevice_SetRenderState_OcclusionCullEnable(int param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetRenderState_StencilCullEnable",
+    va=0x00120FE0,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_SetRenderState_StencilCullEnable``. Ghidra signature: ``undefined D3DDevice_SetRenderState_StencilCullEnable(int param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetRenderState_RopZCmpAlwaysRead",
+    va=0x00121040,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_SetRenderState_RopZCmpAlwaysRead``. Ghidra signature: ``undefined D3DDevice_SetRenderState_RopZCmpAlwaysRead(undefined4 param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetRenderState_RopZRead",
+    va=0x00121060,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_SetRenderState_RopZRead``. Ghidra signature: ``undefined D3DDevice_SetRenderState_RopZRead(undefined4 param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetRenderState_DoNotCullUncompressed",
+    va=0x00121080,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_SetRenderState_DoNotCullUncompressed``. Ghidra signature: ``undefined D3DDevice_SetRenderState_DoNotCullUncompressed(undefined4 param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DTexture_GetSurfaceLevel",
+    va=0x00121150,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc="Auto-generated stdcall(12) entry for ``D3DTexture_GetSurfaceLevel``. Ghidra signature: ``undefined D3DTexture_GetSurfaceLevel(uint * param_1, uint param_2, undefined4 * param_3)``",
+))
+
+register(VanillaSymbol(
+    name="D3DTexture_LockRect",
+    va=0x001211A0,
+    calling_convention="stdcall",
+    arg_bytes=20,
+    doc="Auto-generated stdcall(20) entry for ``D3DTexture_LockRect``. Ghidra signature: ``undefined D3DTexture_LockRect(uint * param_1, int param_2, undefined4 * param_3, int * param_4, uint param_5)``",
+))
+
+register(VanillaSymbol(
+    name="D3DCubeTexture_GetCubeMapSurface",
+    va=0x001211E0,
+    calling_convention="stdcall",
+    arg_bytes=16,
+    doc="Auto-generated stdcall(16) entry for ``D3DCubeTexture_GetCubeMapSurface``. Ghidra signature: ``undefined D3DCubeTexture_GetCubeMapSurface(uint * param_1, int param_2, uint param_3, undefined4 * param_4)``",
+))
+
+register(VanillaSymbol(
+    name="D3DCubeTexture_LockRect",
+    va=0x00121240,
+    calling_convention="stdcall",
+    arg_bytes=24,
+    doc="Auto-generated stdcall(24) entry for ``D3DCubeTexture_LockRect``. Ghidra signature: ``undefined D3DCubeTexture_LockRect(uint * param_1, uint param_2, int param_3, undefined4 * param_4, int * param_5, uint param_6)``",
+))
+
+register(VanillaSymbol(
+    name="D3D_CreateTexture",
+    va=0x00121300,
+    calling_convention="stdcall",
+    arg_bytes=36,
+    doc="Auto-generated stdcall(36) entry for ``D3D_CreateTexture``. Ghidra signature: ``undefined4 D3D_CreateTexture(uint param_1, uint param_2, uint param_3, uint param_4, uint param_5, uint param_6, char param_7, uint param_8, undefined4 * param_9)``",
+))
+
+register(VanillaSymbol(
+    name="D3D_CheckDeviceFormat",
+    va=0x00121740,
+    calling_convention="stdcall",
+    arg_bytes=24,
+    doc="Auto-generated stdcall(24) entry for ``D3D_CheckDeviceFormat``. Ghidra signature: ``undefined4 D3D_CheckDeviceFormat(int param_1, int param_2, int param_3, byte param_4, undefined4 param_5, int param_6)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_CreateVertexShader",
+    va=0x00121DF0,
+    calling_convention="stdcall",
+    arg_bytes=20,
+    doc="Auto-generated stdcall(20) entry for ``D3DDevice_CreateVertexShader``. Ghidra signature: ``undefined4 D3DDevice_CreateVertexShader(void * this, uint * param_1, ushort * param_2, uint * param_3, undefined4 param_4)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetStreamSource",
+    va=0x00122110,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc="Auto-generated stdcall(12) entry for ``D3DDevice_SetStreamSource``. Ghidra signature: ``undefined D3DDevice_SetStreamSource(int param_1, uint * param_2, int param_3)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_LoadVertexShader",
+    va=0x00122240,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_LoadVertexShader``. Ghidra signature: ``undefined D3DDevice_LoadVertexShader(int param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_LoadVertexShaderProgram",
+    va=0x001222A0,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_LoadVertexShaderProgram``. Ghidra signature: ``undefined D3DDevice_LoadVertexShaderProgram(uint * param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SelectVertexShader",
+    va=0x00122310,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_SelectVertexShader``. Ghidra signature: ``undefined D3DDevice_SelectVertexShader(uint param_1, undefined4 param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetShaderConstantMode",
+    va=0x001223D0,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_SetShaderConstantMode``. Ghidra signature: ``undefined D3DDevice_SetShaderConstantMode(uint param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_DeleteVertexShader",
+    va=0x00122510,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_DeleteVertexShader``. Ghidra signature: ``undefined D3DDevice_DeleteVertexShader(int param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetVertexShader",
+    va=0x00122630,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_SetVertexShader``. Ghidra signature: ``undefined D3DDevice_SetVertexShader(uint param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetVertexShaderConstant",
+    va=0x00122710,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc="Auto-generated stdcall(12) entry for ``D3DDevice_SetVertexShaderConstant``. Ghidra signature: ``undefined D3DDevice_SetVertexShaderConstant(int param_1, uint * param_2, int param_3)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_Clear",
+    va=0x00122F60,
+    calling_convention="stdcall",
+    arg_bytes=24,
+    doc="Auto-generated stdcall(24) entry for ``D3DDevice_Clear``. Ghidra signature: ``undefined D3DDevice_Clear(int param_1, uint * param_2, uint param_3, uint param_4, float param_5, uint param_6)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_DrawVerticesUP",
+    va=0x00123590,
+    calling_convention="stdcall",
+    arg_bytes=16,
+    doc="Auto-generated stdcall(16) entry for ``D3DDevice_DrawVerticesUP``. Ghidra signature: ``undefined D3DDevice_DrawVerticesUP(undefined4 param_1, uint param_2, uint param_3, int param_4)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_DrawIndexedVerticesUP",
+    va=0x001236D0,
+    calling_convention="stdcall",
+    arg_bytes=20,
+    doc="Auto-generated stdcall(20) entry for ``D3DDevice_DrawIndexedVerticesUP``. Ghidra signature: ``undefined D3DDevice_DrawIndexedVerticesUP(undefined4 param_1, uint param_2, ushort * param_3, uint param_4, int param_5)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_DrawVertices",
+    va=0x00123810,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc="Auto-generated stdcall(12) entry for ``D3DDevice_DrawVertices``. Ghidra signature: ``undefined D3DDevice_DrawVertices(undefined4 param_1, uint param_2, uint param_3)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_DrawIndexedVertices",
+    va=0x001238B0,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc="Auto-generated stdcall(12) entry for ``D3DDevice_DrawIndexedVertices``. Ghidra signature: ``undefined D3DDevice_DrawIndexedVertices(int * param_1, uint param_2, int * param_3)``",
+))
+
+register(VanillaSymbol(
+    name="D3DSurface_GetDesc",
+    va=0x00123E00,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DSurface_GetDesc``. Ghidra signature: ``undefined D3DSurface_GetDesc(uint * param_1, uint * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DSurface_LockRect",
+    va=0x00123E20,
+    calling_convention="stdcall",
+    arg_bytes=16,
+    doc="Auto-generated stdcall(16) entry for ``D3DSurface_LockRect``. Ghidra signature: ``undefined D3DSurface_LockRect(uint * param_1, undefined4 * param_2, int * param_3, uint param_4)``",
+))
+
+register(VanillaSymbol(
+    name="D3D_SetPushBufferSize",
+    va=0x00124140,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3D_SetPushBufferSize``. Ghidra signature: ``undefined D3D_SetPushBufferSize(undefined4 param_1, undefined4 param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_CreateIndexBuffer",
+    va=0x00124200,
+    calling_convention="stdcall",
+    arg_bytes=0,
+    doc="Auto-generated stdcall(0) entry for ``D3DDevice_CreateIndexBuffer``. Ghidra signature: ``undefined4 D3DDevice_CreateIndexBuffer()``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_CreateVertexBuffer",
+    va=0x00124320,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_CreateVertexBuffer``. Ghidra signature: ``undefined4 D3DDevice_CreateVertexBuffer(undefined4 param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DVertexBuffer_Lock",
+    va=0x00124380,
+    calling_convention="stdcall",
+    arg_bytes=20,
+    doc="Auto-generated stdcall(20) entry for ``D3DVertexBuffer_Lock``. Ghidra signature: ``undefined D3DVertexBuffer_Lock(uint * param_1, int param_2, undefined4 param_3, int * param_4, byte param_5)``",
+))
+
+register(VanillaSymbol(
+    name="D3DResource_GetType",
+    va=0x001244F0,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DResource_GetType``. Ghidra signature: ``char D3DResource_GetType(uint * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DResource_BlockUntilNotBusy",
+    va=0x001245A0,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DResource_BlockUntilNotBusy``. Ghidra signature: ``undefined D3DResource_BlockUntilNotBusy(uint * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3D_DestroyResource",
+    va=0x00124740,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3D_DestroyResource``. Ghidra signature: ``undefined D3D_DestroyResource(uint * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DResource_AddRef",
+    va=0x00124860,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DResource_AddRef``. Ghidra signature: ``uint D3DResource_AddRef(uint * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DResource_Release",
+    va=0x001248A0,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DResource_Release``. Ghidra signature: ``uint D3DResource_Release(uint * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DResource_Register",
+    va=0x001249A0,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DResource_Register``. Ghidra signature: ``undefined D3DResource_Register(uint * param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_RunPushBuffer",
+    va=0x00125250,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_RunPushBuffer``. Ghidra signature: ``undefined D3DDevice_RunPushBuffer(int * param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_GetPushBufferOffset",
+    va=0x00125530,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_GetPushBufferOffset``. Ghidra signature: ``undefined D3DDevice_GetPushBufferOffset(int * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_Present",
+    va=0x001263C0,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_Present``. Ghidra signature: ``undefined D3DDevice_Present(uint * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3D_AllocContiguousMemory",
+    va=0x00126570,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3D_AllocContiguousMemory``. Ghidra signature: ``undefined D3D_AllocContiguousMemory(int param_1, undefined4 param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_CreatePixelShader",
+    va=0x001268B0,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3DDevice_CreatePixelShader``. Ghidra signature: ``undefined4 D3DDevice_CreatePixelShader(undefined4 * param_1, undefined4 * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_DeletePixelShader",
+    va=0x00126900,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_DeletePixelShader``. Ghidra signature: ``undefined D3DDevice_DeletePixelShader(int * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3DDevice_SetPixelShader",
+    va=0x00126DC0,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3DDevice_SetPixelShader``. Ghidra signature: ``undefined D3DDevice_SetPixelShader(uint param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3D_UpdateProjectionViewportTransform",
+    va=0x00127680,
+    calling_convention="stdcall",
+    arg_bytes=0,
+    doc="Auto-generated stdcall(0) entry for ``D3D_UpdateProjectionViewportTransform``. Ghidra signature: ``undefined D3D_UpdateProjectionViewportTransform()``",
+))
+
+register(VanillaSymbol(
+    name="D3D_LazySetPointParams",
+    va=0x00127990,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3D_LazySetPointParams``. Ghidra signature: ``undefined D3D_LazySetPointParams(uint * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3D_SetFence",
+    va=0x0012A410,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3D_SetFence``. Ghidra signature: ``uint D3D_SetFence(byte param_1)``",
+))
+
+register(VanillaSymbol(
+    name="D3D_BlockOnTime",
+    va=0x0012A4B0,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="Auto-generated stdcall(8) entry for ``D3D_BlockOnTime``. Ghidra signature: ``undefined D3D_BlockOnTime(uint param_1, int param_2)``",
+))
+
+register(VanillaSymbol(
+    name="D3D_KickOffAndWaitForIdle",
+    va=0x0012A790,
+    calling_convention="stdcall",
+    arg_bytes=0,
+    doc="Auto-generated stdcall(0) entry for ``D3D_KickOffAndWaitForIdle``. Ghidra signature: ``undefined D3D_KickOffAndWaitForIdle()``",
+))
+
+register(VanillaSymbol(
+    name="D3D_BlockOnResource",
+    va=0x0012A7B0,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``D3D_BlockOnResource``. Ghidra signature: ``undefined D3D_BlockOnResource(uint * param_1)``",
+))
+
+register(VanillaSymbol(
+    name="XMETAL_StartPush",
+    va=0x0012A840,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="Auto-generated stdcall(4) entry for ``XMETAL_StartPush``. Ghidra signature: ``undefined XMETAL_StartPush(uint * param_1)``",
+))
+
+
+
+register(VanillaSymbol(
+    name="XGSwizzleRect",
+    va=0x0015CFED,
+    calling_convention="stdcall",
+    arg_bytes=32,
+    doc="Auto-generated stdcall(32) entry for ``XGSwizzleRect``. Ghidra signature: ``undefined XGSwizzleRect(undefined4 * param_1, int param_2, int * param_3, undefined4 * param_4, uint param_5, uint param_6, uint * param_7, undefined8 * param_8)``",
+))
+
+
+
+register(VanillaSymbol(
+    name="XGUnswizzleBox",
+    va=0x0015E0B0,
+    calling_convention="stdcall",
+    arg_bytes=40,
+    doc="Auto-generated stdcall(40) entry for ``XGUnswizzleBox``. Ghidra signature: ``undefined XGUnswizzleBox(int param_1, uint param_2, uint param_3, uint param_4, uint * param_5, undefined4 * param_6, uint param_7, int param_8, int * param_9, uint param_10)``",
+))
+
+
+register(VanillaSymbol(
+    name="XGSetTextureHeader",
+    va=0x0015E597,
+    calling_convention="stdcall",
+    arg_bytes=36,
+    doc="Auto-generated stdcall(36) entry for ``XGSetTextureHeader``. Ghidra signature: ``undefined XGSetTextureHeader(uint param_1, uint param_2, uint param_3, uint param_4, uint param_5, undefined4 param_6, undefined4 * param_7, undefined4 param_8, uint param_9)``",
+))
+
+
 # ---------------------------------------------------------------------------
 # Public accessors
 # ---------------------------------------------------------------------------

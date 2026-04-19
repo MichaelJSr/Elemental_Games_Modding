@@ -297,6 +297,731 @@ void XapiBootToDash(unsigned long arg1, unsigned long arg2,
                      unsigned long arg3);
 
 
+
+/* ==================================================================
+ * Auto-generated bulk coverage (April 2026 expansion)
+ * ==================================================================
+ *
+ * 242 extern declarations auto-generated from the Ghidra snapshot.
+ * cdecl for C-runtime / MSVC internals (``_foo`` / ``__foo``) and
+ * varargs; stdcall for Xbox SDK / Win32 (X*, Xc*, Xe*, Xapi*, D3D*,
+ * Mm*, Ke*, Rtl*, + curated Win32 set).  Ghidra ``undefined`` /
+ * ``undefined4`` types normalise to plain C — ABI cares only about
+ * byte width, not type spelling.  Cast at the call site as needed.
+ */
+
+/* VA 0x000DFE7B  (stdcall) */
+__attribute__((stdcall)) int XapiSelectCachePartition(int param_1, void * param_2, void * param_3);
+
+/* VA 0x000E007F  (stdcall) */
+__attribute__((stdcall)) void XMountUtilityDrive(int param_1);
+
+/* VA 0x000E016A  (stdcall) */
+__attribute__((stdcall)) void XMountAlternateTitleA(void * param_1, unsigned int param_2, void * param_3);
+
+/* VA 0x000E02CF  (stdcall) */
+__attribute__((stdcall)) void XUnmountAlternateTitleA(unsigned char param_1);
+
+/* VA 0x000E0466  (stdcall) */
+__attribute__((stdcall)) void XMUNameFromDriveLetter(int param_1, int param_2, int param_3);
+
+/* VA 0x000E06B4  (stdcall) */
+__attribute__((stdcall)) void MoveFileA(int param_1, int param_2);
+
+/* VA 0x000E0D04  (stdcall) */
+__attribute__((stdcall)) int OpenEventA(int param_1, int param_2, int param_3);
+
+/* VA 0x000E0D9E  (stdcall) */
+__attribute__((stdcall)) int PulseEvent(int param_1);
+
+/* VA 0x000E0E9B  (stdcall) */
+__attribute__((stdcall)) int CreateMutexA(int param_1, int param_2, int param_3);
+
+/* VA 0x000E0FB3  (stdcall) */
+__attribute__((stdcall)) int SignalObjectAndWait(int param_1, int param_2, unsigned int param_3, int param_4);
+
+/* VA 0x000E2BC9  (stdcall) */
+__attribute__((stdcall)) void * XCalculateSignatureBegin(int param_1);
+
+/* VA 0x000E2DFD  (stdcall) */
+__attribute__((stdcall)) void XapiSetLastNTError(int param_1);
+
+/* VA 0x000E2F40  (stdcall) */
+__attribute__((stdcall)) void GetOverlappedResult(int param_1, void * param_2, void * param_3, int param_4);
+
+/* VA 0x000E66A4  (stdcall) */
+__attribute__((stdcall)) int XapiMapLetterToDirectory(int param_1, void * param_2, void * param_3, int param_4, void * param_5, void * param_6);
+
+/* VA 0x000E6A92  (stdcall) */
+__attribute__((stdcall)) void XapiInitProcess(void);
+
+/* VA 0x000E705E  (stdcall) */
+__attribute__((stdcall)) void XapiFormatObjectAttributes(int param_1, int param_2, int param_3);
+
+/* VA 0x000E72DC  (cdecl) */
+void cinit(void);
+
+/* VA 0x000E7334  (cdecl) */
+void rtinit(void);
+
+/* VA 0x000E735D  (stdcall) */
+__attribute__((stdcall)) void XapiCallThreadNotifyRoutines(void);
+
+/* VA 0x000E7395  (stdcall) */
+__attribute__((stdcall)) void UnhandledExceptionFilter(int param_1);
+
+/* VA 0x000E73B2  (stdcall) */
+__attribute__((stdcall)) void SetThreadPriority(int param_1, int param_2);
+
+/* VA 0x000E7404  (stdcall) */
+__attribute__((stdcall)) int GetThreadPriority(int param_1);
+
+/* VA 0x000E7458  (stdcall) */
+__attribute__((stdcall)) int SetThreadPriorityBoost(int param_1, int param_2);
+
+/* VA 0x000E752B  (stdcall) */
+__attribute__((stdcall)) void RaiseException(int param_1, unsigned int param_2, unsigned int param_3, void * param_4);
+
+/* VA 0x000E75C4  (stdcall) */
+__attribute__((stdcall)) void ExitThread(int param_1);
+
+/* VA 0x000E75D6  (stdcall) */
+__attribute__((stdcall)) void GetExitCodeThread(int param_1, void * param_2);
+
+/* VA 0x000E76BD  (stdcall) */
+__attribute__((stdcall)) void XRegisterThreadNotifyRoutine(int param_1);
+
+/* VA 0x000E77A5  (stdcall) */
+__attribute__((stdcall)) unsigned int CreateThread(int param_1, unsigned int param_2, int param_3, int param_4, unsigned int param_5, int param_6);
+
+/* VA 0x000E7A90  (stdcall) */
+__attribute__((stdcall)) void XGetSectionSize(int param_1);
+
+/* VA 0x000E7A9A  (stdcall) */
+__attribute__((stdcall)) void XAutoPowerDownResetTimer(void);
+
+/* VA 0x000E7E0E  (stdcall) */
+__attribute__((stdcall)) int ExQueryNonVolatileSetting(unsigned long ValueIndex, int Type, void * Value, unsigned long ValueLength, int ResultLength);
+
+/* VA 0x000EB278  (cdecl) */
+void _onexit_lk(void);
+
+/* VA 0x000EB2F8  (cdecl) */
+void __onexitinit(void);
+
+/* VA 0x000EB320  (cdecl) */
+void _onexit(void);
+
+/* VA 0x000EB358  (cdecl) */
+int atexit(void * func);
+
+/* VA 0x000EB495  (cdecl) */
+void _fclose_lk(void * param_1);
+
+/* VA 0x000EBC8E  (cdecl) */
+unsigned int _abstract_cw(void);
+
+/* VA 0x000EBD20  (cdecl) */
+unsigned int _hw_cw(void);
+
+/* VA 0x000EBE0C  (cdecl) */
+unsigned int _control87(unsigned int param_1, unsigned int param_2);
+
+/* VA 0x000EBE3E  (cdecl) */
+void _controlfp(unsigned int param_1, unsigned int param_2);
+
+/* VA 0x000EC09F  (cdecl) */
+void _fsopen(void);
+
+/* VA 0x000EC190  (cdecl) */
+void _dosmaperr(unsigned int param_1);
+
+/* VA 0x000EC203  (cdecl) */
+void * _wcsdup(void * param_1);
+
+/* VA 0x000EC288  (cdecl) */
+double _copysign(double x, double y);
+
+/* VA 0x000EC2A9  (cdecl) */
+int _chgsign(int param_1, unsigned int param_2);
+
+/* VA 0x000EC8E0  (cdecl) */
+long long _allmul(unsigned int param_1, int param_2, unsigned int param_3, int param_4);
+
+/* VA 0x000ECC91  (cdecl) */
+void _SEH_epilog(void);
+
+/* VA 0x000ECCA4  (cdecl) */
+void _global_unwind2(int param_1);
+
+/* VA 0x000ECCE6  (cdecl) */
+void _local_unwind2(int param_1, int param_2);
+
+/* VA 0x000ECDA0  (cdecl) */
+unsigned long long _aullshr(unsigned char param_1, unsigned int param_2);
+
+/* VA 0x000ECDC0  (cdecl) */
+int _aullrem(unsigned int param_1, unsigned int param_2, unsigned int param_3, unsigned int param_4);
+
+/* VA 0x000ECE35  (cdecl) */
+void * wcsncpy(void * dest, void * src, unsigned int n);
+
+/* VA 0x000ECF20  (cdecl) */
+int _aulldiv(unsigned int param_1, unsigned int param_2, unsigned int param_3, unsigned int param_4);
+
+/* VA 0x000ECF90  (cdecl) */
+int _allshr(unsigned char param_1, int param_2);
+
+/* VA 0x000ED000  (cdecl) */
+int _alldiv(unsigned int param_1, unsigned int param_2, unsigned int param_3, unsigned int param_4);
+
+/* VA 0x000ED0AA  (cdecl) */
+int _wcsicmp(void * param_1, void * param_2);
+
+/* VA 0x000ED15C  (cdecl) */
+void * wcscpy(void * dest, void * src);
+
+/* VA 0x000ED399  (cdecl) */
+int isalpha(int param_1);
+
+/* VA 0x000ED419  (cdecl) */
+int isdigit(int param_1);
+
+/* VA 0x000ED470  (cdecl) */
+int isspace(int param_1);
+
+/* VA 0x000ED4C2  (cdecl) */
+int isalnum(int param_1);
+
+/* VA 0x000ED6C9  (cdecl) */
+void seh_longjmp_unwind(int param_1);
+
+/* VA 0x000ED997  (cdecl) */
+unsigned int _flsbuf(unsigned char param_1, void * param_2);
+
+/* VA 0x000EDAB0  (cdecl) */
+void write_char(void * param_1);
+
+/* VA 0x000EDAE3  (cdecl) */
+void write_multi_char(int param_1, int param_2, void * param_3);
+
+/* VA 0x000EDB07  (cdecl) */
+void write_string(int param_1);
+
+/* VA 0x000EEB6D  (cdecl) */
+void _close(void);
+
+/* VA 0x000EEC08  (cdecl) */
+void _freebuf(void * param_1);
+
+/* VA 0x000EEC33  (cdecl) */
+void _flush(void * param_1);
+
+/* VA 0x000EEC90  (cdecl) */
+int _fflush_lk(void * param_1);
+
+/* VA 0x000EECBE  (cdecl) */
+void flsall(void);
+
+/* VA 0x000EEDE3  (cdecl) */
+void _flushall(void);
+
+/* VA 0x000EEEAF  (cdecl) */
+void _lock_file(unsigned int param_1);
+
+/* VA 0x000EEEDE  (cdecl) */
+void _lock_file2(int param_1, int param_2);
+
+/* VA 0x000EEF01  (cdecl) */
+void _unlock_file(unsigned int param_1);
+
+/* VA 0x000EEF30  (cdecl) */
+void _unlock_file2(int param_1, int param_2);
+
+/* VA 0x000EF1EB  (cdecl) */
+unsigned int _hextodec(void);
+
+/* VA 0x000EF21D  (cdecl) */
+unsigned int _inc(int param_1, void * param_2);
+
+/* VA 0x000F02CE  (cdecl) */
+int _errcode(unsigned char param_1);
+
+/* VA 0x000F02FB  (cdecl) */
+int _umatherr(int param_1, int param_2);
+
+/* VA 0x000F0399  (cdecl) */
+int _handle_qnan1(int param_1, double param_2);
+
+/* VA 0x000F03EC  (cdecl) */
+int _handle_qnan2(int param_1, double param_2, double param_3);
+
+/* VA 0x000F05AF  (cdecl) */
+int _set_exp(int param_1, short param_2);
+
+/* VA 0x000F0618  (cdecl) */
+int _set_bexp(int param_1, short param_2);
+
+/* VA 0x000F063D  (cdecl) */
+void _sptype(int param_1, unsigned int param_2);
+
+/* VA 0x000F0765  (cdecl) */
+int _ctrlfp(void);
+
+/* VA 0x000F07E2  (cdecl) */
+unsigned int _filbuf(void * param_1);
+
+/* VA 0x000F0A8C  (cdecl) */
+void _read(void);
+
+/* VA 0x000F0B37  (cdecl) */
+void _stbuf(void * param_1);
+
+/* VA 0x000F0BBF  (cdecl) */
+void _ftbuf(int param_1, void * param_2);
+
+/* VA 0x000F0D74  (cdecl) */
+void _write(void);
+
+/* VA 0x000F1374  (cdecl) */
+void * _openfile(int param_1, void * param_2, int param_3, void * param_4);
+
+/* VA 0x000F14DC  (cdecl) */
+void * _getstream(void);
+
+/* VA 0x000F1831  (cdecl) */
+void _forcdecpt(void * param_1);
+
+/* VA 0x000F18EE  (cdecl) */
+void _fassign(unsigned int param_1, void * param_2, void * param_3);
+
+/* VA 0x000F1BDE  (cdecl) */
+void _cfltcvt(void * param_1, void * param_2, int param_3, unsigned int param_4, int param_5);
+
+/* VA 0x000F1C30  (cdecl) */
+void _trandisp1(int param_1, int param_2);
+
+/* VA 0x000F1C97  (cdecl) */
+void _trandisp2(int param_1, int param_2);
+
+/* VA 0x000F1E13  (cdecl) */
+int _startOneArgErrorHandling(int param_1, int param_2, unsigned short param_3, int param_4, int param_5, int param_6);
+
+/* VA 0x000F1E95  (cdecl) */
+unsigned int _fload_withFB(int param_1, int param_2);
+
+/* VA 0x000F1EFB  (cdecl) */
+void _math_exit(int param_1, int param_2, int param_3, int param_4, int param_5);
+
+/* VA 0x000F23F8  (cdecl) */
+void _lseek(void);
+
+/* VA 0x000F252B  (cdecl) */
+void _getbuf(void * param_1);
+
+/* VA 0x000F256F  (cdecl) */
+unsigned char _isatty(unsigned int param_1);
+
+/* VA 0x000F25D0  (cdecl) */
+int _aulldvrm(unsigned int param_1, unsigned int param_2, unsigned int param_3, unsigned int param_4);
+
+/* VA 0x000F28B5  (cdecl) */
+void _get_osfhandle(unsigned int param_1);
+
+/* VA 0x000F2969  (cdecl) */
+void _unlock_fhandle(unsigned int param_1);
+
+/* VA 0x000F34C8  (cdecl) */
+void _ZeroTail(int param_1, int param_2);
+
+/* VA 0x000F34FA  (cdecl) */
+void _IncMan(int param_1, int param_2);
+
+/* VA 0x000F3547  (cdecl) */
+void _RoundMan(int param_1, int param_2);
+
+/* VA 0x000F35B9  (cdecl) */
+void _CopyMan(int param_1, void * param_2);
+
+/* VA 0x000F35E0  (cdecl) */
+void _IsZeroMan(int param_1);
+
+/* VA 0x000F35F9  (cdecl) */
+void _ShrMan(int param_1, int param_2);
+
+/* VA 0x000F3674  (cdecl) */
+void _ld12cvt(void * param_1, void * param_2, void * param_3);
+
+/* VA 0x000F37F8  (cdecl) */
+void _ld12told(void * param_1, void * param_2);
+
+/* VA 0x000F410B  (cdecl) */
+void _sopen(void);
+
+/* VA 0x000F4214  (cdecl) */
+void __dtold(void * param_1, void * param_2);
+
+/* VA 0x000F441A  (cdecl) */
+void _flswbuf(int param_1, void * param_2);
+
+/* VA 0x000F4542  (cdecl) */
+void __addl(unsigned int param_1, unsigned int param_2, void * param_3);
+
+/* VA 0x000F4563  (cdecl) */
+void __add_12(void * param_1, void * param_2);
+
+/* VA 0x000F45C1  (cdecl) */
+void __shl_12(void * param_1);
+
+/* VA 0x000F45EF  (cdecl) */
+void __shr_12(void * param_1);
+
+/* VA 0x000F4F09  (stdcall) */
+__attribute__((stdcall)) void MmFreeContiguousMemory(void * BaseAddress);
+
+/* VA 0x000F53D1  (stdcall) */
+__attribute__((stdcall)) void GetTimeZoneInformation(void * param_1);
+
+/* VA 0x000F568A  (stdcall) */
+__attribute__((stdcall)) void OutputDebugStringW(int param_1);
+
+/* VA 0x000F56DC  (stdcall) */
+__attribute__((stdcall)) void RtlUnwind(void * TargetFrame, void * TargetIp, int ExceptionRecord, void * ReturnValue);
+
+/* VA 0x000F5717  (stdcall) */
+__attribute__((stdcall)) void XGWriteSurfaceOrTextureToXPR(void * param_1, unsigned int param_2, int param_3);
+
+/* VA 0x000F5AF3  (cdecl) */
+void * _itoa(int param_1, void * param_2, unsigned int param_3);
+
+/* VA 0x000F5B1D  (cdecl) */
+void * _ltoa(int param_1, void * param_2, unsigned int param_3);
+
+/* VA 0x000F5C18  (cdecl) */
+void longjmp(void * env, int val);
+
+/* VA 0x000F5C94  (cdecl) */
+void _setjmp3(void * param_1, int param_2, int param_3, int param_4);
+
+/* VA 0x000F5D0F  (cdecl) */
+void rt_probe_read4(void);
+
+/* VA 0x000F5FDC  (cdecl) */
+void _cintrindisp2(int param_1, int param_2);
+
+/* VA 0x000F601A  (cdecl) */
+void _cintrindisp1(int param_1, int param_2);
+
+/* VA 0x000F6057  (cdecl) */
+void _ctrandisp2(unsigned int param_1, int param_2, unsigned int param_3, int param_4);
+
+/* VA 0x000F61ED  (cdecl) */
+void _ctrandisp1(unsigned int param_1, int param_2);
+
+/* VA 0x000F6220  (cdecl) */
+int _fload(unsigned int param_1, int param_2);
+
+/* VA 0x0011D5D0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_GetDeviceCaps(void * param_1);
+
+/* VA 0x0011D630  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetGammaRamp(unsigned char param_1, void * param_2);
+
+/* VA 0x0011D690  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_GetGammaRamp(void * param_1);
+
+/* VA 0x0011D6C0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_CreateTexture(unsigned int param_1, unsigned int param_2, unsigned int param_3, unsigned int param_4, unsigned int param_5, int param_6, void * param_7);
+
+/* VA 0x0011D6F0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_CreateVolumeTexture(unsigned int param_1, unsigned int param_2, unsigned int param_3, unsigned int param_4, unsigned int param_5, unsigned int param_6, int param_7, void * param_8);
+
+/* VA 0x0011D720  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_CreateCubeTexture(unsigned int param_1, unsigned int param_2, unsigned int param_3, unsigned int param_4, int param_5, void * param_6);
+
+/* VA 0x0011D7B0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetTransform(int param_1, void * param_2);
+
+/* VA 0x0011D8F0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_MultiplyTransform(int param_1, void * param_2);
+
+/* VA 0x0011DB30  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_Release(void);
+
+/* VA 0x0011DB80  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_BlockOnFence(unsigned int param_1);
+
+/* VA 0x0011DC10  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_GetVisibilityTestResult(unsigned int param_1, void * param_2, void * param_3);
+
+/* VA 0x0011DC90  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_BlockUntilVerticalBlank(void);
+
+/* VA 0x0011DF00  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_InsertFence(void);
+
+/* VA 0x0011E530  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_GetDisplayMode(void * param_1);
+
+/* VA 0x0011E590  (stdcall) */
+__attribute__((stdcall)) int D3DDevice_Reset(void * param_1);
+
+/* VA 0x0011E650  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetRenderTarget(void * param_1, void * param_2);
+
+/* VA 0x0011E8B0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_GetBackBuffer(int param_1, int param_2, void * param_3);
+
+/* VA 0x0011E940  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_CopyRects(int param_1, void * param_2, unsigned int param_3, int param_4, void * param_5);
+
+/* VA 0x0011EDB0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_GetRenderTarget(void * param_1);
+
+/* VA 0x0011EDD0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_GetDepthStencilSurface(void * param_1);
+
+/* VA 0x0011EE00  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetViewport(void * param_1);
+
+/* VA 0x0011EF60  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetLight(float param_1, void * param_2);
+
+/* VA 0x0011F260  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetTexture(int param_1, void * param_2);
+
+/* VA 0x0011F480  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetIndices(void * param_1, int param_2);
+
+/* VA 0x0011F5A0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_BeginVisibilityTest(void);
+
+/* VA 0x0011F5D0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_EndVisibilityTest(unsigned int param_1);
+
+/* VA 0x0011F630  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_GetDisplayFieldStatus(void * param_1);
+
+/* VA 0x0011F890  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetTile(unsigned int param_1, void * param_2);
+
+/* VA 0x0011FB60  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetScissors(unsigned int param_1, unsigned int param_2, void * param_3);
+
+/* VA 0x0011FCF0  (stdcall) */
+__attribute__((stdcall)) int D3DDevice_PersistDisplay(void);
+
+/* VA 0x0011FEB0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetRenderState_Simple(int param_1, int param_2);
+
+/* VA 0x0011FEE0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetRenderState_Deferred(int param_1, int param_2);
+
+/* VA 0x0011FF00  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetRenderStateNotInline(int param_1, int param_2);
+
+/* VA 0x001201E0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetRenderState_FogColor(unsigned int param_1);
+
+/* VA 0x00120230  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetRenderState_CullMode(int param_1);
+
+/* VA 0x00120310  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetRenderState_TextureFactor(int param_1);
+
+/* VA 0x00120360  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetRenderState_LineWidth(float param_1);
+
+/* VA 0x001203C0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetRenderState_Dxt1NoiseEnable(unsigned int param_1);
+
+/* VA 0x00120510  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetRenderState_FillMode(int param_1);
+
+/* VA 0x00120640  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetTextureState_TexCoordIndex(int param_1, unsigned int param_2);
+
+/* VA 0x00120720  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetTextureState_BumpEnv(unsigned int param_1, int param_2, int param_3);
+
+/* VA 0x00120780  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetTextureState_BorderColor(int param_1, int param_2);
+
+/* VA 0x001207C0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetTextureState_ColorKeyColor(int param_1, int param_2);
+
+/* VA 0x00120810  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetTextureStageStateNotInline(unsigned int param_1, int param_2, unsigned int param_3);
+
+/* VA 0x00120D20  (stdcall) */
+__attribute__((stdcall)) void D3D_CommonSetDebugRegisters(void);
+
+/* VA 0x00120DF0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetRenderState_ZEnable(int param_1);
+
+/* VA 0x00120F80  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetRenderState_OcclusionCullEnable(int param_1);
+
+/* VA 0x00120FE0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetRenderState_StencilCullEnable(int param_1);
+
+/* VA 0x00121040  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetRenderState_RopZCmpAlwaysRead(int param_1);
+
+/* VA 0x00121060  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetRenderState_RopZRead(int param_1);
+
+/* VA 0x00121080  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetRenderState_DoNotCullUncompressed(int param_1);
+
+/* VA 0x00121150  (stdcall) */
+__attribute__((stdcall)) void D3DTexture_GetSurfaceLevel(void * param_1, unsigned int param_2, void * param_3);
+
+/* VA 0x001211A0  (stdcall) */
+__attribute__((stdcall)) void D3DTexture_LockRect(void * param_1, int param_2, void * param_3, void * param_4, unsigned int param_5);
+
+/* VA 0x001211E0  (stdcall) */
+__attribute__((stdcall)) void D3DCubeTexture_GetCubeMapSurface(void * param_1, int param_2, unsigned int param_3, void * param_4);
+
+/* VA 0x00121240  (stdcall) */
+__attribute__((stdcall)) void D3DCubeTexture_LockRect(void * param_1, unsigned int param_2, int param_3, void * param_4, void * param_5, unsigned int param_6);
+
+/* VA 0x00121300  (stdcall) */
+__attribute__((stdcall)) void D3D_CreateTexture(unsigned int param_1, unsigned int param_2, unsigned int param_3, unsigned int param_4, unsigned int param_5, unsigned int param_6, char param_7, unsigned int param_8, void * param_9);
+
+/* VA 0x00121740  (stdcall) */
+__attribute__((stdcall)) void D3D_CheckDeviceFormat(int param_1, int param_2, int param_3, unsigned char param_4, int param_5, int param_6);
+
+/* VA 0x00121DF0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_CreateVertexShader(void * this, void * param_1, void * param_2, void * param_3, int param_4);
+
+/* VA 0x00122110  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetStreamSource(int param_1, void * param_2, int param_3);
+
+/* VA 0x00122240  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_LoadVertexShader(int param_1, int param_2);
+
+/* VA 0x001222A0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_LoadVertexShaderProgram(void * param_1, int param_2);
+
+/* VA 0x00122310  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SelectVertexShader(unsigned int param_1, int param_2);
+
+/* VA 0x001223D0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetShaderConstantMode(unsigned int param_1);
+
+/* VA 0x00122510  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_DeleteVertexShader(int param_1);
+
+/* VA 0x00122630  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetVertexShader(unsigned int param_1);
+
+/* VA 0x00122710  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetVertexShaderConstant(int param_1, void * param_2, int param_3);
+
+/* VA 0x00122F60  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_Clear(int param_1, void * param_2, unsigned int param_3, unsigned int param_4, float param_5, unsigned int param_6);
+
+/* VA 0x00123590  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_DrawVerticesUP(int param_1, unsigned int param_2, unsigned int param_3, int param_4);
+
+/* VA 0x001236D0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_DrawIndexedVerticesUP(int param_1, unsigned int param_2, void * param_3, unsigned int param_4, int param_5);
+
+/* VA 0x00123810  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_DrawVertices(int param_1, unsigned int param_2, unsigned int param_3);
+
+/* VA 0x001238B0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_DrawIndexedVertices(void * param_1, unsigned int param_2, void * param_3);
+
+/* VA 0x00123E00  (stdcall) */
+__attribute__((stdcall)) void D3DSurface_GetDesc(void * param_1, void * param_2);
+
+/* VA 0x00123E20  (stdcall) */
+__attribute__((stdcall)) void D3DSurface_LockRect(void * param_1, void * param_2, void * param_3, unsigned int param_4);
+
+/* VA 0x00124140  (stdcall) */
+__attribute__((stdcall)) void D3D_SetPushBufferSize(int param_1, int param_2);
+
+/* VA 0x00124200  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_CreateIndexBuffer(void);
+
+/* VA 0x00124320  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_CreateVertexBuffer(int param_1);
+
+/* VA 0x00124380  (stdcall) */
+__attribute__((stdcall)) void D3DVertexBuffer_Lock(void * param_1, int param_2, int param_3, void * param_4, unsigned char param_5);
+
+/* VA 0x001244F0  (stdcall) */
+__attribute__((stdcall)) char D3DResource_GetType(void * param_1);
+
+/* VA 0x001245A0  (stdcall) */
+__attribute__((stdcall)) void D3DResource_BlockUntilNotBusy(void * param_1);
+
+/* VA 0x00124740  (stdcall) */
+__attribute__((stdcall)) void D3D_DestroyResource(void * param_1);
+
+/* VA 0x00124860  (stdcall) */
+__attribute__((stdcall)) unsigned int D3DResource_AddRef(void * param_1);
+
+/* VA 0x001248A0  (stdcall) */
+__attribute__((stdcall)) unsigned int D3DResource_Release(void * param_1);
+
+/* VA 0x001249A0  (stdcall) */
+__attribute__((stdcall)) void D3DResource_Register(void * param_1, int param_2);
+
+/* VA 0x00125250  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_RunPushBuffer(void * param_1, int param_2);
+
+/* VA 0x00125530  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_GetPushBufferOffset(void * param_1);
+
+/* VA 0x001263C0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_Present(void * param_1);
+
+/* VA 0x00126570  (stdcall) */
+__attribute__((stdcall)) void D3D_AllocContiguousMemory(int param_1, int param_2);
+
+/* VA 0x001268B0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_CreatePixelShader(void * param_1, void * param_2);
+
+/* VA 0x00126900  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_DeletePixelShader(void * param_1);
+
+/* VA 0x00126DC0  (stdcall) */
+__attribute__((stdcall)) void D3DDevice_SetPixelShader(unsigned int param_1);
+
+/* VA 0x00127680  (stdcall) */
+__attribute__((stdcall)) void D3D_UpdateProjectionViewportTransform(void);
+
+/* VA 0x00127990  (stdcall) */
+__attribute__((stdcall)) void D3D_LazySetPointParams(void * param_1);
+
+/* VA 0x0012A410  (stdcall) */
+__attribute__((stdcall)) unsigned int D3D_SetFence(unsigned char param_1);
+
+/* VA 0x0012A4B0  (stdcall) */
+__attribute__((stdcall)) void D3D_BlockOnTime(unsigned int param_1, int param_2);
+
+/* VA 0x0012A790  (stdcall) */
+__attribute__((stdcall)) void D3D_KickOffAndWaitForIdle(void);
+
+/* VA 0x0012A7B0  (stdcall) */
+__attribute__((stdcall)) void D3D_BlockOnResource(void * param_1);
+
+/* VA 0x0012A840  (stdcall) */
+__attribute__((stdcall)) void XMETAL_StartPush(void * param_1);
+
+/* VA 0x0015CFED  (stdcall) */
+__attribute__((stdcall)) void XGSwizzleRect(void * param_1, int param_2, void * param_3, void * param_4, unsigned int param_5, unsigned int param_6, void * param_7, void * param_8);
+
+/* VA 0x0015E0B0  (stdcall) */
+__attribute__((stdcall)) void XGUnswizzleBox(int param_1, unsigned int param_2, unsigned int param_3, unsigned int param_4, void * param_5, void * param_6, unsigned int param_7, int param_8, void * param_9, unsigned int param_10);
+
+/* VA 0x0015E597  (stdcall) */
+__attribute__((stdcall)) void XGSetTextureHeader(unsigned int param_1, unsigned int param_2, unsigned int param_3, unsigned int param_4, unsigned int param_5, int param_6, void * param_7, int param_8, unsigned int param_9);
+
+
 #ifdef __cplusplus
 }
 #endif

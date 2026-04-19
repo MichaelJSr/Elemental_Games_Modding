@@ -231,15 +231,24 @@ class VanillaFunctionAudit(unittest.TestCase):
     # We allow any of these as the first byte.
     _VALID_PROLOGUE_FIRSTBYTES = {
         0x55, 0x53, 0x56, 0x57,              # PUSH EBP/EBX/ESI/EDI
+        0x51,                                 # PUSH ECX (D3D* wrappers)
         0x83, 0x81,                           # SUB ESP, imm
         0x8B,                                 # MOV r32, r/m32 (global load)
         0x8A,                                 # MOV r8, r/m8 (thiscall flag-
                                               # check prologue, e.g.
                                               # calculate_save_signature)
+        0x8D,                                 # LEA r32, [...] (helper prologues)
         0xA0, 0xA1,                           # MOV AL/EAX, [abs32]
         0x33,                                 # XOR r32, r32 (e.g. XOR EAX,EAX)
         0xD9,                                 # FLD ... (float-first prologue)
         0x6A, 0x68,                           # PUSH imm8 / imm32
+        0x66,                                 # 16-bit operand override
+                                              # (math helpers like _math_exit)
+        0x80,                                 # CMP r8, imm8
+                                              # (shift helpers like _aullshr)
+        0xF6,                                 # TEST r/m8, imm8 / r
+                                              # (thiscall flag-check variant)
+        0xE9,                                 # JMP rel32 (tail-call thunk)
         # PE-COFF import thunks + kernel-variant prologues:
         0xFF,   # FF 25 <abs32>  = JMP [abs]       (import thunk)
                 # FF 74 24 04    = PUSH [ESP+4]    (arg-shuffle wrapper)
@@ -247,21 +256,36 @@ class VanillaFunctionAudit(unittest.TestCase):
                 # (TIB-access prologue, e.g. GetLastError / SetLastError)
     }
 
+    # Azurik's XBE has several executable sections beyond ``.text``:
+    # each statically-linked library (D3D, DSOUND, XGRPH, D3DX,
+    # XPP, BINK*) lives in its own exec section.  The vanilla-
+    # symbol registry covers functions from all of them, so the
+    # "lives in code" check needs to accept any section whose
+    # XBE flags include the EXECUTABLE bit (0x04).
+    _EXEC_FLAG = 0x04
+
     @classmethod
     def setUpClass(cls):
         cls.xbe, cls.secs = _load_xbe()
-        cls.text_sec = next(s for s in cls.secs if s["name"] == ".text")
+        cls.exec_secs = [
+            s for s in cls.secs
+            if int(s.get("flags", 0)) & cls._EXEC_FLAG]
+        # Sanity: .text must be one of them.
+        assert any(s["name"] == ".text" for s in cls.exec_secs)
 
-    def test_every_vanilla_symbol_lives_in_text(self):
+    def test_every_vanilla_symbol_lives_in_code(self):
         for sym in all_entries():
             with self.subTest(name=sym.name, va=f"0x{sym.va:X}"):
-                ts = self.text_sec
-                in_text = ts["vaddr"] <= sym.va < ts["vaddr"] + ts["vsize"]
-                self.assertTrue(
-                    in_text,
+                host = next(
+                    (s for s in self.exec_secs
+                     if s["vaddr"] <= sym.va < s["vaddr"] + s["vsize"]),
+                    None)
+                self.assertIsNotNone(
+                    host,
                     msg=f"vanilla symbol {sym.name!r} VA 0x{sym.va:X} "
-                        f"is outside .text (section range 0x{ts['vaddr']:X}"
-                        f"..0x{ts['vaddr']+ts['vsize']:X})")
+                        f"isn't inside any executable section "
+                        f"(sections: "
+                        f"{', '.join(s['name'] for s in self.exec_secs)})")
 
     def test_every_vanilla_symbol_has_valid_prologue_byte(self):
         for sym in all_entries():
