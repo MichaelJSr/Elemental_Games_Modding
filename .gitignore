@@ -34,3 +34,13 @@ save*_extracted/
 # commit user EEPROMs even when pulled in for signature research.
 eeprom.bin
 *.eeprom
+
+# Extracted game audio (users must provide their own ISO; these are
+# tool OUTPUT directories, not source).  ``audio dump`` emits a lot
+# of .bin/.wav files + a manifest.json under the target dir; guard
+# against accidental commits of derived game content.
+audio_out/
+Azurik Audio/
+**/audio_out/
+**/Azurik Audio/
+**/waves/

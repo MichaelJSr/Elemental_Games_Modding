@@ -313,6 +313,41 @@ in Audacity" helper, but it's diagnostic only — not intended
 playback.  See ``docs/LEARNINGS.md`` § fx.xbr wave codec for the
 full RE trail.
 
+#### Extracting every wave-bearing XBR in one pass
+
+The tool runs against one XBR at a time, but every level / special
+XBR in ``gamedata/`` has its own ``wave`` entries (air / earth /
+fire / water / death levels, plus ``english.xbr`` for dialogue,
+``airship*.xbr``, ``characters.xbr``, etc.).  A small shell loop
+pulls everything into one tree:
+
+```bash
+GAMEDATA=/path/to/extracted/ISO/gamedata
+OUT=/path/to/audio_out
+IDX="$GAMEDATA/index/index.xbr"
+
+for xbr in "$GAMEDATA"/*.xbr; do
+    stem=$(basename "$xbr" .xbr)
+    azurik-mod audio dump "$xbr" \
+        --output "$OUT/$stem" \
+        --index-xbr "$IDX"
+done
+```
+
+Vanilla ISO yields **255 playable `.wav` files** across **36
+wave-bearing XBRs** (2,266 total TOC entries — most are empty
+placeholders or non-audio data, per the RE above).  Breakdown:
+
+- ``fx.xbr`` — 103 SFX (impacts, pickups, footsteps, etc.)
+- ``english.xbr`` — 11 dialogue clips
+- Level XBRs — 2-14 per level, mostly level-specific ambience
+- ``airship.xbr`` / ``interface.xbr`` / ``characters.xbr`` —
+  ship, UI, and model-specific SFX
+
+Add ``.gitignore`` rules for ``audio_out/`` + ``Azurik Audio/``
++ ``**/waves/`` if you're running into a working tree; the
+default ``.gitignore`` already covers those paths.
+
 ### `assets fingerprint` — sha1-index a file tree
 ```bash
 azurik-mod assets fingerprint iso/unpacked/ -o before.json

@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Audio cleanup — unused imports out, gitignore for extraction dirs
+
+Small cleanup pass on the audio module after the codec-RE closed.
+
+- Removed unused ``asdict`` + ``re`` imports from
+  ``azurik_mod.xbe_tools.audio_dump`` (neither referenced after
+  the ``likely-audio`` → ``non-audio`` relabel).
+- Added gitignore entries for ``audio_out/`` + ``Azurik Audio/``
+  + ``**/waves/`` so users who extract game audio into a working
+  tree don't accidentally commit derived game content.  The
+  ``audio dump`` tool produces all three patterns; one
+  ``manifest.json`` per source XBR + hundreds of ``.bin``/``.wav``
+  files under ``waves/`` adds up fast.
+- Added a bulk-extraction recipe to ``docs/TOOLS.md`` for
+  running ``audio dump`` against every wave-bearing XBR in the
+  ISO at once — vanilla yields 255 playable ``.wav`` files
+  across 36 XBRs (2,266 total TOC entries, most empty
+  placeholders or non-audio data per the April 2026 RE).
+
+**Drift guards**: 715 passed / 1 skipped.
+
 ### fx.xbr wave codec — RE closed (no custom decoder exists)
 
 The xemu-debug breakpoint at ``load_asset_by_fourcc`` (hit by the
