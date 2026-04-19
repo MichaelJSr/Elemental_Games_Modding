@@ -4,14 +4,47 @@ Each pack is a **folder** under [`azurik_mod/patches/`](../azurik_mod/patches/) 
 
 Packs tagged **c-shim** are backed by compiled C code from the feature folder's `shim.c` rather than hand-assembled bytes.  See [docs/SHIM_AUTHORING.md](SHIM_AUTHORING.md) for the authoring workflow.
 
-| Pack                 | Sites | Default-on | Tags                | Folder |
-|----------------------|-------|------------|---------------------|--------|
-| `fps_unlock`         | 50    | no         | fps, experimental   | [azurik_mod/patches/fps_unlock/](../azurik_mod/patches/fps_unlock/) |
-| `qol_gem_popups`     | 0     | no         | qol                 | [azurik_mod/patches/qol_gem_popups/](../azurik_mod/patches/qol_gem_popups/) |
-| `qol_other_popups`   | 0     | no         | qol                 | [azurik_mod/patches/qol_other_popups/](../azurik_mod/patches/qol_other_popups/) |
-| `qol_pickup_anims`   | 1     | no         | qol                 | [azurik_mod/patches/qol_pickup_anims/](../azurik_mod/patches/qol_pickup_anims/) |
-| `qol_skip_logo`      | 1     | no         | qol, c-shim         | [azurik_mod/patches/qol_skip_logo/](../azurik_mod/patches/qol_skip_logo/) |
-| `player_physics`     | 3     | no         | player, physics     | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
+## Categories
+
+Every pack lives in exactly one **category**, which determines the tab it appears under in the GUI's Patches page.  Categories are first-class objects declared in [`azurik_mod/patching/category.py`](../azurik_mod/patching/category.py) and ordered by `Category.order` (lower → earlier tab).  The builtin set:
+
+| id              | Title             | Order | Contents                                  |
+|-----------------|-------------------|-------|-------------------------------------------|
+| `performance`   | Performance       | 10    | Frame-rate / GPU / rendering tweaks       |
+| `player`        | Player            | 20    | Player-character movement + physics       |
+| `boot`          | Boot / Intro      | 30    | Skip boot-time cutscenes and logos        |
+| `qol`           | Quality of Life   | 40    | In-game UX and pacing improvements        |
+| `other`         | Other             | 9999  | Fallback for packs without an explicit id |
+
+### Creating a new category
+
+The easy path: just set `category="my_new_name"` on your `Feature(...)` declaration.  The registry auto-creates a placeholder `Category` — the tab label defaults to the id humanised (`"my_new_name"` → `"My New Name"`) and sort order `1000` (after every builtin).
+
+The explicit path (recommended for shipped packs):
+
+```python
+from azurik_mod.patching.category import Category, register_category
+
+register_category(Category(
+    id="cheats",
+    title="Cheats",
+    description="Plugin-provided cheat / debug mods.",
+    order=50,    # pick from 100+ if you don't want to compete with builtins
+))
+```
+
+`register_category` is idempotent when the metadata matches exactly, so it's safe to call from multiple modules.  Conflicting re-registrations (same `id`, different `title`/`order`/`description`) raise `ValueError` to catch plugin clashes early.
+
+---
+
+| Pack                 | Sites | Default-on | Category      | Tags          | Folder |
+|----------------------|-------|------------|---------------|---------------|--------|
+| `fps_unlock`         | 50    | no         | `performance` | fps, experimental | [azurik_mod/patches/fps_unlock/](../azurik_mod/patches/fps_unlock/) |
+| `player_physics`     | 3     | no         | `player`      | physics       | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
+| `qol_skip_logo`      | 1     | no         | `boot`        | c-shim        | [azurik_mod/patches/qol_skip_logo/](../azurik_mod/patches/qol_skip_logo/) |
+| `qol_gem_popups`     | 0     | no         | `qol`         | —             | [azurik_mod/patches/qol_gem_popups/](../azurik_mod/patches/qol_gem_popups/) |
+| `qol_other_popups`   | 0     | no         | `qol`         | —             | [azurik_mod/patches/qol_other_popups/](../azurik_mod/patches/qol_other_popups/) |
+| `qol_pickup_anims`   | 1     | no         | `qol`         | —             | [azurik_mod/patches/qol_pickup_anims/](../azurik_mod/patches/qol_pickup_anims/) |
 
 ---
 
@@ -224,7 +257,8 @@ The Patches page renders all three `ParametricSlider` widgets under the `player_
        sites=FOO_PATCH_SITES,
        apply=apply_foo_patches,
        default_on=True,
-       tags=("cosmetic",),
+       category="cosmetic",    # auto-registers a new GUI tab for you
+       tags=(),                # optional secondary badges
    ))
    ```
 

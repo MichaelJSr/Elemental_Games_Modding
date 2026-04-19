@@ -47,7 +47,8 @@ FEATURE = register_feature(Feature(
     apply=apply_other_popups_patch,
     default_on=False,
     included_in_randomizer_qol=False,
-    tags=("qol",),
+    category="qol",
+    tags=(),
     extra_whitelist_ranges=tuple((off, off + 1) for off in OTHER_POPUP_OFFSETS),
     custom_apply=_custom_apply,
 ))

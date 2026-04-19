@@ -191,7 +191,8 @@ FEATURE = register_feature(Feature(
     description="<user-facing text for the GUI/CLI>",
     sites=[MY_FEATURE_TRAMPOLINE],
     apply=apply_my_feature_patch,
-    tags=("qol", "c-shim"),     # `c-shim` surfaces it in audits
+    category="qol",              # GUI tab; pick existing or new id
+    tags=("c-shim",),            # secondary badge surfaced in audits
     shim=_SHIM,                  # enables auto-compile on missing .o
 ))
 ```

@@ -122,7 +122,9 @@ class RegistryEntry(unittest.TestCase):
         pack = get_pack("qol_other_popups")
         self.assertFalse(pack.default_on,
             msg="qol_other_popups must default to OFF")
-        self.assertIn("qol", pack.tags)
+        # Since the category system was introduced, the primary
+        # classification lives on ``category`` instead of ``tags``.
+        self.assertEqual(pack.category, "qol")
         self.assertEqual(pack.sites, [],
             msg="qol_other_popups has no PatchSpec sites — it's an "
                 "imperative null-byte patch on a list of offsets")

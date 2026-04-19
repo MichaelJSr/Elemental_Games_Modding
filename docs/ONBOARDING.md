@@ -107,7 +107,8 @@ FEATURE = register_feature(Feature(
     description="Skips the boot music intro.",
     sites=[SKIP_MUSIC_SPEC],
     apply=lambda xbe: None,         # generic dispatcher handles it
-    tags=("qol",),
+    category="qol",                 # GUI tab this pack lives in
+    tags=(),                        # optional secondary badges
 ))
 
 __all__ = ["FEATURE", "SKIP_MUSIC_SPEC"]

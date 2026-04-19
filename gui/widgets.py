@@ -373,51 +373,189 @@ class Section(ttk.Frame):
 
 
 class PackBrowser(ttk.Frame):
-    """Checkbox list of PatchPack rows, grouped by the pack's first tag.
+    """Category-based notebook of :class:`PatchPack` rows.
 
-    Mutates a shared `dict[str, tk.BooleanVar]` passed in at construction
-    time, so the Randomize page (or any other consumer) can observe the
-    same state.
+    Renders every category registered in
+    :mod:`azurik_mod.patching.category` as its own tab (ordered by
+    :attr:`Category.order`).  Empty categories are hidden so the tab
+    strip never shows a tab with zero packs.
+
+    Any pack that exposes :class:`ParametricPatch` sites gets an
+    inline slider block directly under its checkbox, within the same
+    tab — no more hunting for sliders in a separate "Parametric
+    sliders" section at the bottom of the page.
+
+    Parameters
+    ----------
+    parent: tk.Widget
+        Container widget.
+    packs: list
+        Packs to render.  Typically
+        ``azurik_mod.patching.registry.all_packs()``.
+    pack_vars: dict[str, tk.BooleanVar]
+        Shared dict the browser mutates — other consumers (e.g. the
+        Randomize page) can observe the same state by passing the
+        same dict.
+    pack_params: dict | None
+        Optional ``{pack_name: {param_name: value}}`` mapping that
+        backs every ParametricSlider in the notebook.  The browser
+        mirrors slider writes back into this dict via ``on_param_change``.
+        Pass ``None`` (the default) to disable parametric rendering.
+    on_param_change: callable | None
+        Optional ``(pack_name, param_name, new_value) -> None`` hook
+        called on every slider drag.  Use it to mirror changes into
+        the app state / event bus.
+
+    The class intentionally keeps a narrow, dependency-free public
+    surface so headless tests can instantiate it inside a throwaway
+    ``tk.Tk()`` and assert on ``tabs()``, ``get()``, etc.
     """
 
-    def __init__(self, parent, packs: list, pack_vars: dict[str, "tk.BooleanVar"]):
+    def __init__(self, parent, packs: list,
+                 pack_vars: dict[str, "tk.BooleanVar"],
+                 pack_params: dict | None = None,
+                 on_param_change: Callable[[str, str, float], None] | None
+                     = None) -> None:
         super().__init__(parent)
         self._vars = pack_vars
+        self._pack_params = pack_params
+        self._on_param_change = on_param_change
+        # One ParametricSlider per (pack, param) — exposed for tests.
+        self._sliders: dict[tuple[str, str], "ParametricSlider"] = {}
+        # id → ttk.Frame for every rendered tab, in insertion order.
+        self._tabs: dict[str, ttk.Frame] = {}
 
-        # Group by first tag (fall back to "other").
-        groups: dict[str, list] = {}
+        # Local imports so ``gui/widgets.py`` imports clean on a
+        # bare tkinter install without the Azurik runtime loaded.
+        from azurik_mod.patching.category import all_categories
+        from azurik_mod.patching.registry import packs_by_category
+
+        self._notebook = ttk.Notebook(self)
+        self._notebook.pack(fill=tk.BOTH, expand=True)
+
+        # Keep explicit references to pack lists by category so the
+        # input ``packs`` argument (which may be a filtered subset)
+        # overrides the registry's global view.
+        requested = {p.name for p in packs}
+        grouped = packs_by_category()
+
+        for cat in all_categories():
+            cat_packs = [p for p in grouped.get(cat.id, [])
+                         if p.name in requested]
+            if not cat_packs:
+                continue  # hide empty tabs
+            tab = self._build_tab(cat, cat_packs)
+            self._notebook.add(tab, text=cat.title)
+            self._tabs[cat.id] = tab
+
+        # Packs whose category id isn't registered (should be
+        # impossible after register_pack's ensure_category, but
+        # handle gracefully anyway).
+        known = {c.id for c in all_categories()}
+        stragglers = [p for p in packs if p.category not in known]
+        if stragglers:
+            from azurik_mod.patching.category import Category
+            orphan = Category("other", "Other",
+                              "Uncategorised", 10_000)
+            tab = self._build_tab(orphan, stragglers)
+            self._notebook.add(tab, text=orphan.title)
+            self._tabs[orphan.id] = tab
+
+    # ---- rendering helpers -------------------------------------------
+
+    def _build_tab(self, category, packs: list) -> ttk.Frame:
+        """Render the content of one tab (Category header + pack rows)."""
+        tab = ttk.Frame(self._notebook, padding=(12, 8))
+        if category.description:
+            ttk.Label(tab, text=category.description,
+                      foreground="gray", wraplength=680,
+                      justify=tk.LEFT).pack(anchor=tk.W, pady=(0, 8))
         for pack in packs:
-            tag = pack.tags[0] if pack.tags else "other"
-            groups.setdefault(tag, []).append(pack)
-
-        for tag in sorted(groups.keys()):
-            grp = groups[tag]
-            section = Section(self, title=tag.upper(), initially_open=True)
-            section.pack(fill=tk.X, pady=(4, 4))
-            for pack in grp:
-                self._render_pack_row(section.body, pack)
+            self._render_pack_row(tab, pack)
+        return tab
 
     def _render_pack_row(self, parent, pack) -> None:
+        """Render one pack: checkbox + tag badges + description +
+        (optional) parametric sliders."""
         row = ttk.Frame(parent)
-        row.pack(fill=tk.X, pady=3)
+        row.pack(fill=tk.X, pady=(4, 8))
 
-        var = self._vars.setdefault(pack.name, tk.BooleanVar(value=pack.default_on))
+        var = self._vars.setdefault(
+            pack.name, tk.BooleanVar(value=pack.default_on))
 
         cb_label = f"{pack.name}  ({len(pack.sites)} sites)"
         ttk.Checkbutton(row, text=cb_label, variable=var).pack(anchor=tk.W)
 
-        badge_row = ttk.Frame(row)
-        badge_row.pack(anchor=tk.W, padx=(25, 0))
-        for tag in pack.tags:
-            ttk.Label(badge_row, text=f"[{tag}]", foreground="#4b7bec",
-                      font=("", 8)).pack(side=tk.LEFT, padx=(0, 4))
-        if any(s.safety_critical for s in pack.sites):
-            ttk.Label(badge_row, text="[safety-critical]",
-                      foreground="#e67e22", font=("", 8)).pack(
-                side=tk.LEFT, padx=(0, 4))
+        if pack.tags or any(
+                getattr(s, "safety_critical", False) for s in pack.sites):
+            badge_row = ttk.Frame(row)
+            badge_row.pack(anchor=tk.W, padx=(25, 0))
+            for tag in pack.tags:
+                ttk.Label(badge_row, text=f"[{tag}]",
+                          foreground="#4b7bec",
+                          font=("", 8)).pack(side=tk.LEFT, padx=(0, 4))
+            if any(getattr(s, "safety_critical", False)
+                   for s in pack.sites):
+                ttk.Label(badge_row, text="[safety-critical]",
+                          foreground="#e67e22", font=("", 8)).pack(
+                    side=tk.LEFT, padx=(0, 4))
 
         ttk.Label(row, text=pack.description, foreground="gray",
-                  wraplength=620, justify=tk.LEFT).pack(anchor=tk.W, padx=(25, 0))
+                  wraplength=620, justify=tk.LEFT).pack(
+                      anchor=tk.W, padx=(25, 0))
+
+        # Parametric sliders live right under the pack so the spatial
+        # relationship is obvious — no more separate bottom section.
+        if self._pack_params is not None and pack.parametric_sites():
+            slider_host = ttk.Frame(row)
+            slider_host.pack(anchor=tk.W, padx=(25, 0),
+                             pady=(4, 0), fill=tk.X)
+            self._pack_params.setdefault(pack.name, {})
+            for pp in pack.parametric_sites():
+                initial = self._pack_params[pack.name].get(
+                    pp.name, pp.default)
+                self._pack_params[pack.name][pp.name] = initial
+
+                def _make_callback(pn=pack.name, param=pp.name):
+                    def on_change(value):
+                        if self._pack_params is not None:
+                            self._pack_params[pn][param] = value
+                        if self._on_param_change is not None:
+                            self._on_param_change(pn, param, value)
+                    return on_change
+
+                slider = ParametricSlider(
+                    slider_host, pp,
+                    initial=initial,
+                    on_change=_make_callback(),
+                )
+                slider.pack(fill=tk.X, pady=(2, 4))
+                self._sliders[(pack.name, pp.name)] = slider
+
+    # ---- test / introspection surface --------------------------------
+
+    def tabs(self) -> list[str]:
+        """Return category ids of currently-rendered tabs, in order.
+
+        Used by regression tests + the Randomize page to enumerate
+        what was built without poking at Tk internals.
+        """
+        return list(self._tabs.keys())
+
+    def tab_titles(self) -> list[str]:
+        """Return the tab strip's user-facing labels."""
+        return [self._notebook.tab(i, "text")
+                for i in range(self._notebook.index("end"))]
+
+    def select(self, category_id: str) -> None:
+        """Raise the tab for ``category_id``; no-op if not rendered."""
+        tab = self._tabs.get(category_id)
+        if tab is not None:
+            self._notebook.select(tab)
+
+    def sliders(self) -> dict[tuple[str, str], "ParametricSlider"]:
+        """Return a copy of the (pack, param) → ParametricSlider map."""
+        return dict(self._sliders)
 
 
 class PrimaryButton(ttk.Button):

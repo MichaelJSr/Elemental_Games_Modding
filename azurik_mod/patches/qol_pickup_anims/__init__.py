@@ -41,7 +41,8 @@ FEATURE = register_feature(Feature(
     apply=apply_pickup_anim_patch,
     default_on=False,
     included_in_randomizer_qol=False,
-    tags=("qol",),
+    category="qol",
+    tags=(),
 ))
 
 

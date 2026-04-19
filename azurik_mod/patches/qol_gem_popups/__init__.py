@@ -50,7 +50,8 @@ FEATURE = register_feature(Feature(
     apply=apply_gem_popups_patch,
     default_on=False,
     included_in_randomizer_qol=False,
-    tags=("qol",),
+    category="qol",
+    tags=(),
     # Each offset is a single-byte null into a resource-key string;
     # declare them so verify-patches --strict sees them as expected.
     extra_whitelist_ranges=tuple((off, off + 1) for off in GEM_POPUP_OFFSETS),

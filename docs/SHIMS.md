@@ -130,7 +130,8 @@ Target: arm64-apple-darwin25.4.0 (host)  →  i386-pc-win32 (output)
        description="Short human description for the Patches UI.",
        sites=(MY_FEATURE_TRAMPOLINE,),
        shim=ShimSource(folder=_HERE),   # auto-compiles shim.c when needed
-       tags=("qol", "c-shim"),
+       category="qol",                   # GUI tab (auto-created if new)
+       tags=("c-shim",),                 # secondary badge for audit tools
    ))
    ```
 

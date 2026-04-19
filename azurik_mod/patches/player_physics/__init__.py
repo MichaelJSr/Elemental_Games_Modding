@@ -375,7 +375,8 @@ FEATURE = register_feature(Feature(
     apply=_apply_defaults,
     default_on=False,
     included_in_randomizer_qol=False,
-    tags=("player", "physics"),
+    category="player",
+    tags=("physics",),
     dynamic_whitelist_from_xbe=_player_speed_dynamic_whitelist,
     custom_apply=_custom_apply,
 ))

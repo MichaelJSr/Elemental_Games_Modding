@@ -134,7 +134,11 @@ class RegistryEntry(unittest.TestCase):
         pack = get_pack("qol_skip_logo")
         self.assertFalse(pack.default_on,
             msg="qol_skip_logo must default to OFF")
-        self.assertIn("qol", pack.tags)
+        # Since the category system was introduced, ``qol_skip_logo``
+        # lives in the ``boot`` category (boot-time cutscene skip),
+        # not ``qol``.  ``tags`` now carries only secondary
+        # classifications like ``c-shim``.
+        self.assertEqual(pack.category, "boot")
         self.assertIn("c-shim", pack.tags)
         self.assertEqual(len(pack.sites), 1)
         self.assertIs(pack.sites[0], SKIP_LOGO_TRAMPOLINE)

@@ -505,5 +505,6 @@ FEATURE = register_feature(Feature(
     apply=apply_fps_patches,
     default_on=False,
     included_in_randomizer_qol=False,
+    category="performance",
     tags=("fps", "experimental"),
 ))

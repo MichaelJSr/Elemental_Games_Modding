@@ -118,7 +118,8 @@ FEATURE = register_feature(Feature(
     apply=apply_skip_logo_patch,
     default_on=False,
     included_in_randomizer_qol=False,
-    tags=("qol", "c-shim"),
+    category="boot",
+    tags=("c-shim",),
     shim=_SHIM,
     legacy_sites=(SKIP_LOGO_LEGACY_SPEC,),
 ))

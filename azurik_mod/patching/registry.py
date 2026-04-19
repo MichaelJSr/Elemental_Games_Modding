@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Union
 
+from azurik_mod.patching.category import ensure_category
 from azurik_mod.patching.feature import ShimSource
 from azurik_mod.patching.spec import (
     ParametricPatch,
@@ -55,8 +56,26 @@ class PatchPack:
     included_in_randomizer_qol: bool = False
     """If True, `randomize-full --no-qol` disables this pack too."""
 
+    category: str = "other"
+    """Primary category — drives GUI tab grouping.  Declare new
+    categories simply by using a fresh string here; the registry
+    auto-creates a placeholder :class:`~azurik_mod.patching.category.Category`
+    on first use.  For a nicer title/description/sort-order,
+    register the category explicitly via
+    :func:`azurik_mod.patching.category.register_category` before
+    importing any feature that references it.
+
+    Canonical builtin ids (each with a pre-registered Category):
+    ``"performance"``, ``"player"``, ``"boot"``, ``"qol"``,
+    ``"other"``.  See ``azurik_mod/patching/category.py``."""
+
     tags: tuple[str, ...] = field(default_factory=tuple)
-    """Free-form tags like 'fps', 'qol', 'player', 'experimental'."""
+    """Secondary free-form classifications surfaced in the GUI as
+    badges (e.g. ``"c-shim"``, ``"experimental"``, ``"physics"``).
+
+    Do NOT use ``tags`` to carry the primary category — set
+    :attr:`category` instead.  ``tags`` is for additional
+    metadata that doesn't fit the one-category-per-pack model."""
 
     extra_whitelist_ranges: tuple[tuple[int, int], ...] = field(default_factory=tuple)
     """Extra ``(lo, hi)`` file-offset half-open byte ranges this pack is
@@ -150,9 +169,17 @@ _REGISTRY: dict[str, PatchPack] = {}
 
 
 def register_pack(pack: PatchPack) -> PatchPack:
-    """Register a patch pack. Raises on duplicate names."""
+    """Register a patch pack. Raises on duplicate names.
+
+    Also auto-creates a placeholder
+    :class:`~azurik_mod.patching.category.Category` for the pack's
+    ``category`` id if no category with that id is registered yet,
+    so feature authors can spin up new categories simply by picking
+    a fresh name.
+    """
     if pack.name in _REGISTRY:
         raise ValueError(f"Duplicate patch pack name: {pack.name!r}")
+    ensure_category(pack.category)
     _REGISTRY[pack.name] = pack
     return pack
 
@@ -170,6 +197,25 @@ def get_pack(name: str) -> PatchPack:
 def all_packs() -> list[PatchPack]:
     """Return every registered pack, in registration order."""
     return list(_REGISTRY.values())
+
+
+def packs_by_category() -> dict[str, list[PatchPack]]:
+    """Return packs grouped by ``category`` id.
+
+    The returned dict's iteration order matches
+    :func:`~azurik_mod.patching.category.all_categories` (by
+    ``Category.order`` then id), so consumers can render tab
+    strips directly without an extra sort.  Categories that
+    currently have zero registered packs are included with an
+    empty list — the GUI can then decide whether to hide them.
+    """
+    from azurik_mod.patching.category import all_categories
+
+    groups: dict[str, list[PatchPack]] = {
+        cat.id: [] for cat in all_categories()}
+    for pack in _REGISTRY.values():
+        groups.setdefault(pack.category, []).append(pack)
+    return groups
 
 
 def all_sites() -> list[SiteType]:
