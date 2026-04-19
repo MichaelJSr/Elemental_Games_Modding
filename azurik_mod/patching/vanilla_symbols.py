@@ -2597,6 +2597,113 @@ register(VanillaSymbol(
 ))
 
 
+
+
+# ---------------------------------------------------------------------------
+# SDK / Xbox-API additions — batch #2 (April 2026)
+# XInput, XGraphics, XAudio, DSound top-level, Direct3D entry points
+# that practical shims may call.  Signatures mined from Ghidra.
+# --------------------------------------------------------------------------
+
+# ---- XInput (XAPILIB) ----
+
+register(VanillaSymbol(
+    name="XInitDevices",
+    va=0x00187E87,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="SDK entry point (XInput (XAPILIB)).  Ghidra signature: ``undefined XInitDevices(undefined4 param_1)``",
+))
+
+# ---- XGraphics (XGRPH) ----
+
+# ---- XAudio (DSOUND) ----
+
+# ---- DirectSound (DSOUND) ----
+
+register(VanillaSymbol(
+    name="DirectSoundCreate",
+    va=0x0013807C,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc="SDK entry point (DirectSound (DSOUND)).  Ghidra signature: ``int DirectSoundCreate(undefined4 param_1, uint * param_2)``",
+))
+
+register(VanillaSymbol(
+    name="DirectSoundDoWork",
+    va=0x00137205,
+    calling_convention="stdcall",
+    arg_bytes=0,
+    doc="SDK entry point (DirectSound (DSOUND)).  Ghidra signature: ``undefined DirectSoundDoWork(void)``",
+))
+
+# ---- Direct3D (D3D) ----
+
+register(VanillaSymbol(
+    name="Direct3D_CreateDevice",
+    va=0x00124160,
+    calling_convention="stdcall",
+    arg_bytes=0,
+    doc="SDK entry point (Direct3D (D3D)).  Ghidra signature: ``int Direct3D_CreateDevice(void)``",
+))
+
+
+
+
+# ---------------------------------------------------------------------------
+# C-runtime + compiler intrinsics - batch #3 (April 2026)
+# 64-bit arithmetic helpers clang emits implicitly + string/file stdlib.
+# ---------------------------------------------------------------------------
+
+register(VanillaSymbol(
+    name="__alldiv",
+    va=0x000ED000,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="64-bit signed divide (compiler intrinsic). Clang emits CALL __alldiv for (int64_t) / (int64_t).",
+))
+
+register(VanillaSymbol(
+    name="__allmul",
+    va=0x000EC8E0,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="64-bit multiply (compiler intrinsic).",
+))
+
+register(VanillaSymbol(
+    name="__allshr",
+    va=0x000ECF90,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="64-bit signed shift-right (intrinsic).",
+))
+
+register(VanillaSymbol(
+    name="__aulldiv",
+    va=0x000ECF20,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="64-bit unsigned divide (intrinsic).",
+))
+
+register(VanillaSymbol(
+    name="__aullrem",
+    va=0x000ECDC0,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="64-bit unsigned remainder (intrinsic).",
+))
+
+register(VanillaSymbol(
+    name="__aullshr",
+    va=0x000ECDA0,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="64-bit unsigned shift-right (intrinsic).",
+))
+
+
 # ---------------------------------------------------------------------------
 # Public accessors
 # ---------------------------------------------------------------------------

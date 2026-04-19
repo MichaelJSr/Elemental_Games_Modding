@@ -772,6 +772,20 @@ typedef struct MovieContext {
 #define AZURIK_STR_LEVELS_TRAINING_VA 0x001A1E4Cu  /* "levels/training_room"*/
 #define AZURIK_STR_INDEX_XBR_PATH_VA  0x0019ADB0u  /* "index\\index.xbr"    */
 
+/* ---- Save-slot UI (UTF-16LE wide strings in .rdata) ----
+ *
+ * Useful for shims that want to rename save slots, localise the
+ * "X days / 1 day" playtime formatting, or hijack the "Scratch
+ * Game" developer entry.  All four are wchar_t[] / ``unsigned
+ * short *`` — dereference with the matching width, not ``char *``.
+ */
+#define AZURIK_STR_SAVEGAME_FMT_W_VA  0x0019E054u  /* L"SaveGame #%d"      */
+#define AZURIK_STR_START_NEW_GAME_W_VA 0x0019E070u /* L"Start New Game"    */
+#define AZURIK_STR_SCRATCH_GAME_W_VA  0x0019E54Cu  /* L"scratch game"      */
+#define AZURIK_STR_DUMMY_TEMP_GAME_W_VA 0x0019E56Cu /* L"DummyTempGame"    */
+#define AZURIK_STR_DAYS_FMT_W_VA      0x0019E038u  /* L"%d days"           */
+#define AZURIK_STR_ONE_DAY_W_VA       0x0019E048u  /* L"1 day"             */
+
 
 /* ==========================================================================
  * Conveniences

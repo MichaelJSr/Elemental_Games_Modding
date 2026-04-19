@@ -1022,6 +1022,79 @@ __attribute__((stdcall)) void XGUnswizzleBox(int param_1, unsigned int param_2, 
 __attribute__((stdcall)) void XGSetTextureHeader(unsigned int param_1, unsigned int param_2, unsigned int param_3, unsigned int param_4, unsigned int param_5, int param_6, void * param_7, int param_8, unsigned int param_9);
 
 
+
+
+/* ==================================================================
+ * SDK / Xbox-API additions — batch #2
+ * Only entries whose first byte parses as a valid x86 prologue in
+ * Azurik's embedded-library XBE sections.  Many Ghidra-named
+ * XAPILIB / XG* / DSound / XAudio entry points turned out to be
+ * IAT thunk labels that land mid-instruction inside import stubs
+ * (``FF 15 <abs32>`` CALL [mem] is 6 bytes but Ghidra tagged
+ * ``XGetDevices`` at +5, i.e. inside the operand).  Those are
+ * dropped here pending a stubs pass that re-identifies the true
+ * thunk table.  See ``docs/LEARNINGS.md`` for the dead-list.
+ * ================================================================== */
+
+/* --- Xbox device init (XAPILIB) --- */
+
+/* VA 0x00187E87  (stdcall — XInput / XAPILIB) */
+__attribute__((stdcall)) void XInitDevices(int reserved);
+
+/* --- DirectSound top-level (DSOUND) --- */
+
+/* VA 0x0013807C  (stdcall — DirectSound (DSOUND)) */
+__attribute__((stdcall)) int DirectSoundCreate(void * guid, void * out_dsound);
+
+/* VA 0x00137205  (stdcall — DirectSound (DSOUND)) */
+__attribute__((stdcall)) void DirectSoundDoWork(void);
+
+/* --- Direct3D (D3D) --- */
+
+/* VA 0x00124160  (stdcall — Direct3D (D3D)) */
+__attribute__((stdcall)) int Direct3D_CreateDevice(void);
+
+
+
+/* ==================================================================
+ * C-runtime + compiler intrinsics - batch #3
+ * 64-bit arithmetic helpers + string/file stdlib
+ * ================================================================== */
+
+/* VA 0x000ED000  (cdecl) — 64-bit signed divide (compiler intrinsic). Clang emits CALL  */
+long long __alldiv(long long a, long long b);
+
+/* VA 0x000EC8E0  (cdecl) — 64-bit multiply (compiler intrinsic). */
+long long __allmul(long long a, long long b);
+
+/* VA 0x000ECF90  (cdecl) — 64-bit signed shift-right (intrinsic). */
+long long __allshr(long long a, int shift);
+
+/* VA 0x000ECF20  (cdecl) — 64-bit unsigned divide (intrinsic). */
+unsigned long long __aulldiv(unsigned long long a, unsigned long long b);
+
+/* VA 0x000ECDC0  (cdecl) — 64-bit unsigned remainder (intrinsic). */
+unsigned long long __aullrem(unsigned long long a, unsigned long long b);
+
+/* VA 0x000ECDA0  (cdecl) — 64-bit unsigned shift-right (intrinsic). */
+unsigned long long __aullshr(unsigned long long a, int shift);
+
+/* VA 0x000ED4C2  (cdecl) — _isalnum(ch) -> bool. */
+int _isalnum(int ch);
+
+/* VA 0x000ED399  (cdecl) — _isalpha(ch). */
+int _isalpha(int ch);
+
+/* VA 0x000ED419  (cdecl) — _isdigit(ch). */
+int _isdigit(int ch);
+
+/* VA 0x000ED470  (cdecl) — _isspace(ch). */
+int _isspace(int ch);
+
+
+
+
+
 #ifdef __cplusplus
 }
 #endif

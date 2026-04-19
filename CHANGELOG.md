@@ -2,6 +2,57 @@
 
 ## Unreleased
 
+### Coverage top-up — vanilla_symbols 272 → 282, +6 save-UI anchors
+
+Audit pass over Ghidra's named-function snapshot vs. our registry
+surfaced a handful of genuinely-useful entry points that were
+missing, plus several that looked reachable but turned out to be
+IAT-thunk label artifacts (Ghidra tagged a name at +5 inside a
+``FF 15 <abs32>`` 6-byte ``CALL [mem]`` stub, i.e. mid-operand —
+those are dropped in-source with a note).
+
+**New in ``vanilla_symbols.py`` (+10 net)** — all verified to have
+valid x86 prologue bytes at the claimed VA:
+
+- *XAPILIB / Xbox device init*: ``XInitDevices`` (the true
+  ``0x00187E87`` entry — NOT the ``0x001889CF`` thunk Ghidra
+  snapshots also list under the same name).
+- *DirectSound*: ``DirectSoundCreate``, ``DirectSoundDoWork``.
+- *Direct3D*: ``Direct3D_CreateDevice``.
+- *Compiler intrinsics that clang emits implicitly* (cdecl):
+  ``__alldiv`` / ``__allmul`` / ``__allshr`` /
+  ``__aulldiv`` / ``__aullrem`` / ``__aullshr`` —
+  shim authors can now use ``int64_t`` / ``uint64_t`` arithmetic
+  without having to link their own 64-bit helpers.
+
+**Dropped (IAT-thunk mid-instruction labels)** — documented inline
+in ``azurik_vanilla.h`` so future passes don't re-add them: all
+five ``XInput*`` entries, ``XGetDevices``, ``XGetDeviceChanges``,
+``XGIsSwizzledFormat``, ``XGUnswizzleRect``, ``XGSwizzleBox``,
+``XGSetSurfaceHeader``, ``XAudioCalculatePitch``,
+``DirectSoundCreateBuffer``, ``DirectSoundCreateStream``,
+``DirectSoundUseFullHRTF``, ``DirectSoundEnterCriticalSection``.
+When a shim genuinely needs one of these the fix is to resolve
+the IAT slot (``DAT_0018F50C`` + company) and point through it,
+not to call the ``FF 15`` stub directly.
+
+**New anchors in ``azurik.h`` (+6)** — UTF-16LE save-slot UI
+strings that can be intercepted to rename save slots, localise
+playtime copy, or reshape the dev/scratch save flow:
+
+- ``AZURIK_STR_SAVEGAME_FMT_W_VA`` (L"SaveGame #%d")
+- ``AZURIK_STR_START_NEW_GAME_W_VA`` (L"Start New Game")
+- ``AZURIK_STR_SCRATCH_GAME_W_VA`` (L"scratch game")
+- ``AZURIK_STR_DUMMY_TEMP_GAME_W_VA`` (L"DummyTempGame")
+- ``AZURIK_STR_DAYS_FMT_W_VA`` (L"%d days")
+- ``AZURIK_STR_ONE_DAY_W_VA`` (L"1 day")
+
+``tests/test_va_audit.py::ANCHOR_EXPECTATIONS`` extended for each
+with a UTF-16 prefix predicate so drift would immediately fail
+the audit.
+
+**Drift guards:** 685 passed / 1 skipped.
+
 ### Struct coverage expansion — azurik.h grew 3 → 10 structs
 
 Pinned seven more game-internal struct layouts so shim authors can

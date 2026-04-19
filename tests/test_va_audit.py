@@ -185,6 +185,31 @@ ANCHOR_EXPECTATIONS: dict[str, tuple[int, str, object, str]] = {
         0x0019ADB0, ".rdata",
         lambda b: b.startswith(b"index\\index.xbr\x00"),
         "ASCII 'index\\\\index.xbr\\0' loader path"),
+    # --- Save-slot UI strings (UTF-16 LE, April 2026 pass) ---
+    "AZURIK_STR_SAVEGAME_FMT_W_VA": (
+        0x0019E054, ".rdata",
+        lambda b: b.startswith(b"S\x00a\x00v\x00e\x00G\x00a\x00m\x00e\x00"),
+        "UTF-16 L'SaveGame #%d' save-slot format"),
+    "AZURIK_STR_START_NEW_GAME_W_VA": (
+        0x0019E070, ".rdata",
+        lambda b: b.startswith(b"S\x00t\x00a\x00r\x00t\x00 \x00N\x00"),
+        "UTF-16 L'Start New Game' menu label"),
+    "AZURIK_STR_SCRATCH_GAME_W_VA": (
+        0x0019E54C, ".rdata",
+        lambda b: b.startswith(b"s\x00c\x00r\x00a\x00t\x00c\x00h\x00"),
+        "UTF-16 L'scratch game' dev save key"),
+    "AZURIK_STR_DUMMY_TEMP_GAME_W_VA": (
+        0x0019E56C, ".rdata",
+        lambda b: b.startswith(b"D\x00u\x00m\x00m\x00y\x00T\x00e\x00"),
+        "UTF-16 L'DummyTempGame' placeholder save key"),
+    "AZURIK_STR_DAYS_FMT_W_VA": (
+        0x0019E038, ".rdata",
+        lambda b: b.startswith(b"%\x00d\x00 \x00d\x00a\x00y\x00s\x00"),
+        "UTF-16 L'%d days' playtime plural format"),
+    "AZURIK_STR_ONE_DAY_W_VA": (
+        0x0019E048, ".rdata",
+        lambda b: b.startswith(b"1\x00 \x00d\x00a\x00y\x00\x00"),
+        "UTF-16 L'1 day' playtime singular format"),
 }
 
 
