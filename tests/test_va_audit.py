@@ -233,6 +233,9 @@ class VanillaFunctionAudit(unittest.TestCase):
         0x55, 0x53, 0x56, 0x57,              # PUSH EBP/EBX/ESI/EDI
         0x83, 0x81,                           # SUB ESP, imm
         0x8B,                                 # MOV r32, r/m32 (global load)
+        0x8A,                                 # MOV r8, r/m8 (thiscall flag-
+                                              # check prologue, e.g.
+                                              # calculate_save_signature)
         0xA0, 0xA1,                           # MOV AL/EAX, [abs32]
         0x33,                                 # XOR r32, r32 (e.g. XOR EAX,EAX)
         0xD9,                                 # FLD ... (float-first prologue)

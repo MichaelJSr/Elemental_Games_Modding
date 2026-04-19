@@ -143,6 +143,37 @@ __attribute__((stdcall))
 int load_asset_by_fourcc(int fourcc, int flags);
 
 
+/* ------------------------------------------------------------------
+ * Save-slot signature entry points (April 2026 RE pass)
+ * ------------------------------------------------------------------ */
+
+/* Entry point for Azurik's save-slot sign / verify.
+ * __thiscall: save-slot context in ECX; the flag byte at
+ * ``[ECX+0x20A]`` gates signing (0x7A = bypass).
+ *
+ * Exposed so a future ``qol_skip_save_signature`` shim can patch
+ * the function prologue to unconditionally set the bypass flag.
+ * See docs/SAVE_FORMAT.md § 7 for the algorithm trace.
+ *
+ * Vanilla VA: 0x0005C920  (mangled: _calculate_save_signature) */
+__attribute__((thiscall))
+void calculate_save_signature(void);
+
+/* XDK re-exports: Xbox SDK's HMAC-SHA1 signature helpers.
+ * Exposed so a (future) shim that wants to bypass / override
+ * Azurik's signature flow can intercept at the XDK boundary
+ * rather than at Azurik's caller.  Both follow the standard
+ * XDK stdcall convention.
+ *
+ * Vanilla VA: 0x000E2BC9  (mangled: _xcalculate_signature_begin@4) */
+__attribute__((stdcall))
+void *xcalculate_signature_begin(unsigned int flags);
+
+/* Vanilla VA: 0x000E2C21  (mangled: _xcalculate_signature_end@8) */
+__attribute__((stdcall))
+int xcalculate_signature_end(unsigned int *ctx, unsigned char *out20);
+
+
 #ifdef __cplusplus
 }
 #endif

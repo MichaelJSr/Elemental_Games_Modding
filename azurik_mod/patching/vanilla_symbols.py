@@ -298,6 +298,63 @@ register(VanillaSymbol(
 ))
 
 register(VanillaSymbol(
+    name="calculate_save_signature",
+    va=0x0005C920,
+    calling_convention="thiscall",
+    arg_bytes=0,
+    doc=(
+        "Entry point for Azurik's save-slot sign / verify.  "
+        "__thiscall: the save-slot context lives in ECX "
+        "(path buffer at [ECX+0x20A], flag byte at [ECX+0x20A]'s "
+        "high byte — 0x7A disables signing).\n\n"
+        "Flow (from Ghidra decomp):\n"
+        "  1. if ([ECX+0x20A] == 0x7A): return    # bypass\n"
+        "  2. ctx = XCalculateSignatureBegin(0)   # HMAC-SHA1\n"
+        "  3. FUN_0005C4B0(path, ctx)             # hash tree\n"
+        "  4. XCalculateSignatureEnd(ctx, sig20)\n"
+        "  5. fwrite(sig20, 20, 1, fopen(path+'/signature.sav'))\n\n"
+        "Documented here so a future ``qol_skip_save_signature`` "
+        "shim (see docs/SAVE_FORMAT.md § 7) can reference the "
+        "function by name rather than raw VA.  The hash-tree-walk "
+        "is pinned in :mod:`azurik_mod.save_format.signature` "
+        "for direct Python use."
+    ),
+))
+
+register(VanillaSymbol(
+    name="xcalculate_signature_begin",
+    va=0x000E2BC9,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc=(
+        "XDK re-export.  ``XCalculateSignatureBegin(flags)`` — "
+        "allocates + initialises an HMAC-SHA1 context keyed with "
+        "``XboxSignatureKey``.  flags=0 means 'inner HMAC only' "
+        "(no per-console HDKey outer layer); Azurik passes 0 "
+        "from ``calculate_save_signature``.\n\n"
+        "Returns the hash-context pointer in EAX (opaque; pass "
+        "to Update / End).  See docs/SAVE_FORMAT.md § 7 for the "
+        "save-sign trace."
+    ),
+))
+
+register(VanillaSymbol(
+    name="xcalculate_signature_end",
+    va=0x000E2C21,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc=(
+        "XDK re-export.  ``XCalculateSignatureEnd(ctx, out20)`` — "
+        "finalises the HMAC-SHA1 accumulator from Begin/Update "
+        "and writes 20 bytes to ``out20``.  When the Begin-time "
+        "flags requested the HDKey outer layer, that extra "
+        "HMAC-SHA1(HDKey, inner) stage happens here too; "
+        "otherwise this is plain HMAC-Final.\n\n"
+        "Pair with :data:`xcalculate_signature_begin`."
+    ),
+))
+
+register(VanillaSymbol(
     name="gravity_integrate_raw",
     va=0x00085700,
     calling_convention="fastcall",
