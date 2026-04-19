@@ -662,10 +662,18 @@ class ParametricSlider(ttk.Frame):
     # --- internals -----------------------------------------------------
 
     def _on_scale(self, _new):
+        # Fires on every pixel-level drag on the slider.  The earlier
+        # version used two different float-format strings here
+        # (``%.3f`` on drag, ``%g`` in ``set_value``) which made the
+        # entry field flicker between e.g. ``9.800`` and ``9.8`` when
+        # the user dragged past the default, stole focus from anyone
+        # typing into the entry, and produced noisy diffs in config
+        # export.  Using ``%g`` consistently collapses both paths
+        # onto the same canonical representation.
         if self._building:
             return
         v = float(self._var.get())
-        self._entry_var.set(f"{v:.3f}")
+        self._entry_var.set(f"{v:g}")
         self._value_lbl.configure(text=self._header_text(v))
         if self._on_change:
             self._on_change(v)

@@ -13,9 +13,9 @@ import contextlib
 import datetime
 import io
 import json
+import os
 import queue
 import shutil
-import subprocess
 import tempfile
 import threading
 import traceback
@@ -126,35 +126,37 @@ class _QueueWriter(io.TextIOBase):
     def writable(self) -> bool:  # type: ignore[override]
         return True
 
+    def _emit(self, line: str) -> None:
+        """Fan one line out to buffer + log + queue + optional hook.
+
+        Factored out of :meth:`write` / :meth:`flush` so the two
+        paths can't drift (buffer always matches queue order) and
+        so the per-line try/except on the log write sits in exactly
+        one place.
+        """
+        self._buffer.append(line)
+        log = self._log_file
+        if log is not None:
+            try:
+                log.write(line)
+            except Exception:  # noqa: BLE001
+                pass
+        self._queue.put(("output", line))
+        if self._on_output is not None:
+            self._on_output(line)
+
     def write(self, text: str) -> int:  # type: ignore[override]
         if not text:
             return 0
         self._pending += text
         while "\n" in self._pending:
             line, self._pending = self._pending.split("\n", 1)
-            line = line + "\n"
-            self._buffer.append(line)
-            if self._log_file is not None:
-                try:
-                    self._log_file.write(line)
-                except Exception:  # noqa: BLE001
-                    pass
-            self._queue.put(("output", line))
-            if self._on_output is not None:
-                self._on_output(line)
+            self._emit(line + "\n")
         return len(text)
 
     def flush(self) -> None:  # type: ignore[override]
         if self._pending:
-            self._buffer.append(self._pending)
-            if self._log_file is not None:
-                try:
-                    self._log_file.write(self._pending)
-                except Exception:  # noqa: BLE001
-                    pass
-            self._queue.put(("output", self._pending))
-            if self._on_output is not None:
-                self._on_output(self._pending)
+            self._emit(self._pending)
             self._pending = ""
         if self._log_file is not None:
             try:
@@ -425,37 +427,43 @@ def load_keyed_tables(config_path: Path) -> dict | None:
 
 _temp_dirs: list[str] = []
 
-# Cache key: ISO path + mtime + size.  If the user reloads the SAME
-# ISO (common: Entity Editor tab repeatedly opened during one session)
-# we hand back the already-extracted config.xbr instead of spawning
-# another ``xdvdfs copy-out`` + ``tempfile.mkdtemp`` pair that would
-# slowly pile up gigabytes of unpacked data over a long session.
+# Cache key: ISO abspath + mtime_ns + size.  If the user reloads the
+# SAME ISO (common: Entity Editor tab repeatedly opened during one
+# session) we hand back the already-extracted ``config.xbr`` instead
+# of spawning another ``xdvdfs copy-out`` + ``tempfile.mkdtemp`` pair
+# that would slowly pile up gigabytes of unpacked data over a long
+# session.
 #
 # Cache invalidates automatically if the ISO changes on disk (mtime
-# / size delta) because then the previous ``config.xbr`` is stale.
-_cached_config: tuple[tuple[str, float, int], Path] | None = None
+# / size delta) — then the cached copy is stale.
+#
+# ``os.stat`` is ~20x faster than ``Path.resolve()`` because it
+# skips the per-component symlink + existence walk.  Matters here
+# because Entity Editor reopens extract_config_xbr on every tab
+# focus to rebuild its row cache.
+_cached_config: tuple[tuple[str, int, int], Path] | None = None
 
 
 def extract_config_xbr(iso_path: Path) -> Path | None:
-    """Extract config.xbr from ISO to a temp file and return its path.
+    """Extract ``config.xbr`` from an ISO to a temp file and return
+    its path.
 
     Cached per-ISO: a second call with the same unchanged ISO reuses
     the first call's temp file.  Changing ISOs (or letting the
     original be rewritten on disk) transparently invalidates the
     cache and runs a fresh extract.
+
+    Returns ``None`` if xdvdfs isn't available OR if the extract
+    fails for any reason — callers already tolerate ``None``.
     """
     global _cached_config
 
-    xdvdfs = find_xdvdfs()
-    if not xdvdfs:
+    if not find_xdvdfs():
         return None
 
-    # Build the cache key.  ``stat`` failures (deleted / unreadable
-    # ISO) fall through to a fresh extract attempt — callers already
-    # tolerate None, so there's nothing to gain by short-circuiting.
     try:
-        st = iso_path.stat()
-        key = (str(iso_path.resolve()), st.st_mtime, st.st_size)
+        st = os.stat(iso_path)
+        key = (os.path.abspath(str(iso_path)), st.st_mtime_ns, st.st_size)
     except OSError:
         key = None
 
@@ -464,8 +472,8 @@ def extract_config_xbr(iso_path: Path) -> Path | None:
         if cached_key == key and cached_path.exists():
             return cached_path
 
-    # Any previous cache entry (different ISO, or same ISO that's
-    # been modified on disk) is now stale — release its temp dir.
+    # Stale cache entry (different ISO, or same ISO modified on disk)
+    # — release its temp dir.
     if _cached_config is not None:
         _, old_path = _cached_config
         old_dir = str(old_path.parent)
@@ -474,22 +482,36 @@ def extract_config_xbr(iso_path: Path) -> Path | None:
             _temp_dirs.remove(old_dir)
         _cached_config = None
 
+    # Delegate to the shared extract-to-memory helper, then spill the
+    # bytes into a tempfile on disk.  Using one code path for both
+    # CLI + GUI consumers means bug fixes (magic-byte validation,
+    # xdvdfs error surfacing) automatically reach both.
+    try:
+        from azurik_mod.iso.pack import extract_config_from_iso
+    except ImportError:
+        return None
+    try:
+        data = extract_config_from_iso(iso_path)
+    except SystemExit:
+        # extract_config_from_iso calls sys.exit on fatal errors;
+        # the GUI should survive that instead of terminating.
+        return None
+    except Exception:  # noqa: BLE001
+        return None
+
     tmpdir = tempfile.mkdtemp(prefix="azurik_cfg_")
     _temp_dirs.append(tmpdir)
     out_file = Path(tmpdir) / "config.xbr"
     try:
-        result = subprocess.run(
-            [xdvdfs, "copy-out", str(iso_path),
-             "gamedata/config.xbr", str(out_file)],
-            capture_output=True, text=True,
-        )
-        if result.returncode == 0 and out_file.exists():
-            if key is not None:
-                _cached_config = (key, out_file)
-            return out_file
-    except Exception:  # noqa: BLE001
-        pass
-    return None
+        out_file.write_bytes(data)
+    except OSError:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        if tmpdir in _temp_dirs:
+            _temp_dirs.remove(tmpdir)
+        return None
+    if key is not None:
+        _cached_config = (key, out_file)
+    return out_file
 
 
 def load_all_pickups() -> dict | None:

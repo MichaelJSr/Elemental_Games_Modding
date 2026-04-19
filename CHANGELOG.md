@@ -2,6 +2,74 @@
 
 ## Unreleased
 
+### ISO + GUI perf pass, xdvdfs lookup memoisation, repo cleanup
+
+Optimisation and cleanup pass across the I/O-heavy paths the GUI +
+CLI share, plus dead-data trimming.
+
+**Perf**
+
+- **xdvdfs binary lookup memoised** (`iso/xdvdfs.py`).  The
+  `$AZURIK_XDVDFS` → `shutil.which` → user-cache → GitHub-release
+  probe chain now runs once per process.  Hot callers
+  (`extract_iso_to_dir`, `run_xdvdfs` wrappers) skipped the
+  resolve tax each invocation before; now they pay it exactly
+  once.
+- **Cache-key fast path** (`iso/pack.py`, `gui/backend.py`).
+  Replaced `Path.resolve() + Path.stat()` with `os.stat +
+  os.path.abspath` in the ISO-cache keys — **5.5× faster**
+  micro-bench, which matters because Entity Editor tab focus
+  re-keys on every paint cycle.
+- **`extract_config_from_iso` is now cached** (4-entry LRU keyed
+  by ``abspath + mtime_ns + size``, mirroring `extract_xbe_from_iso`).
+  The Entity Editor's `_load_variant_defaults` previously ran
+  `xdvdfs copy-out` once per entity across every variant section
+  on every tab open — ~200 copy-outs per refresh; now collapsed
+  to one per ISO per session (and auto-invalidated when the ISO
+  changes on disk).
+- **Single-file extract helper factored out**
+  (`iso/pack.py::_copy_out_bytes`).  `extract_config_from_iso`
+  and `extract_xbe_from_iso` used to re-implement the same
+  tempdir + `copy-out` + `read_bytes` + validate dance; now they
+  both delegate to one function.  Bug fixes (magic-byte
+  validation, xdvdfs error surfacing, cleanup on exception)
+  now land on both call paths automatically.
+- **GitHub API User-Agent**.  `_download_latest` now sends a
+  non-default UA header — GitHub rate-limits the default
+  `Python-urllib/X.Y` UA aggressively, so first-run xdvdfs fetch
+  on a fresh checkout is less likely to 403.
+- **`_QueueWriter` line fan-out** (`gui/backend.py`).  Buffer /
+  log-file / queue / hook dispatch is now in one `_emit`
+  helper; the per-line try/except on log writes is de-duped.
+- **ParametricSlider drag flicker** (`gui/widgets.py`).  The
+  drag callback used `%.3f` while `set_value` used `%g`, which
+  made the numeric entry flicker between ``9.800`` and ``9.8``
+  when the user dragged across the default.  Both paths now
+  use `%g` uniformly.
+
+**Cleanup**
+
+- **Removed** `scripts/configs/` — duplicate `entity_values.json`
+  + legacy README with zero consumers (the canonical copy lives
+  at `azurik_mod/config/entity_values.json` and is read by the
+  tools directly).
+- **`gui/backend.py::extract_config_xbr`** now delegates to
+  `azurik_mod.iso.pack.extract_config_from_iso` instead of
+  spawning its own `subprocess.run` — one less place for xdvdfs
+  behaviour to drift across layers.
+
+**Docs**
+
+- Reworked the `level preview` entry in `docs/TOOLS.md` with the
+  full list of what it surfaces + an explicit *"can it render
+  maps/images?"* answer (no — it's a text-only asset-reference
+  scanner; spatial rendering would need `rdms`/`surf`/`tern`
+  parsers we don't have yet).
+- `docs/SCRIPTS.md`: dropped the stale `scripts/configs/` section
+  and pointed readers at the canonical `azurik_mod/config/` copy.
+
+**Drift guards**: 685 passed / 1 skipped.
+
 ### Coverage top-up — vanilla_symbols 272 → 282, +6 save-UI anchors
 
 Audit pass over Ghidra's named-function snapshot vs. our registry

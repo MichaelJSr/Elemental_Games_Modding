@@ -197,14 +197,55 @@ azurik-mod entity diff --iso A.iso --iso B.iso -s critters_walking -e garret4
 ```
 
 ### `level preview` — structured level summary
-Shows per-tag counts, extracted level connections, localisation keys,
-cutscene refs, asset paths, identifiers.  Replaces the earlier
-noise-heavy preview.
+Text-only summary of a level XBR's TOC + scanned asset references.
+Replaces the earlier noise-heavy preview.  What it surfaces:
+
+- **TOC roll-up** — per-tag count, total bytes, largest entry
+  (useful for spotting unusual levels)
+- **Level connections** — e.g. `levels/air/a1` strings that become
+  portal / loading-screen targets
+- **Localisation keys** — `loc/<lang>/<path>` references
+- **Cutscene refs** — `bink:<name>.bik` movie triggers
+- **Asset references** — `characters/…`, `effects/…`, `items/…`,
+  `fx/…`, `shaders/…`, `sounds/…` paths
+- **Identifiers** — snake_case IDs that didn't match any other
+  bucket (`water_elemental`, `seal_air`, …)
+- **Raw strings** (opt-in, `--include-raw`) — everything else
+  that passed the quality filter, sorted longest-first
 
 ```bash
+# Quick summary (recommended starting point)
 azurik-mod level preview gamedata/town.xbr
+
+# Drill-down mode — also shows every structured-miss string
 azurik-mod level preview gamedata/w1.xbr --include-raw
+
+# Machine-readable output for downstream tooling
+azurik-mod level preview gamedata/a1.xbr --json > a1.json
+
+# Python API (returns a LevelPreview dataclass)
+python -c "
+from azurik_mod.xbe_tools.level_preview import preview_level
+p = preview_level('gamedata/w1.xbr')
+print(p.tag_stats)
+print(p.level_connections)
+print(p.cutscene_refs)
+"
 ```
+
+**Can it render maps / images?**  No.  The tool intentionally only
+scans TOC tags that carry strings (``node`` / ``levl``) — the
+geometry / terrain / mesh payloads (``rdms`` / ``surf`` / ``tern``)
+are skipped both for performance and because we don't have a
+decoded format for them yet.  Spatial rendering would need a
+structured parser for the ``rdms`` section; pull it out of
+`docs/TOOLING_ROADMAP.md` § level-geometry if you want to build
+one.  The closest we have today is:
+
+- `azurik-mod level preview <xbr>` — what's *in* the level textually
+- `python scripts/xbr_parser.py <xbr> --stats` — per-tag size breakdown
+- Entity / loc / cutscene lists you can feed into a hand-drawn
+  map if you're doing human documentation.
 
 ### `movies info` — Bink movie metadata
 ```bash

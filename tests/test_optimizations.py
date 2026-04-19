@@ -21,6 +21,7 @@ Covers:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import struct
 import subprocess
@@ -218,18 +219,55 @@ class GuiExtractConfigReuse(unittest.TestCase):
     fresh extract + drops the previous temp dir."""
 
     def _stub_xdvdfs(self, tmp: Path) -> Path:
-        """Create a fake xdvdfs script that just ``touch``es the
-        output file so ``result.returncode == 0`` + ``out_file.exists()``
-        hold.
+        """Create a fake xdvdfs script that writes a minimal valid
+        ``config.xbr`` blob (``xobx`` magic + zeroed header) to the
+        output path.
 
-        ``extract_config_xbr`` invokes: ``xdvdfs copy-out <iso>
-        gamedata/config.xbr <out_file>``.  From the script's
-        perspective argv is ``$1=copy-out $2=<iso> $3=gamedata/...
-        $4=<out_file>``."""
+        ``extract_config_xbr`` now validates the magic byte via the
+        shared :func:`azurik_mod.iso.pack._copy_out_bytes` helper, so
+        the earlier empty-touch stub would hit the magic-mismatch
+        guard.  A header-only file is enough to pass validation
+        without pulling in real XBR parsing.
+
+        From the stub's perspective argv is ``$1=copy-out $2=<iso>
+        $3=gamedata/config.xbr $4=<out_file>``.
+        """
         stub = tmp / "fake_xdvdfs.sh"
-        stub.write_text("#!/bin/sh\ntouch \"$4\"\nexit 0\n")
+        # printf for portable binary output (busybox / bash / dash all OK);
+        # ``\\x`` pushes the hex escapes through the shell.
+        stub.write_text(
+            "#!/bin/sh\n"
+            "printf 'xobx\\0\\0\\0\\0\\0\\0\\0\\0' > \"$4\"\n"
+            "exit 0\n"
+        )
         stub.chmod(0o755)
         return stub
+
+    def _mock_xdvdfs_env(self, stub: Path):
+        """Return a context that stubs BOTH the backend resolver and
+        the ``azurik_mod.iso.xdvdfs`` memoisation so
+        ``extract_config_xbr``'s delegate path resolves to the stub.
+        """
+        from azurik_mod.iso import xdvdfs as xdvdfs_mod
+        from gui import backend
+
+        @contextlib.contextmanager
+        def _ctx():
+            saved_cache = xdvdfs_mod._cached_binary
+            xdvdfs_mod._cached_binary = stub
+            saved_env = os.environ.get("AZURIK_XDVDFS")
+            os.environ["AZURIK_XDVDFS"] = str(stub)
+            with mock.patch.object(backend, "find_xdvdfs",
+                                   return_value=str(stub)):
+                try:
+                    yield
+                finally:
+                    xdvdfs_mod._cached_binary = saved_cache
+                    if saved_env is None:
+                        os.environ.pop("AZURIK_XDVDFS", None)
+                    else:
+                        os.environ["AZURIK_XDVDFS"] = saved_env
+        return _ctx()
 
     def test_same_iso_returns_same_path(self):
         from gui import backend
@@ -239,10 +277,9 @@ class GuiExtractConfigReuse(unittest.TestCase):
             fake_iso.write_bytes(b"fakefake")
             stub = self._stub_xdvdfs(tmp)
 
-            # Clear any leftover cache + temp dirs from other tests.
             backend.cleanup_temp_dirs()
 
-            with mock.patch.object(backend, "find_xdvdfs", return_value=str(stub)):
+            with self._mock_xdvdfs_env(stub):
                 a = backend.extract_config_xbr(fake_iso)
                 b = backend.extract_config_xbr(fake_iso)
 
@@ -273,7 +310,7 @@ class GuiExtractConfigReuse(unittest.TestCase):
 
             backend.cleanup_temp_dirs()
 
-            with mock.patch.object(backend, "find_xdvdfs", return_value=str(stub)):
+            with self._mock_xdvdfs_env(stub):
                 a = backend.extract_config_xbr(fake_iso)
                 # Change mtime + size to simulate a new build.
                 time.sleep(0.05)

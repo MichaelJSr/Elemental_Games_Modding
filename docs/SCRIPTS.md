@@ -133,15 +133,18 @@ python scripts/analysis/scan_ghidra_hexdump.py < pasted.txt
 
 ---
 
-## `scripts/configs/` — example data
+## Vanilla entity-values reference
 
-### `entity_values.json`
-Sample mod JSON showing the vanilla values for every editable
-config entity.  Used as a reference when authoring a new mod JSON.
-Not consumed by any script directly; read it for schema clarity.
+`azurik_mod/config/entity_values.json` (canonical — read by the
+tools directly) holds the vanilla values for every editable config
+entity.  Use it as a schema reference when hand-authoring a mod
+JSON; `azurik-mod mod-template --iso <iso>` is the preferred way to
+regenerate it against a specific ISO.
 
-See `azurik-mod mod-template` for the preferred way to generate
-these.
+*(An earlier duplicate at ``scripts/configs/entity_values.json``
+was removed in the April 2026 cleanup pass — nothing read from it
+and it drifted over time.  Point at the ``azurik_mod/config/``
+copy instead.)*
 
 ---
 

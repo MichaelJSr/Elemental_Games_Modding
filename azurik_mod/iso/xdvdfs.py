@@ -32,6 +32,13 @@ from platformdirs import user_cache_dir
 
 RELEASES_API = "https://api.github.com/repos/antangelo/xdvdfs/releases/latest"
 
+# Memoised binary path so repeated calls to ``get_xdvdfs()`` skip the
+# env-var + ``shutil.which`` + cache-dir + GitHub-API probe chain after
+# the first successful resolve.  Invalidated if the resolved path
+# disappears on disk (unusual, but handled so a deleted cache doesn't
+# leave stale state in a long-running GUI session).
+_cached_binary: Path | None = None
+
 
 def _cache_root() -> Path:
     root = Path(user_cache_dir("azurik_mod", appauthor=False))
@@ -65,8 +72,14 @@ def _download_latest(cache_root: Path) -> Path | None:
     if tag is None:
         return None
 
+    # Unauthenticated GitHub API rate-limits aggressively when the
+    # default ``User-Agent: Python-urllib/X.Y`` header is sent; any
+    # non-default UA shifts us to a more forgiving bucket.
+    req = urllib.request.Request(
+        RELEASES_API,
+        headers={"User-Agent": "azurik-mod-xdvdfs-fetcher"})
     try:
-        with urllib.request.urlopen(RELEASES_API, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             release = json.load(resp)
     except Exception as exc:  # noqa: BLE001
         print(f"  WARNING: could not fetch xdvdfs release metadata: {exc}",
@@ -142,25 +155,38 @@ def get_xdvdfs() -> Path | None:
 
     Returns None if no binary can be found or fetched (on macOS, the
     user must `cargo install xdvdfs-cli` or set $AZURIK_XDVDFS).
+
+    Memoised — a second call on the same process reuses the first
+    resolve unless the cached path disappeared on disk.
     """
+    global _cached_binary
+    if _cached_binary is not None and _cached_binary.exists():
+        return _cached_binary
+
     env_override = os.environ.get("AZURIK_XDVDFS")
     if env_override:
         p = Path(env_override)
         if p.exists():
+            _cached_binary = p
             return p
         print(f"  WARNING: $AZURIK_XDVDFS points to missing file: {p}",
               file=sys.stderr)
 
     found = shutil.which("xdvdfs")
     if found:
-        return Path(found)
+        _cached_binary = Path(found)
+        return _cached_binary
 
     cache = _cache_root()
     cached = cache / _binary_name()
     if cached.exists():
+        _cached_binary = cached
         return cached
 
-    return _download_latest(cache)
+    downloaded = _download_latest(cache)
+    if downloaded is not None:
+        _cached_binary = downloaded
+    return downloaded
 
 
 def require_xdvdfs() -> Path:
