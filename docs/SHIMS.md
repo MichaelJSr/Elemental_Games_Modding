@@ -275,16 +275,19 @@ shim's REL32 relocations to those stubs.  The stub cache is
 session-wide, so multiple shims calling the same kernel function
 share a single stub.
 
-If the extern you want isn't catalogued in `xboxkrnl_ordinals.py`,
-Azurik's vanilla XBE doesn't import it and you have two options:
+If the extern you want IS in Azurik's static 151 imports, D1's fast
+path emits a 6-byte `FF 25 <thunk_va>` stub.  If it's in the extended
+catalogue (any other xboxkrnl export), **D1-extend** emits a 33-byte
+resolving stub that walks the kernel export table on first call and
+caches the result — see [`D1_EXTEND.md`](./D1_EXTEND.md).  Include
+`azurik_kernel_extend.h` for the common extended imports; for ones
+not yet declared, add a `KernelOrdinal(...)` entry to
+`EXTENDED_KERNEL_ORDINALS` in `xboxkrnl_ordinals.py` and use an
+`extern` declaration matching the right calling convention.
 
-- Call a vanilla Azurik function that wraps the kernel API (A3
-  route — add the wrapper to `vanilla_symbols.py` and
-  `azurik_vanilla.h`).
-- File a Phase 2 D1-extend task: extending the XBE kernel thunk
-  table to carry new ordinals requires moving the table plus
-  re-linking every existing `CALL [thunk_va]` site in the game,
-  which is substantial XBE surgery.  Not yet supported.
+The dispatcher in `shim_session.stub_for_kernel_symbol` handles the
+static-vs-extended split automatically — shim authors don't need to
+know which path a given function takes.
 
 ### Authoring shared libraries
 
@@ -324,16 +327,14 @@ them non-recursive.
 
 ## Limitations (still)
 
-- **No kernel imports beyond the existing 151**.  Calling an
-  xboxkrnl function Azurik doesn't already import requires
-  extending the XBE kernel thunk table (D1-extend) — see "Calling
-  a kernel function" above for the workaround.
 - **No D3D / DSOUND imports**.  Xbox XBEs statically link D3D8 and
   DSound into the game's `.text` (you can see `D3D`, `DSOUND`,
   `XGRPH` as named sections in the XBE).  Those functions are
   vanilla-Azurik code from the shim platform's perspective — expose
   specific ones via `vanilla_symbols.py` + `azurik_vanilla.h` as
-  demand arises.
+  demand arises.  D2 (see [`D2_NXDK.md`](./D2_NXDK.md)) would wire
+  them in as a group via the Xbox SDK, but is deferred until a
+  shim concretely needs them.
 - **Escape hatch preserved**.  The legacy byte-patch form of every
   migrated pack stays behind an env var (`AZURIK_SKIP_LOGO_LEGACY=1`
   etc.) so users on a host without the i386 clang toolchain can
@@ -447,7 +448,7 @@ table whenever a tier lands or a new candidate becomes concrete.
 | Layout | Folder-per-feature reorganisation + `apply_pack` dispatcher | **done**     |
 | B2  | Unicorn-backed runtime test harness for shims          | **deferred**      |
 | C-jump | Player jump-velocity patch (requested separately)   | **not started**   |
-| D1-extend | Adding new kernel imports beyond the 151          | **not started**   |
+| D1-extend | Runtime resolver for any xboxkrnl export beyond the 151 | **done** — see [`D1_EXTEND.md`](./D1_EXTEND.md) |
 | D2  | NXDK integration (real Xbox SDK headers)               | **not started**   |
 
 ### Near-term candidates
@@ -515,26 +516,19 @@ table whenever a tier lands or a new candidate becomes concrete.
 
 ### Long-term
 
-1. **D1-extend — Adding new kernel imports.**  D1 (done) exposes
-   the 151 xboxkrnl functions Azurik's vanilla XBE already imports.
-   Calling a kernel function OUTSIDE that set would require
-   extending the XBE's kernel thunk table, which has zero trailing
-   slack in Azurik's build — it would require moving the whole
-   table and re-linking every existing ``CALL [thunk_va]`` in the
-   game.  Deferred until a shim has a concrete need for it.
-   Workaround in the meantime: route through a vanilla Azurik
-   function that wraps the kernel API (A3's vanilla-symbol
-   registry).
+1. **D1-extend — done.**  Shims can now call ANY xboxkrnl export,
+   not just the 151 Azurik statically imports.  The runtime resolver
+   walks xboxkrnl.exe's PE export table at the fixed retail base
+   `0x80010000`; per-import resolving stubs cache the result inline
+   so second-and-later calls cost one indirect jump.  Full design
+   note + when-to-use guide in [`D1_EXTEND.md`](./D1_EXTEND.md).
 
-2. **NXDK integration (D2).**  Real Xbox Development Kit headers
-   (`<d3d8.h>`, `<xapi.h>`, `<xgraphics.h>`, `<xonline.h>`, ...)
-   wired into the shim toolchain.  Unlocks shims that do their
-   own D3D rendering (HUD overlays, texture swaps, post-process
-   filters), custom audio streams, raw XInput, XACT / XNet, etc.
-   Trade-off: ~100 MB of SDK + linker changes in `compile.sh`.
-   Worth doing once 2–3 concrete shims want native Xbox APIs.
-   See `docs/ONBOARDING.md` for the full catalog of patch types
-   D2 would unlock.
+2. **NXDK integration (D2).**  Full Xbox SDK (D3D8, DSound, XAPI,
+   XGraphics, ...) wired into the shim toolchain.  Design note +
+   migration plan + concrete milestones in
+   [`docs/D2_NXDK.md`](./D2_NXDK.md).  Deferred because D1-extend
+   (runtime kernel-export resolver) covers the kernel-API side,
+   and no shipped shim has demanded native D3D / DSound yet.
 
 3. **Unicorn-backed test harness (B2).**  Static byte checks only
    prove the shim LANDS correctly; they don't prove the runtime

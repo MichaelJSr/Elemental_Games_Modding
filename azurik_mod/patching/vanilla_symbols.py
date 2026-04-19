@@ -160,6 +160,29 @@ register(VanillaSymbol(
     ),
 ))
 
+register(VanillaSymbol(
+    name="boot_state_tick",
+    va=0x0005F620,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc=(
+        "Runs one tick of the boot-state machine.  __stdcall: "
+        "dt (float) on stack.  Returns a boolean-ish value in AL "
+        "(caller at VA 0x59BA5 does ``TEST AL, AL; JNZ ...`` to "
+        "branch on the result).\n\n"
+        "This is the state-machine function that ``qol_skip_logo`` "
+        "shims into — it decides which movie / logo plays next. "
+        "Shims that want to INTERCEPT boot-state transitions "
+        "(rather than just skip a single movie) can wrap it: "
+        "call the vanilla then post-process the AL return to "
+        "force a different transition.\n\n"
+        "Multiple ``RET 4`` exits confirm __stdcall with 1 arg. "
+        "Return type formally undefined4 in Ghidra, but the only "
+        "observed caller treats it as a byte — ``unsigned char`` "
+        "is a safe shim-side declaration."
+    ),
+))
+
 
 # ---------------------------------------------------------------------------
 # Public accessors

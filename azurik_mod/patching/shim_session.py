@@ -1,13 +1,25 @@
-"""Shim layout session — coordinates D1 + E across multiple trampolines.
+"""Shim layout session — coordinates D1 + D1-extend + E across trampolines.
 
 A :class:`ShimLayoutSession` wraps an XBE bytearray and caches:
 
-- **Kernel import stubs (D1).**  Every first time a shim calls
-  ``DbgPrint`` (say), the session lazily parses the XBE's kernel
-  thunk table, allocates a 6-byte ``FF 25 <thunk_va>`` stub, and
-  records ``{"_DbgPrint": stub_va}``.  Subsequent shims referencing
-  the same kernel function reuse the cached stub VA instead of
-  installing a second copy.
+- **Static kernel import stubs (D1).**  When a shim calls a kernel
+  function Azurik's vanilla XBE already imports (one of the 151 at
+  the static thunk table), the session emits a 6-byte
+  ``FF 25 <thunk_va>`` stub that indirect-jumps through the XBE's
+  resolved thunk slot.  Cached by mangled name — one stub per
+  kernel function, shared across all shims in the session.
+
+- **Runtime-resolving kernel import stubs (D1-extend).**  When a
+  shim calls a kernel function that is NOT in Azurik's thunk table
+  (any other xboxkrnl export), the session:
+
+    1. Auto-places ``shims/shared/xboxkrnl_resolver.c`` (the PE-
+       export-table walker) the first time any extended import is
+       referenced.
+    2. Emits a 33-byte resolving stub per extended import: first
+       call invokes the resolver with the ordinal and caches the
+       result inline; subsequent calls jump through the cache.
+    3. Caches stubs by mangled name, same as the static D1 path.
 
 - **Shared library placements (E).**  Helper functions that several
   trampolines share can live in a standalone ``.o`` file.  The
@@ -39,6 +51,7 @@ externs; the session resolves them against the single placement.
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -49,6 +62,90 @@ from azurik_mod.patching.kernel_imports import (
     kernel_name_for_symbol,
     stub_bytes_for,
 )
+from azurik_mod.patching.xboxkrnl_ordinals import (
+    NAME_TO_ORDINAL,
+    is_azurik_imported,
+)
+
+
+# --- D1-extend resolving-stub template --------------------------------------
+#
+# The resolver shim (shims/shared/xboxkrnl_resolver.c) exports one
+# function: ``void *xboxkrnl_resolve_by_ordinal(unsigned ordinal)``.
+# Per-import resolving stubs emitted by
+# :meth:`ShimLayoutSession.stub_for_extended_kernel_symbol` invoke it
+# once (caching the result inline) then jump through the cache on
+# subsequent calls.
+#
+# Stub layout (33 bytes):
+#
+#   off  bytes                  instruction
+#   ----+---------------------+----------------------------------
+#   0x00 A1 <cache_va:4>       MOV  EAX, [cache_va]
+#   0x05 85 C0                 TEST EAX, EAX
+#   0x07 75 12                 JNZ  +0x12  (to offset 0x1B)
+#   0x09 68 <ordinal:4>        PUSH imm32 <ordinal>
+#   0x0E E8 <rel32:4>          CALL xboxkrnl_resolve_by_ordinal
+#   0x13 83 C4 04              ADD  ESP, 4
+#   0x16 A3 <cache_va:4>       MOV  [cache_va], EAX
+#   0x1B FF E0                 JMP  EAX        ← resolved path
+#   0x1D 00 00 00 00           DWORD cache     ← cached_va
+#
+# The shim's ``CALL _NtCreateProcess@20`` REL32 resolves to offset
+# 0x00 of the stub.  cache_va = stub_va + 0x1D.
+#
+# ``ordinal`` and ``rel32`` are fixed at apply time; cache starts
+# zero and is written on first call.
+
+_D1_EXTEND_STUB_SIZE = 0x21  # 33 bytes (code + 4-byte cache slot)
+_D1_EXTEND_CACHE_OFFSET = 0x1D
+
+
+def _build_extended_stub(
+    stub_va: int,
+    ordinal: int,
+    resolver_va: int,
+) -> bytes:
+    """Assemble the 33-byte resolving stub for one extended import.
+
+    ``resolver_va`` is the VA of ``xboxkrnl_resolve_by_ordinal`` in
+    the XBE's SHIMS region (after the resolver .o has been placed).
+    ``stub_va`` is where this stub will live — used to compute the
+    REL32 for the CALL and the abs32s for the cache-slot loads.
+    """
+    cache_va = stub_va + _D1_EXTEND_CACHE_OFFSET
+    # REL32 for the CALL instruction at offset 0x0E.  Next-instruction
+    # VA = stub_va + 0x13.
+    call_site_after = stub_va + 0x13
+    rel32 = resolver_va - call_site_after
+    if not (-0x80000000 <= rel32 <= 0x7FFFFFFF):
+        raise ValueError(
+            f"D1-extend resolver is too far from stub at 0x{stub_va:X} "
+            f"(delta 0x{rel32:X}) — doesn't fit signed 32-bit")
+
+    code = bytearray()
+    # MOV EAX, [cache_va]
+    code += b"\xA1" + struct.pack("<I", cache_va)
+    # TEST EAX, EAX
+    code += b"\x85\xC0"
+    # JNZ +0x12
+    code += b"\x75\x12"
+    # PUSH imm32 <ordinal>
+    code += b"\x68" + struct.pack("<I", ordinal)
+    # CALL rel32 <resolver_va>
+    code += b"\xE8" + struct.pack("<i", rel32)
+    # ADD ESP, 4
+    code += b"\x83\xC4\x04"
+    # MOV [cache_va], EAX
+    code += b"\xA3" + struct.pack("<I", cache_va)
+    # JMP EAX
+    code += b"\xFF\xE0"
+    # DWORD cache (starts zero)
+    code += b"\x00\x00\x00\x00"
+    assert len(code) == _D1_EXTEND_STUB_SIZE, (
+        f"stub layout drift: got {len(code)} B, expected "
+        f"{_D1_EXTEND_STUB_SIZE} B")
+    return bytes(code)
 
 
 # Session attribute name — attached to the bytearray so callers who
@@ -92,6 +189,11 @@ class ShimLayoutSession:
     the same library is an idempotent no-op that returns the cached
     export map."""
 
+    _resolver_va: int | None = None
+    """VA of the ``xboxkrnl_resolve_by_ordinal`` function once it's
+    placed in the SHIMS region.  None until the first extended kernel
+    import is referenced.  See :meth:`_ensure_resolver_placed`."""
+
     # ------------------------------------------------------------------
     # Kernel imports (D1)
     # ------------------------------------------------------------------
@@ -113,33 +215,158 @@ class ShimLayoutSession:
     ) -> int | None:
         """Return the stub VA for a kernel import, placing one if needed.
 
-        Returns ``None`` if ``mangled`` doesn't correspond to a known
-        xboxkrnl export — the caller should keep looking in other
-        resolvers (vanilla registry, shared-lib exports, etc.).
+        Dispatch strategy:
 
-        The stub is 6 bytes: ``FF 25 <thunk_va>`` (indirect JMP through
-        the kernel thunk slot).  Allocation happens via the caller's
-        ``allocate`` callback — typically backed by
-        :func:`_carve_shim_landing` so stubs land alongside ordinary
-        shim code in the SHIMS region.
+        1. **Cache hit**: reuse an already-placed stub for ``mangled``.
+        2. **D1 fast path**: if the function is in Azurik's static
+           thunk table, emit a 6-byte ``FF 25 <thunk_va>`` stub
+           (indirect JMP through the pre-resolved slot).
+        3. **D1-extend runtime path**: if the function is in the
+           extended ordinal catalogue but NOT in Azurik's thunk table,
+           auto-place ``xboxkrnl_resolver.c`` (once per session) and
+           emit a 33-byte resolving stub that caches the resolved
+           kernel pointer on first call.
+        4. **Miss**: return ``None`` so the caller can keep looking in
+           vanilla-symbol / shared-library resolvers.
+
+        Allocation happens via the caller's ``allocate`` callback —
+        typically backed by :func:`_carve_shim_landing` so stubs land
+        alongside ordinary shim code in the SHIMS region.
         """
         # Fast path: already placed a stub for this symbol.
         if mangled in self._kernel_stubs:
             return self._kernel_stubs[mangled]
 
-        # Map mangled → xboxkrnl name, then thunk VA.
+        # Map mangled → xboxkrnl name.  If neither the name nor the
+        # kernel ordinal is catalogued, we can't generate a stub.
         kernel_name = kernel_name_for_symbol(mangled)
         if kernel_name is None:
             return None
-        thunks = self.kernel_thunks()
-        if kernel_name not in thunks:
-            # Known ordinal, but Azurik doesn't import it — D1-extend
-            # territory, not what this session can handle.
-            return None
-        thunk_va = thunks[kernel_name]
 
-        stub = stub_bytes_for(thunk_va)
-        _, stub_va = allocate(f"__imp__{kernel_name}", stub)
+        ordinal = NAME_TO_ORDINAL.get(kernel_name)
+        if ordinal is None:
+            return None
+
+        # D1 fast path: Azurik's vanilla XBE already imports this
+        # function.  Use the 6-byte static thunk stub.
+        if is_azurik_imported(ordinal):
+            thunks = self.kernel_thunks()
+            if kernel_name not in thunks:
+                # Table says Azurik imports it, but our parse missed
+                # the thunk.  Shouldn't happen — but if it does,
+                # fall through to the D1-extend path as a safety net.
+                pass
+            else:
+                thunk_va = thunks[kernel_name]
+                stub = stub_bytes_for(thunk_va)
+                _, stub_va = allocate(f"__imp__{kernel_name}", stub)
+                self._kernel_stubs[mangled] = stub_va
+                return stub_va
+
+        # D1-extend runtime path: this ordinal isn't in Azurik's
+        # thunk table.  Emit a resolving stub that calls the shared
+        # resolver on first invocation.
+        return self._place_extended_kernel_stub(
+            mangled, kernel_name, ordinal, allocate)
+
+    # ------------------------------------------------------------------
+    # Kernel imports (D1-extend — runtime resolver)
+    # ------------------------------------------------------------------
+
+    def _ensure_resolver_placed(
+        self,
+        allocate: Callable[[str, bytes], tuple[int, int]],
+    ) -> int:
+        """Place ``shims/shared/xboxkrnl_resolver.c`` once, return its VA.
+
+        The resolver is a single-function shim (cdecl, no externs, no
+        relocations) so we can use the fast ``extract_shim_bytes``
+        path rather than the full ``layout_coff`` pipeline.  Compiles
+        on demand if the .o is missing — inherits the same auto-
+        compile heuristic as ``apply_trampoline_patch``.
+        """
+        if self._resolver_va is not None:
+            return self._resolver_va
+
+        # Lazy imports to keep the main :mod:`apply` module free of
+        # circular references back into this file.
+        from azurik_mod.patching.apply import (
+            _guess_shim_source,
+            _auto_compile,
+        )
+        from azurik_mod.patching.coff import extract_shim_bytes, parse_coff
+
+        # Locate the resolver .o.  We key the path off this session's
+        # xbe_data bytearray via the repo-root discovery already wired
+        # into _guess_shim_source: pass a synthetic .o path that
+        # points at shims/build/xboxkrnl_resolver.o and let the helper
+        # find the source if the build is stale.
+        from azurik_mod.patching.shim_session import _SESSION_ATTR  # noqa
+        # Repo root := directory holding shims/ and azurik_mod/.
+        # shim_session.py itself lives at azurik_mod/patching/, so
+        # that's three parents up.
+        import pathlib as _pl
+        repo_root = _pl.Path(__file__).resolve().parents[2]
+        shim_obj = repo_root / "shims" / "build" / "xboxkrnl_resolver.o"
+        shim_src = repo_root / "shims" / "shared" / "xboxkrnl_resolver.c"
+
+        if not shim_obj.exists():
+            # Try an auto-compile — same hook apply_trampoline_patch
+            # uses for missing feature shims.
+            if shim_src.exists():
+                _auto_compile(
+                    shim_src, shim_obj, repo_root,
+                    "D1-extend resolver")
+
+        if not shim_obj.exists():
+            raise RuntimeError(
+                f"D1-extend: kernel resolver .o not found at "
+                f"{shim_obj} and auto-compile failed.  Run "
+                f"``bash shims/toolchain/compile.sh "
+                f"{shim_src} {shim_obj}`` manually, or disable "
+                f"extended kernel imports.")
+
+        coff = parse_coff(shim_obj.read_bytes())
+        text_bytes, sym_offset = extract_shim_bytes(
+            coff, "_xboxkrnl_resolve_by_ordinal")
+        _, base_va = allocate("xboxkrnl_resolver", text_bytes)
+        self._resolver_va = base_va + sym_offset
+        return self._resolver_va
+
+    def _place_extended_kernel_stub(
+        self,
+        mangled: str,
+        kernel_name: str,
+        ordinal: int,
+        allocate: Callable[[str, bytes], tuple[int, int]],
+    ) -> int:
+        """Emit a 33-byte resolving stub for an extended kernel import.
+
+        The first invocation of this function in a session triggers
+        placement of the resolver shim via :meth:`_ensure_resolver_placed`;
+        subsequent invocations reuse the cached resolver VA.
+
+        Each extended import gets its own stub (with its own inline
+        4-byte cache slot).  Stubs are cached by mangled name so
+        multiple shims referencing the same extended import share a
+        single placement.
+        """
+        # Step 1: make sure the resolver itself is placed.
+        resolver_va = self._ensure_resolver_placed(allocate)
+
+        # Step 2: allocate the 33-byte stub with placeholder zeros.
+        #         We allocate FIRST (to learn stub_va) then build the
+        #         real bytes, then overwrite.
+        placeholder = bytes(_D1_EXTEND_STUB_SIZE)
+        stub_file_off, stub_va = allocate(
+            f"__impext__{kernel_name}", placeholder)
+
+        # Step 3: assemble the real stub bytes now that we know
+        #         stub_va + resolver_va.
+        stub_bytes = _build_extended_stub(stub_va, ordinal, resolver_va)
+        self.xbe_data[stub_file_off:stub_file_off + _D1_EXTEND_STUB_SIZE] = \
+            stub_bytes
+
         self._kernel_stubs[mangled] = stub_va
         return stub_va
 

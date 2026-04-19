@@ -250,11 +250,21 @@ class AzurikHeaderStructOffsets(unittest.TestCase):
              lambda b: _struct.unpack('<f', b[:4])[0] == 3.0),
             ("AZURIK_PLAYER_CHAR_NAME_VA", 0x0019EA68, ".rdata",
              lambda b: b.startswith(b"garret4\x00")),
+            ("AZURIK_FLOAT_ZERO_VA", 0x001A2508, ".rdata",
+             lambda b: _struct.unpack('<f', b[:4])[0] == 0.0),
+            ("AZURIK_FLOAT_HALF_VA", 0x001A9C84, ".data",
+             lambda b: _struct.unpack('<f', b[:4])[0] == 0.5),
+            ("AZURIK_FLOAT_ONE_VA", 0x001A9C88, ".data",
+             lambda b: _struct.unpack('<f', b[:4])[0] == 1.0),
             ("AZURIK_BOOT_STATE_VA", 0x001BF61C, ".data",
              # BSS-initialised DWORD — sits in the VA portion of
              # .data that's past raw_size, so on-disk reads return
              # empty bytes.  Xbox loader zero-fills at load time.
              # Accept either empty (past raw) or literal zeros.
+             lambda b: b == b"" or b[:4] == b"\x00\x00\x00\x00"),
+            # Entity-registry begin/end/cap sit deep in BSS —
+            # zero-filled on disk, runtime-populated.
+            ("AZURIK_ENTITY_REGISTRY_BEGIN_VA", 0x0038C1E4, ".data",
              lambda b: b == b"" or b[:4] == b"\x00\x00\x00\x00"),
         ]
 

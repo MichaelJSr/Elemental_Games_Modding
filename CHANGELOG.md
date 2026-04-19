@@ -2,6 +2,76 @@
 
 ## Unreleased
 
+### D1-extend — runtime xboxkrnl export resolver + comprehensive coverage pass
+
+Shims can now call **any** xboxkrnl export, not just the 151 Azurik's
+vanilla XBE statically imports.  Full design note:
+[`docs/D1_EXTEND.md`](docs/D1_EXTEND.md).  D2 (full NXDK integration)
+is documented separately in [`docs/D2_NXDK.md`](docs/D2_NXDK.md) and
+intentionally deferred.
+
+- **Runtime resolver shim** (`shims/shared/xboxkrnl_resolver.c`).
+  Single self-contained function `xboxkrnl_resolve_by_ordinal(n)`
+  that walks xboxkrnl.exe's PE export table from the fixed retail
+  base `0x80010000`.  ~50 bytes of i386 code; zero undefined
+  externs; auto-placed by `ShimLayoutSession` the first time any
+  extended import is referenced.
+
+- **Per-import resolving stubs** (33 bytes each).  On first call:
+  `CALL xboxkrnl_resolve_by_ordinal(ordinal); cache inline; JMP EAX`.
+  On subsequent calls: 3 instructions (load cache + test + indirect
+  jump).  Dispatch lives in `shim_session.stub_for_kernel_symbol`
+  which auto-routes between D1 static-thunk (fast path, 6 bytes)
+  and D1-extend resolver (slow-first-call path, 33 bytes) based on
+  whether the ordinal is in Azurik's 151.
+
+- **Expanded ordinal catalogue** (`xboxkrnl_ordinals.py`).  Split
+  into two tables: `AZURIK_KERNEL_ORDINALS` (151, unchanged) +
+  new `EXTENDED_KERNEL_ORDINALS` (~100 curated entries covering
+  Debug, Executive, I/O, Kernel services, Memory Manager, Object
+  Manager, Process, Runtime, Crypto, and Xbox-specific APIs).
+  `ALL_KERNEL_ORDINALS` gives the union; `NAME_TO_ORDINAL`
+  prefers Azurik's static slot when a name appears in both
+  (so D1's fast path always wins over D1-extend when possible).
+  New public helper: `is_azurik_imported(ordinal)`.
+
+- **New header** `shims/include/azurik_kernel_extend.h`.  Declares
+  ~60 of the most useful extended imports with correct `NTAPI` /
+  `FASTCALL` annotations: DbgBreakPoint, DbgPrompt, the Ex*/Ke*
+  / Io* / Mm* / Ob* / Ps* / Rtl* surface areas not in Azurik's
+  static imports, plus `snprintf` / `sprintf` / `XboxKrnlVersion`.
+  Shim authors just `#include` and call.
+
+- **New VA anchors** in `shims/include/azurik.h` for commonly-
+  read globals: `AZURIK_FLOAT_ZERO_VA` / `AZURIK_FLOAT_HALF_VA` /
+  `AZURIK_FLOAT_ONE_VA` (shared numerical constants at
+  `0x001A2508` / `0x001A9C84` / `0x001A9C88`);
+  `AZURIK_ENTITY_REGISTRY_BEGIN_VA` / `_END_VA` / `_CAP_VA`
+  (runtime entity-pointer vector at `0x0038C1E4..EC`);
+  `AZURIK_MOVIE_CONTEXT_PTR_VA` / `AZURIK_MOVIE_IDLE_FLAG_VA`
+  (boot movie state at `0x001BCDC8` / `0x001BCDB4`);
+  `AZURIK_WALKING_STATE_FLAG_VA` (`0x0037ADEC`).  Real on-disk
+  bytes + BSS placement pinned via new regression tests.
+
+- **New vanilla function** `boot_state_tick` (`FUN_0005F620`)
+  registered as `__stdcall(float)` with verified `RET 4` exits
+  and AL-return convention.  Declared in `azurik_vanilla.h`.
+  Lets shims wrap the boot-state machine (extension path for
+  future `qol_skip_prophecy`-style patches).
+
+- **Tests**: 213 passing (+ 20 new in `test_d1_extend.py`).
+  Pinned: ordinal-catalogue invariants, static-vs-extended
+  dispatch, stub byte-shape + opcode offsets + rel32 overflow,
+  resolver `.c` compiles + has zero undefined externs, end-to-end
+  session dispatch against the real vanilla XBE, and a drift
+  guard between `azurik_kernel_extend.h` and
+  `EXTENDED_KERNEL_ORDINALS`.
+
+- **New docs**: [`docs/D1_EXTEND.md`](docs/D1_EXTEND.md) (full
+  design + authoring workflow for extended imports),
+  [`docs/D2_NXDK.md`](docs/D2_NXDK.md) (deferred — NXDK
+  integration plan + deferral rationale).
+
 ### Small headers fill-in pass — ControllerState, drop tables, entity_lookup
 
 - **`ControllerState` struct** added to `shims/include/azurik.h`.

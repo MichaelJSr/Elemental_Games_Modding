@@ -498,6 +498,61 @@ typedef enum BootState {
 
 
 /* ==========================================================================
+ * Shared numerical constants (.rdata / .data)
+ * ==========================================================================
+ * Widely-read float constants.  Declared as VA anchors so shims can
+ * reference them via DIR32 without each hardcoding the literal.
+ *
+ * NB: these constants are shared across dozens of call sites.  DO NOT
+ * patch their values — use the player-physics C1-style redirect
+ * (rewrite individual instruction operands to new VAs) if you need
+ * per-site constants.
+ */
+#define AZURIK_FLOAT_ZERO_VA        0x001A2508u  /* f32 0.0   (.rdata, 1 reader) */
+#define AZURIK_FLOAT_HALF_VA        0x001A9C84u  /* f32 0.5   (.data, ~15 readers) */
+#define AZURIK_FLOAT_ONE_VA         0x001A9C88u  /* f32 1.0   (.data, ~15 readers) */
+#define AZURIK_FLOAT_RUN_MULT_VA    0x001A25BCu  /* f32 3.0 run-multiplier (45 readers; alias of AZURIK_SHARED_RUN_MULT_VA) */
+
+
+/* ==========================================================================
+ * Entity registry (runtime vector)
+ * ==========================================================================
+ * A ``std::vector<Entity *>``-shaped registry that ``entity_lookup``
+ * (``FUN_0004B510``) scans to resolve names → entity descriptors.
+ * Runtime-initialised from config files, then grown as critters
+ * load.  Shims can read directly or call the exposed vanilla
+ * function (prefer the latter — cheaper + matches the game's own
+ * lookup semantics including the fallback-registration branch).
+ *
+ * The BEGIN / END anchors are BSS — vanilla XBE bytes are zero;
+ * the pointers are set during init by the game's constructors.
+ * Useful for shims that want to iterate every registered entity.
+ */
+#define AZURIK_ENTITY_REGISTRY_BEGIN_VA  0x0038C1E4u  /* Entity **begin */
+#define AZURIK_ENTITY_REGISTRY_END_VA    0x0038C1E8u  /* Entity **end (one past last) */
+#define AZURIK_ENTITY_REGISTRY_CAP_VA    0x0038C1ECu  /* Entity **capacity */
+
+
+/* ==========================================================================
+ * Boot-time movie subsystem state (BSS)
+ * ==========================================================================
+ * Movie state machine globals the boot code reads on every tick.
+ * All BSS — vanilla XBE bytes are zero; initialised by ``play_movie_fn``
+ * on first use and updated by ``poll_movie`` each frame.
+ *
+ * Exposed so shims that intercept the movie pipeline (e.g. a
+ * ``qol_skip_prophecy`` shim) can inspect or reset the state
+ * without going through the full vanilla call path.
+ */
+#define AZURIK_MOVIE_CONTEXT_PTR_VA  0x001BCDC8u  /* PVOID — current movie context (0 when idle) */
+#define AZURIK_MOVIE_IDLE_FLAG_VA    0x001BCDB4u  /* u8    — AL-styled return byte of play_movie_fn */
+
+/* Walking-state flag byte (tested by FUN_00085F50 and FUN_0008CCC0
+ * at LAB_000863E4; set during the ground-walk state transition). */
+#define AZURIK_WALKING_STATE_FLAG_VA 0x0037ADECu
+
+
+/* ==========================================================================
  * Conveniences
  * ========================================================================== */
 

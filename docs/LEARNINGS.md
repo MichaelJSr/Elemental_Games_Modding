@@ -189,25 +189,51 @@ with the retail key `0x5B6D40B6`).  151 four-byte slots, null-
 terminated at `0x0018F5FC`.  Each slot's high bit is set, low 16
 bits give the xboxkrnl export ordinal.
 
-### No trailing slack — extending the table is hard
+### No trailing slack — extending the table is hard, but D1-extend sidesteps it
 
 The byte at `0x0018F600` (immediately after the null terminator) is
 the start of the library-version table (`b1 ae cc 3b` = a
 timestamp).  Can't append new thunks without moving or overwriting
 that data.
 
-Workaround for new kernel calls (when we need one Azurik doesn't
-import): find a vanilla Azurik wrapper and expose it via
-`vanilla_symbols.py`.
+D1-extend gets around this entirely via a **runtime export
+resolver**: shims that need a non-imported xboxkrnl function get a
+stub that walks xboxkrnl.exe's PE export table at the fixed retail
+base `0x80010000` on first call and caches the result inline.
+Zero XBE header surgery; zero call-site rewriting.  See
+[`docs/D1_EXTEND.md`](D1_EXTEND.md).
 
-Reference: `azurik_mod/patching/kernel_imports.py`.
+### Xbox retail kernel is mapped at VA 0x80010000
 
-### Each import is called via `FF 15 <thunk_va>` (6-byte indirect)
+The retail Xbox kernel (`xboxkrnl.exe`) is always loaded at
+`0x80010000`.  Its PE image header lives at that base; `e_lfanew`
+at `+0x3C` gives the PE header offset; the data-directory entry 0
+(EXPORT) gives the RVA of the export table.  This layout is
+stable across every retail kernel revision and every retail game —
+the resolver hardcodes `0x80010000` without concern.
+
+Debug and Chihiro kernels use different bases; the shim platform
+targets retail only.
+
+Reference: `shims/shared/xboxkrnl_resolver.c`.
+
+### Each static import is called via `FF 15 <thunk_va>` (6-byte indirect)
 
 The game's own kernel calls use `FF 15 <thunk_va>` — a 6-byte
 indirect jump through the thunk slot.  Our D1 path reproduces this
 exactly: we generate the same 6-byte stub in the shim landing
 region and resolve the shim's `CALL _Foo@N` REL32 to the stub.
+
+### D1-extend stubs are 33 bytes with inline cache
+
+For imports NOT in Azurik's static 151, the D1-extend resolving
+stub is 33 bytes (27 bytes of code + 4-byte cache slot + 2-byte
+`JMP EAX` tail).  First call: `CALL xboxkrnl_resolve_by_ordinal` +
+cache + `JMP EAX`.  Subsequent calls: `MOV EAX,[cache]; TEST
+EAX,EAX; JNZ tail; JMP EAX` — three instructions, cache-hot after
+the first call.  Same API surface to shim authors as D1; the
+dispatch in `shim_session.stub_for_kernel_symbol` picks the path
+automatically.
 
 ### Data exports exist alongside functions
 

@@ -85,11 +85,37 @@ class OrdinalTableInvariants(unittest.TestCase):
             ordinals, sorted(ordinals),
             msg="keep rows sorted by ordinal so audits can binary-search")
 
-    def test_name_to_ordinal_is_inverse_of_ordinal_to_name(self):
+    def test_name_to_ordinal_prefers_azurik_imports_on_collision(self):
+        """With D1-extend's extended table, some kernel functions have
+        multiple ordinals (alias slots).  NAME_TO_ORDINAL must resolve
+        each name to an ordinal that actually maps back to that same
+        name in ORDINAL_TO_NAME (round-trip consistency), AND — for
+        names that appear in Azurik's static 151 — the forward lookup
+        must return the Azurik-imported ordinal (so D1's fast thunk-
+        slot path wins over D1-extend's runtime resolver)."""
+        from azurik_mod.patching.xboxkrnl_ordinals import (
+            AZURIK_KERNEL_ORDINALS)
+
+        azurik_name_to_ord = {e.name: e.ordinal for e in AZURIK_KERNEL_ORDINALS}
+
+        # Round-trip: name -> ordinal -> name must equal the original.
         for name, ordinal in NAME_TO_ORDINAL.items():
-            self.assertEqual(ORDINAL_TO_NAME[ordinal], name)
-        for ordinal, name in ORDINAL_TO_NAME.items():
-            self.assertEqual(NAME_TO_ORDINAL[name], ordinal)
+            self.assertEqual(
+                ORDINAL_TO_NAME[ordinal], name,
+                msg=f"round-trip failed: NAME_TO_ORDINAL[{name!r}] = "
+                    f"{ordinal}, but ORDINAL_TO_NAME[{ordinal}] = "
+                    f"{ORDINAL_TO_NAME[ordinal]!r}")
+
+        # For any name in Azurik's static table, the forward map MUST
+        # prefer that ordinal over any extended alias — otherwise D1's
+        # fast path gets bypassed.
+        for name, azurik_ord in azurik_name_to_ord.items():
+            self.assertEqual(
+                NAME_TO_ORDINAL[name], azurik_ord,
+                msg=f"{name} is an Azurik-imported function (static "
+                    f"ordinal {azurik_ord}), but NAME_TO_ORDINAL "
+                    f"resolved it to {NAME_TO_ORDINAL[name]} — "
+                    f"the extended table is shadowing the fast path")
 
     def test_spot_checks_well_known_ordinals(self):
         """These pairings are fixed by the Xbox kernel itself — if any

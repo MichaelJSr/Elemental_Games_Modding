@@ -61,6 +61,25 @@ unsigned char play_movie_fn(const char *name, char flag);
 __attribute__((stdcall))
 int poll_movie(float dt);
 
+/* Boot state-machine tick — runs one iteration of the logo / splash
+ * / prophecy sequencer.  Called from the main boot loop at
+ * VA 0x59BA5 with dt in seconds.  Returns a boolean-ish value in AL;
+ * the caller does ``TEST AL, AL; JNZ ...`` to branch on "boot still
+ * in progress" vs "boot complete — enter title screen".
+ *
+ * Return type declared ``unsigned char`` on the shim side because
+ * only AL is observed by the vanilla caller, even though the
+ * callee technically returns a full ``undefined4`` per Ghidra.
+ *
+ * Safe to wrap from shims that want to intercept boot-state
+ * transitions without replacing the whole state machine (e.g. an
+ * extension of ``qol_skip_logo`` that also skips the prophecy
+ * intro cutscene).
+ *
+ * Vanilla VA: 0x0005F620  (mangled: _boot_state_tick@4) */
+__attribute__((stdcall))
+unsigned char boot_state_tick(float dt);
+
 
 /* ------------------------------------------------------------------
  * Entity registry

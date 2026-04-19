@@ -246,7 +246,7 @@ Key files behind each step:
 | "Drift guard test failing"                        | [AGENT_GUIDE.md §4c](AGENT_GUIDE.md#4c-calling-convention-mangling-on-i386-pe-coff) (mangling) |
 | "How was field X in azurik.h reverse-engineered?" | [LEARNINGS.md](LEARNINGS.md) — cross-referenced to Ghidra functions |
 | "What packs exist?"                               | [PATCHES.md](PATCHES.md) (catalog + per-pack details) |
-| "Can I call xboxkrnl function X from a shim?"     | [shims/include/azurik_kernel.h](../shims/include/azurik_kernel.h) — all 151 declared |
+| "Can I call xboxkrnl function X from a shim?"     | Yes — any xboxkrnl export, even ones Azurik doesn't import.  Static 151: [shims/include/azurik_kernel.h](../shims/include/azurik_kernel.h).  Extended (runtime resolver): [shims/include/azurik_kernel_extend.h](../shims/include/azurik_kernel_extend.h) + [docs/D1_EXTEND.md](D1_EXTEND.md) |
 | "My feature needs to survive without clang"       | Add `legacy_sites=(...,)` to the `Feature`; users set `AZURIK_NO_SHIMS=1` |
 | "Where do I put shared helper code?"              | `azurik_mod/patches/_shared.py` (non-pack) or a dedicated shim library placed via `ShimLayoutSession.apply_shared_library` |
 
