@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+### Small headers fill-in pass — ControllerState, drop tables, entity_lookup
+
+- **`ControllerState` struct** added to `shims/include/azurik.h`.
+  84-byte layout (`AZURIK_CONTROLLER_STRIDE = 0x54`), per-player
+  at `AZURIK_CONTROLLER_STATE_VA + player_idx * 0x54`.  Covers
+  analog sticks, D-pad, 8 analog buttons, triggers, stick clicks,
+  start / back, plus the 12-byte `edge_state[]` latch array.
+  Pinned from Ghidra's `FUN_000a2880` (XInput poll) — every write
+  maps 1:1 to a named field.  Active-player index anchor
+  `AZURIK_ACTIVE_PLAYER_INDEX_VA = 0x001A7AE4`.  Compile-time
+  `_Static_assert`s pin `sizeof(ControllerState) == 0x54` and every
+  critical offset.
+
+- **CritterData drop-table + range fields** pulled into
+  `shims/include/azurik.h`: `range`, `range_up`, `range_down`,
+  `attack_range`, `drop_1..5`, `drop_count_1..5`, `drop_chance_1..5`
+  at offsets `0xB8..0x10C`.  Offsets verified against
+  `FUN_00049480`'s `"dropN"` / `"dropChanceN"` / `"rangeN"` writes.
+
+- **`entity_lookup` (`FUN_0004B510`)** registered in
+  `vanilla_symbols.py` + declared in `azurik_vanilla.h`.  Verified
+  `__fastcall` (`@entity_lookup@8`) by reading two real callers —
+  both emit `MOV ECX,<name>; MOV EDX,<fallback>; CALL` with no
+  `ADD ESP, N` cleanup.  Lets shims resolve named entities at
+  runtime without going through a config-table wrapper.
+
+- **Skipped** `FUN_00085700` (gravity integration) — Ghidra decomps
+  it as `__fastcall` but the body reads `in_EAX` as an implicit
+  output-pointer (MSVC RVO pattern), so clean clang exposure
+  requires a naked-asm wrapper.  Reasoning documented in
+  `docs/LEARNINGS.md::Vanilla-function exposure` for future
+  reference.
+
+- **Tests**: 193 passing + 57 subtests (up from 192 + 32).  New
+  drift-guards in `tests/test_shim_authoring.py` pin 10 CritterData
+  drop-table offsets and 15 ControllerState offsets as compile-
+  observable facts.
+
+- **Docs**: LEARNINGS.md gains a "ControllerState struct" section
+  with the full byte-level map + a "Vanilla-function exposure" note
+  covering the fastcall-vs-thiscall-vs-RVO ABI edge cases.  SHIMS.md
+  roadmap updated: mid-term #3 and #4 marked done; stale "Long-term"
+  section cleaned up (D1 and E were duplicated there despite being
+  done; replaced with D1-extend + D2 + B2 future-work entries).
+
 ### Folder-per-feature reorganisation + unified `apply_pack` dispatcher
 
 - **Every feature is now one self-contained folder** under

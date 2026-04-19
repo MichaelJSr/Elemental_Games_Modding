@@ -87,6 +87,39 @@ class AzurikHeaderStructOffsets(unittest.TestCase):
         # Gameplay fields with correct Ghidra-verified offsets.
         "drown_time":        0x80,
         "shadow_size":       0x94,
+        # Range + drop-table fields added alongside the ControllerState
+        # work.  Offsets pinned against FUN_00049480's "rangeN" /
+        # "dropN" / "dropChanceN" writes.
+        "range":             0xB8,
+        "range_up":          0xBC,
+        "range_down":        0xC0,
+        "attack_range":      0xC4,
+        "drop_1":            0xD4,
+        "drop_5":            0xE4,
+        "drop_count_1":      0xE8,
+        "drop_count_5":      0xF8,
+        # The last two sit past 0x80 so disp32 encoding is expected;
+        # the helper checks that form too.
+        "drop_chance_1":     0xFC,
+        "drop_chance_5":    0x10C,
+    }
+    EXPECTED_CONTROLLER_OFFSETS = {
+        "left_stick_x":      0x00,
+        "left_stick_y":      0x04,
+        "right_stick_x":     0x08,
+        "right_stick_y":     0x0C,
+        "dpad_y":            0x10,
+        "dpad_x":            0x14,
+        "button_a":          0x18,
+        "button_y":          0x24,
+        "trigger_left":      0x30,
+        "trigger_right":     0x34,
+        "stick_left_click":  0x38,
+        "stick_right_click": 0x3C,
+        "start_button":      0x40,
+        "back_button":       0x44,
+        # edge_state is a byte array — probe its base.
+        "edge_state":        0x48,
     }
 
     def _compile_probe(self, source: str) -> bytes:
@@ -144,9 +177,40 @@ class AzurikHeaderStructOffsets(unittest.TestCase):
         obj = self._compile_probe("\n".join(lines))
         for field, offset in self.EXPECTED_CRITTER_OFFSETS.items():
             with self.subTest(field=field, offset=f"0x{offset:X}"):
-                self.assertIn(bytes([offset]), obj,
+                # Offsets <= 0x7F use disp8 encoding (single byte);
+                # 0x80+ use disp32 encoding (LE 4 bytes).
+                if offset < 0x80:
+                    needle = bytes([offset])
+                else:
+                    needle = struct.pack("<I", offset)
+                self.assertIn(needle, obj,
                     msg=f"offset 0x{offset:X} for CritterData.{field} "
                         f"not found in compiled .o — layout drift?")
+
+    def test_controller_state_fields_resolve_to_expected_offsets(self):
+        """Probe the ControllerState struct for every canonical
+        offset derived from FUN_000a2880 (the XInput polling loop).
+        Catches per-player stride + per-field offset drift."""
+        lines = ["#include \"azurik.h\"", "volatile u32 sink;",
+                 "void probe(ControllerState *cs) {"]
+        for field in self.EXPECTED_CONTROLLER_OFFSETS:
+            # edge_state is an array; take its first element so the
+            # same u32-cast pattern works.
+            if field == "edge_state":
+                lines.append(f"    sink = (u32)cs->{field}[0];")
+            else:
+                lines.append(f"    sink = (u32)cs->{field};")
+        lines.append("}")
+
+        obj = self._compile_probe("\n".join(lines))
+        for field, offset in self.EXPECTED_CONTROLLER_OFFSETS.items():
+            with self.subTest(field=field, offset=f"0x{offset:X}"):
+                needle = bytes([offset]) if offset < 0x80 \
+                    else struct.pack("<I", offset)
+                self.assertIn(needle, obj,
+                    msg=f"offset 0x{offset:X} for ControllerState."
+                        f"{field} not found in compiled .o — layout "
+                        f"drift from FUN_000a2880's write pattern?")
 
     def test_va_anchors_point_at_expected_xbe_data(self):
         """Validate every ``AZURIK_*_VA`` constant in azurik.h against

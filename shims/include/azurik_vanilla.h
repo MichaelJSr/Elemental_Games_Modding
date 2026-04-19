@@ -61,6 +61,30 @@ unsigned char play_movie_fn(const char *name, char flag);
 __attribute__((stdcall))
 int poll_movie(float dt);
 
+
+/* ------------------------------------------------------------------
+ * Entity registry
+ * ---------------------------------------------------------------- */
+
+/* Look up an entity descriptor by name (byte-level strcmp).  If the
+ * name isn't in the registry AND ``fallback != NULL``, the function
+ * registers the fallback as a new entry and returns it; if
+ * ``fallback == NULL`` and the name isn't found, returns NULL.
+ *
+ * Scans the global registry at ``DAT_0038C1E4..DAT_0038C1E8``
+ * (array of descriptor-pointers).  Name comparison is case-
+ * sensitive, terminates at the first 0x00 byte.
+ *
+ * __fastcall convention — clang emits the mangled name
+ * ``@entity_lookup@8``:
+ *   ECX = name (null-terminated ASCII byte pointer)
+ *   EDX = fallback (optional registration payload, or NULL)
+ *   EAX (return) = descriptor pointer, or NULL on miss+no-fallback
+ *
+ * Vanilla VA: 0x0004B510  (mangled: @entity_lookup@8) */
+__attribute__((fastcall))
+int *entity_lookup(const char *name, int *fallback);
+
 #ifdef __cplusplus
 }
 #endif

@@ -71,7 +71,9 @@ typedef double         f64;
 typedef void *EntityHandle;         /* Anything the game models as an entity  */
 typedef void *ConfigTableHandle;    /* A loaded `tabl` chunk from config.xbr  */
 typedef void *ScenePtr;             /* Opaque scene / world graph handle      */
-typedef void *ControllerStatePtr;   /* Per-player input block (4 players)     */
+/* ControllerStatePtr below is now a real struct pointer — see
+ * ``ControllerState`` + ``AZURIK_CONTROLLER_STATE_VA`` below. */
+typedef struct ControllerState *ControllerStatePtr;
 
 
 /* ==========================================================================
@@ -171,12 +173,151 @@ typedef struct CritterData {
     f32 clip_plane_offset;            /* +0x98 piVar9[0x26] — "clipPlaneOffset"        */
     i32 shadow_texture_res;           /* +0x9C piVar9[0x27] — -1 = no shadow           */
 
-    /* --- Anything past here is not yet mapped.  Full struct is
-     * several hundred bytes; walk range / drop tables / attack
-     * triggers live in the 0xB8..0x120 range (range, range up, range
-     * down, attackRange, drop1..drop5, dropChance1..5) but we don't
-     * surface them until a shim actually needs them. */
+    /* --- unmapped gap between shadow_texture_res and range[] --- */
+    u8  _reserved_A0[0xB8 - 0xA0];
+
+    /* --- critters_critter_data: awareness / attack ranges ---
+     * Units are world-space (identical scale to collision_radius and
+     * camera distances).  Used by the AI for target-acquisition,
+     * line-of-sight, and attack-range gating in FUN_00049480. */
+    f32 range;                        /* +0xB8 piVar9[0x2E] — "range" (sight radius)  */
+    f32 range_up;                     /* +0xBC piVar9[0x2F] — "range up"              */
+    f32 range_down;                   /* +0xC0 piVar9[0x30] — "range down"            */
+    f32 attack_range;                 /* +0xC4 piVar9[0x31] — "attackRange"            */
+
+    /* --- unmapped gap; piVar9[0x32]..[0x34] not observed in FUN_00049480 --- */
+    u8  _reserved_C8[0xD4 - 0xC8];
+
+    /* --- critters_critter_data: drop tables ---
+     * Each ``drop_<n>`` slot is a resource-ID / pointer produced by
+     * FUN_000d1630 at config-load time (populated via the "dropN"
+     * config keys).  ``drop_chance_<n>`` is a 0..1 probability;
+     * ``drop_count_<n>`` is the integer quantity dropped when the
+     * chance fires.  A drop slot with a zero pointer means
+     * "no drop in this slot" — the engine scans until the first
+     * zero or the full 5-slot limit, whichever comes first. */
+    u32 drop_1;                       /* +0xD4 piVar9[0x35] — "drop1"                  */
+    u32 drop_2;                       /* +0xD8 piVar9[0x36] — "drop2"                  */
+    u32 drop_3;                       /* +0xDC piVar9[0x37] — "drop3"                  */
+    u32 drop_4;                       /* +0xE0 piVar9[0x38] — "drop4"                  */
+    u32 drop_5;                       /* +0xE4 piVar9[0x39] — "drop5"                  */
+
+    u32 drop_count_1;                 /* +0xE8 piVar9[0x3A] — "dropCount1"             */
+    u32 drop_count_2;                 /* +0xEC piVar9[0x3B] — "dropCount2"             */
+    u32 drop_count_3;                 /* +0xF0 piVar9[0x3C] — "dropCount3"             */
+    u32 drop_count_4;                 /* +0xF4 piVar9[0x3D] — "dropCount4"             */
+    u32 drop_count_5;                 /* +0xF8 piVar9[0x3E] — "dropCount5"             */
+
+    f32 drop_chance_1;                /* +0xFC  piVar9[0x3F] — "dropChance1"           */
+    f32 drop_chance_2;                /* +0x100 piVar9[0x40] — "dropChance2"           */
+    f32 drop_chance_3;                /* +0x104 piVar9[0x41] — "dropChance3"           */
+    f32 drop_chance_4;                /* +0x108 piVar9[0x42] — "dropChance4"           */
+    f32 drop_chance_5;                /* +0x10C piVar9[0x43] — "dropChance5"           */
+
+    /* --- Anything past +0x110 is not yet mapped.  Full struct is
+     * several hundred bytes; attack-triggers and more config fields
+     * live in that region but stay unnamed until a shim references
+     * them. */
 } CritterData;
+
+
+/* ==========================================================================
+ * ControllerState
+ * ==========================================================================
+ * Per-player gamepad state populated every frame by the XInput
+ * polling loop (``FUN_000a2df0`` → ``FUN_000a2880``).  One
+ * :class:`ControllerState` per player (up to 4) — the array lives at
+ * ``DAT_0037BE98`` and striding is 0x54 bytes
+ * (``AZURIK_CONTROLLER_STATE_VA + player_index * 0x54``).
+ *
+ * All analog axes are normalised into ``[-1.0, 1.0]`` (sticks) or
+ * ``[0.0, 1.0]`` (triggers / analog buttons); digital buttons are
+ * either exactly ``0.0`` or ``1.0`` — the engine never pushes
+ * intermediate values.  D-pad axes are three-valued:
+ * ``-1.0 / 0.0 / +1.0``.
+ *
+ * Edge-detection: the 12 bytes at +0x48..+0x53 are a per-button
+ * "was pressed last frame" latch.  One byte per button-like field
+ * in the +0x18..+0x47 range (12 fields → 12 latch bytes, matching
+ * order).  Engine callers read a rising edge as
+ * ``current > 0 && latch == 0`` and write ``latch = 1`` after
+ * consuming the press; the polling loop clears ``latch`` when the
+ * button goes back to zero.  Shims that hook per-frame logic may
+ * read ``edge_state[]`` directly to avoid double-firing on held
+ * buttons.
+ *
+ * ``DAT_001A7AE4`` holds the "active player index" (0..3), or 4 if
+ * no controller is connected.  Shims that act on the active player
+ * only should dereference
+ * ``ControllerState *active = &players[DAT_001A7AE4]`` when
+ * ``DAT_001A7AE4 != 4``.
+ */
+
+/* Base VA of the 4-player ControllerState array (player 0). */
+#define AZURIK_CONTROLLER_STATE_VA    0x0037BE98u
+
+/* Active-player index (0..3, or 4 for "no controller connected"). */
+#define AZURIK_ACTIVE_PLAYER_INDEX_VA 0x001A7AE4u
+
+/* Stride in bytes between per-player ControllerState entries. */
+#define AZURIK_CONTROLLER_STRIDE      0x54u
+
+typedef struct ControllerState {
+    /* --- Analog sticks (normalised to [-1.0, 1.0]) ---
+     * XInput dead-zone processing in FUN_000a2880:
+     *   raw = XINPUT_GAMEPAD.sThumb{LX,LY,RX,RY}
+     *   if (raw < 0)  value = max(-1, (raw + 12000) * 4.815332e-5)
+     *   else          value = min( 1, (raw - 12000) * 4.815332e-5)
+     * — so anything inside ±12000 of centre reads as exactly 0.0.
+     * The 4.815332e-5 factor normalises the remaining 20768 units
+     * of travel into ±1.0.
+     */
+    f32 left_stick_x;                 /* +0x00 — sThumbLX normalised */
+    f32 left_stick_y;                 /* +0x04 — sThumbLY normalised */
+    f32 right_stick_x;                /* +0x08 — sThumbRX normalised */
+    f32 right_stick_y;                /* +0x0C — sThumbRY normalised */
+
+    /* --- D-pad (three-valued per axis: -1, 0, +1) ---
+     * D-pad-X is derived from bits 0x04 (LEFT) / 0x08 (RIGHT);
+     * D-pad-Y from 0x01 (UP) / 0x02 (DOWN) of XINPUT_GAMEPAD.wButtons.
+     */
+    f32 dpad_y;                       /* +0x10 — +1 up, -1 down, 0 neutral */
+    f32 dpad_x;                       /* +0x14 — +1 right, -1 left         */
+
+    /* --- Analog buttons (pressure 0.0..1.0, from XINPUT analog bytes) ---
+     * Dead-zone: raw < 30 reads as 0.0.
+     * Scale: (raw - 30) * 0.0044444446 ≈ 1/225 gives the 1.0-cap.
+     * Order matches XINPUT_GAMEPAD.bAnalogButtons[] exactly. */
+    f32 button_a;                     /* +0x18 — A analog pressure        */
+    f32 button_b;                     /* +0x1C — B analog pressure        */
+    f32 button_x;                     /* +0x20 — X analog pressure        */
+    f32 button_y;                     /* +0x24 — Y analog pressure        */
+    f32 button_black;                 /* +0x28 — BLACK analog pressure    */
+    f32 button_white;                 /* +0x2C — WHITE analog pressure    */
+    f32 trigger_left;                 /* +0x30 — LT analog pressure       */
+    f32 trigger_right;                /* +0x34 — RT analog pressure       */
+
+    /* --- Digital buttons (exactly 0.0 or 1.0) ---
+     * From XINPUT_GAMEPAD.wButtons bit flags:
+     *   bit 0x40 → stick_left_click  (LEFT_THUMB)
+     *   bit 0x80 → stick_right_click (RIGHT_THUMB)
+     *   bit 0x10 → start_button      (START)
+     *   bit 0x20 → back_button       (BACK)
+     */
+    f32 stick_left_click;             /* +0x38 — L-stick press             */
+    f32 stick_right_click;            /* +0x3C — R-stick press             */
+    f32 start_button;                 /* +0x40 — START                     */
+    f32 back_button;                  /* +0x44 — BACK                      */
+
+    /* --- Edge-detect latch bytes (12 × u8) ---
+     * One per ``button_*`` / ``trigger_*`` / ``stick_*`` / ``start`` /
+     * ``back`` field above (12 total, same order).  The polling loop
+     * clears each byte when its corresponding button returns to 0.0,
+     * which is how the engine implements "consume rising edge once
+     * per press" without dedicated edge-detect state elsewhere.
+     */
+    u8  edge_state[12];               /* +0x48..+0x53                      */
+} ControllerState;
 
 
 /* ==========================================================================
@@ -398,6 +539,45 @@ _Static_assert(__builtin_offsetof(CritterData, shadow_size) == 0x94,
                "CritterData.shadow_size drifted");
 _Static_assert(__builtin_offsetof(CritterData, shadow_texture_res) == 0x9C,
                "CritterData tail drifted past shadow_texture_res");
+_Static_assert(__builtin_offsetof(CritterData, range) == 0xB8,
+               "CritterData.range drifted — _reserved_A0 gap size wrong?");
+_Static_assert(__builtin_offsetof(CritterData, attack_range) == 0xC4,
+               "CritterData.attack_range drifted — range[] layout broke");
+_Static_assert(__builtin_offsetof(CritterData, drop_1) == 0xD4,
+               "CritterData.drop_1 drifted — _reserved_C8 gap size wrong?");
+_Static_assert(__builtin_offsetof(CritterData, drop_5) == 0xE4,
+               "CritterData.drop_5 drifted");
+_Static_assert(__builtin_offsetof(CritterData, drop_count_1) == 0xE8,
+               "CritterData.drop_count_1 drifted");
+_Static_assert(__builtin_offsetof(CritterData, drop_count_5) == 0xF8,
+               "CritterData.drop_count_5 drifted");
+_Static_assert(__builtin_offsetof(CritterData, drop_chance_1) == 0xFC,
+               "CritterData.drop_chance_1 drifted");
+_Static_assert(__builtin_offsetof(CritterData, drop_chance_5) == 0x10C,
+               "CritterData.drop_chance_5 drifted");
+
+/* ControllerState (from XInput polling in FUN_000a2880). */
+_Static_assert(sizeof(ControllerState) == 0x54,
+               "ControllerState must be exactly 0x54 bytes — the "
+               "per-player stride the XInput poll uses");
+_Static_assert(__builtin_offsetof(ControllerState, left_stick_x) == 0x00,
+               "ControllerState.left_stick_x drifted");
+_Static_assert(__builtin_offsetof(ControllerState, right_stick_y) == 0x0C,
+               "ControllerState.right_stick_y drifted");
+_Static_assert(__builtin_offsetof(ControllerState, dpad_y) == 0x10,
+               "ControllerState.dpad_y drifted");
+_Static_assert(__builtin_offsetof(ControllerState, button_a) == 0x18,
+               "ControllerState.button_a drifted");
+_Static_assert(__builtin_offsetof(ControllerState, trigger_right) == 0x34,
+               "ControllerState.trigger_right drifted");
+_Static_assert(__builtin_offsetof(ControllerState, stick_left_click) == 0x38,
+               "ControllerState.stick_left_click drifted");
+_Static_assert(__builtin_offsetof(ControllerState, start_button) == 0x40,
+               "ControllerState.start_button drifted");
+_Static_assert(__builtin_offsetof(ControllerState, back_button) == 0x44,
+               "ControllerState.back_button drifted");
+_Static_assert(__builtin_offsetof(ControllerState, edge_state) == 0x48,
+               "ControllerState.edge_state drifted");
 
 _Static_assert(__builtin_offsetof(PlayerInputState, stick_magnitude) == 0x1C,
                "PlayerInputState.stick_magnitude drifted");

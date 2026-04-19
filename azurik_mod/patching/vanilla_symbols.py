@@ -137,6 +137,29 @@ register(VanillaSymbol(
     ),
 ))
 
+register(VanillaSymbol(
+    name="entity_lookup",
+    va=0x0004B510,
+    calling_convention="fastcall",
+    arg_bytes=8,
+    doc=(
+        "Looks up an entity descriptor by name.  __fastcall: "
+        "name (byte *) in ECX, fallback (int *) in EDX.  Walks the "
+        "global entity registry (DAT_0038C1E4..DAT_0038C1E8) "
+        "comparing each entry's name against the needle; returns "
+        "the matching descriptor pointer in EAX, or 0 if no match "
+        "AND the fallback is NULL.  When the fallback is non-null "
+        "and the lookup misses, the function registers the "
+        "fallback as a new entry and returns it.\n\n"
+        "ABI verified from two callers (FUN_000353F0 and "
+        "FUN_0003A610) both of which do ``MOV ECX, <name>; "
+        "XOR/MOV EDX, <fallback>; CALL`` without any ``ADD ESP, N`` "
+        "cleanup afterward — __fastcall with 2 register args.\n\n"
+        "Safe to call from shims that need to resolve named "
+        "entities (critter descriptors, scripted pickups, etc.)."
+    ),
+))
+
 
 # ---------------------------------------------------------------------------
 # Public accessors

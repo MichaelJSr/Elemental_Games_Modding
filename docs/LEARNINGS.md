@@ -437,6 +437,66 @@ so `shims/build/qol_skip_logo.o` (not `skip_logo.o`).  Two features
 whose source files both happen to be called `shim.c` can't collide
 in the shared build cache.
 
+## ControllerState struct (XInput polling) — pinned 2026-04-18
+
+Per-player gamepad state lives at `DAT_0037BE98 + player_idx * 0x54`
+(up to 4 players).  Populated every frame by the XInput polling loop
+`FUN_000a2df0 → FUN_000a2880` which calls `XInputGetState` and
+normalises the raw XInput fields into floats:
+
+| Offset | Type | Field |
+|:--|:--|:--|
+| 0x00 | f32 | left_stick_x (sThumbLX normalised to [-1, 1]) |
+| 0x04 | f32 | left_stick_y |
+| 0x08 | f32 | right_stick_x |
+| 0x0C | f32 | right_stick_y |
+| 0x10 | f32 | dpad_y (-1 / 0 / +1) |
+| 0x14 | f32 | dpad_x (-1 / 0 / +1) |
+| 0x18..0x34 | f32 × 8 | button_a, button_b, button_x, button_y, button_black, button_white, trigger_left, trigger_right (analog 0..1) |
+| 0x38 | f32 | stick_left_click (digital 0 / 1) |
+| 0x3C | f32 | stick_right_click |
+| 0x40 | f32 | start_button |
+| 0x44 | f32 | back_button |
+| 0x48..0x53 | u8 × 12 | edge_state[] — latches that the polling loop clears when the corresponding button returns to 0.0, so the engine can implement "consume rising edge once per press" |
+
+Active-player index at `DAT_001A7AE4` (0..3, or 4 = "no controller").
+Stick dead zone is raw-unit ±12000 of centre.  Analog-button dead zone is raw-unit 30.
+
+Exposed in `azurik.h` as `ControllerState` with `_Static_assert`s
+pinning every late field.  Compile-time regression guards in
+`tests/test_shim_authoring.py::test_controller_state_fields_resolve_to_expected_offsets`.
+
+Reference: `FUN_000a2880` decomp (the XInput-write side of the
+polling loop) — each `DAT_0037be{9c,a0,a4,a8,ac,b0...}` target maps
+1:1 to a struct field in this table.
+
+## Vanilla-function exposure — __fastcall edge cases
+
+When adding functions to `vanilla_symbols.py`, `__fastcall` works
+cleanly in clang as long as the function TRULY is fastcall.  The
+callers' register-setup pattern is the authoritative signal:
+
+- `MOV ECX, <arg1>; XOR/MOV EDX, <arg2>; CALL` → __fastcall, 2
+  register args + optional stack args.
+- `PUSH ...; PUSH ...; MOV ECX, this; CALL` → __thiscall, 1
+  register arg (ECX=this) + N stack args.  **clang's
+  `__attribute__((thiscall))` works on i386-pc-win32 but emits
+  ``@name@N`` mangling that doesn't match what Ghidra / vanilla
+  Azurik emitted** — you need a naked-asm wrapper that shuffles
+  registers before the call.  Deferred.
+
+Skipped example: `FUN_00085700` (gravity integration).  Ghidra
+decomps it as `__fastcall(param_1, param_2, float param_3)` but the
+body also reads `in_EAX` as an implicit output-pointer (Microsoft
+RVO pattern).  Clang's `__attribute__((fastcall))` doesn't let you
+declare an implicit EAX parameter.  Safe exposure would require a
+4-line assembly wrapper that saves EAX into a stack arg before the
+call.  Deferred until a concrete shim needs it.
+
+Working example: `FUN_0004B510` (entity_lookup) — both callers
+confirmed pure __fastcall (ECX=name, EDX=fallback).  Now registered
+at `entity_lookup@8`.
+
 ## What to add here next
 
 Things we haven't pinned down but should when a shim needs them:
@@ -444,12 +504,20 @@ Things we haven't pinned down but should when a shim needs them:
 - [ ] **Camera projection + FOV**.  Likely a `.rdata` float similar
       to gravity.  Quick win if found.
 - [ ] **Player jump impulse**.  Tracked as `C-jump` in SHIMS.md.
-- [ ] **Controller input struct**.  `DAT_0037BE98 + player_idx * 0x54`
-      is roughly where per-player input lives — sticks, buttons,
-      triggers — but field offsets need Ghidra work.
-- [ ] **Per-entity drop-table layout**.  `CritterData` has
-      drop1..drop5 / dropChance1..5 fields beyond offset `0xB8` that
-      haven't been exposed in `azurik.h` yet.
 - [ ] **Save-file format**.  Partially in `docs/SAVE_PARSER_PLAN.md`
       — extend `scripts/extract_save.py` + `scripts/xbr_parser.py`
       when someone wants persistent shim state.
+- [ ] **`FUN_00085700` (gravity integration)** naked-asm wrapper —
+      see "Vanilla-function exposure" section above.
+- [ ] **`FUN_000d1420` / `FUN_000d1520` (config lookup)** —
+      __thiscall; needs naked-asm wrappers to call from shims.
+
+**Recently pinned** (as of this pass):
+
+- [x] **Controller input struct** — done, see section above.
+- [x] **Drop-table fields in `CritterData`** — `range`, `range_up`,
+      `range_down`, `attack_range`, `drop_1..5`, `drop_count_1..5`,
+      `drop_chance_1..5` all exposed.  Offsets pinned against
+      `FUN_00049480`.
+- [x] **`entity_lookup` (FUN_0004b510)** — registered in
+      `vanilla_symbols.py` as __fastcall.

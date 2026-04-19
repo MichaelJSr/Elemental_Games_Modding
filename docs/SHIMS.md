@@ -481,43 +481,67 @@ table whenever a tier lands or a new candidate becomes concrete.
    frames) wants unit tests of its runtime behaviour.
 
 2. **Expand `azurik_vanilla.h` as demand arises.**  Currently
-   exposes `play_movie_fn` + `poll_movie` (both `__stdcall`).
-   Functions we've touched in Ghidra but haven't exposed:
-   - `FUN_00085700` — gravity integration (`__fastcall`, trivial).
-   - `FUN_0004b510` — entity registry lookup (`__fastcall`).
-   - `FUN_000d1420` / `FUN_000d1520` — config-table row / cell
-     lookup (`__thiscall`; needs naked-asm wrappers, so deferred).
+   exposes:
+   - `play_movie_fn` / `poll_movie` — boot-time movie player
+     (both `__stdcall`).
+   - `entity_lookup` — entity registry name lookup (`__fastcall`,
+     pinned from two callers in `FUN_000353F0` and `FUN_0003A610`).
+
+   Investigated but **deferred**:
+   - `FUN_00085700` (gravity integration) — Ghidra decomps as
+     `__fastcall` but the body reads `in_EAX` as an implicit
+     output-pointer (MSVC RVO pattern).  clang's
+     `__attribute__((fastcall))` doesn't let you declare an
+     implicit EAX parameter, so safe exposure needs a naked-asm
+     wrapper.  See `docs/LEARNINGS.md` "Vanilla-function exposure".
+   - `FUN_000d1420` / `FUN_000d1520` (config-table lookups) —
+     `__thiscall`, same naked-asm-wrapper requirement.
+
    Add entries as concrete shims need them, not speculatively.
 
-3. **`ControllerState` struct in `azurik.h`.**  The per-player input
-   state at `DAT_0037BE98 + player_idx * 0x54` holds stick X/Y,
-   button flags, and trigger pressures.  Would unlock shims that
-   rebind controls, add combo moves, etc.  Deferred until the
-   first such shim is requested.
+3. **`ControllerState` struct in `azurik.h`** — **done** (pinned
+   2026-04-18).  84-byte struct at `DAT_0037BE98 + player_idx *
+   0x54`, populated by the XInput polling loop in `FUN_000a2880`.
+   Exposes analog sticks, dpad, 8 analog buttons, start / back,
+   stick clicks, and the 12-byte edge-detect latch array.  Unlocks
+   shims that rebind controls, add combo moves, etc.  See
+   `docs/LEARNINGS.md` "ControllerState struct" for the full
+   byte-level map.
 
-### Long-term (Phase 2D / NXDK)
+4. **Drop tables + range fields in `CritterData`** — **done**.
+   Added `range`, `range_up`, `range_down`, `attack_range`,
+   `drop_1..5`, `drop_count_1..5`, `drop_chance_1..5`.  Offsets
+   pinned against `FUN_00049480`.
 
-1. **Kernel / D3D import-table rewriting (D1).**  Shims can't
-   currently call `XKernel*` / `D3D*` routines directly — every
-   such API access has to go through a vanilla Azurik function
-   that wraps it (via A3's vanilla-symbol registry).  Phase 2D
-   extends the XBE import-table at apply time so shims can declare
-   `extern __stdcall int XGetDeviceEnumerationStatus(void);` and
-   have it resolve at load time.
+### Long-term
+
+1. **D1-extend — Adding new kernel imports.**  D1 (done) exposes
+   the 151 xboxkrnl functions Azurik's vanilla XBE already imports.
+   Calling a kernel function OUTSIDE that set would require
+   extending the XBE's kernel thunk table, which has zero trailing
+   slack in Azurik's build — it would require moving the whole
+   table and re-linking every existing ``CALL [thunk_va]`` in the
+   game.  Deferred until a shim has a concrete need for it.
+   Workaround in the meantime: route through a vanilla Azurik
+   function that wraps the kernel API (A3's vanilla-symbol
+   registry).
 
 2. **NXDK integration (D2).**  Real Xbox Development Kit headers
-   (`<xkernel.h>`, `<d3d8.h>`, etc.) for shims that want to do
-   anything substantial on their own.  Pairs with D1.  Big
-   toolchain change — only worth it once several shims want Xbox
-   APIs.
+   (`<d3d8.h>`, `<xapi.h>`, `<xgraphics.h>`, `<xonline.h>`, ...)
+   wired into the shim toolchain.  Unlocks shims that do their
+   own D3D rendering (HUD overlays, texture swaps, post-process
+   filters), custom audio streams, raw XInput, XACT / XNet, etc.
+   Trade-off: ~100 MB of SDK + linker changes in `compile.sh`.
+   Worth doing once 2–3 concrete shims want native Xbox APIs.
+   See `docs/ONBOARDING.md` for the full catalog of patch types
+   D2 would unlock.
 
-3. **Shared-library shim layout (E).**  Today each
-   `TrampolinePatch` apply places its own copy of every section
-   from the shim's `.o`.  If two sites call the same helper
-   function they each install a private copy.  Phase E introduces
-   a shared-library landing pass so common shim code is laid out
-   once and all apply-time call sites link against the same
-   placement.
+3. **Unicorn-backed test harness (B2).**  Static byte checks only
+   prove the shim LANDS correctly; they don't prove the runtime
+   behaviour.  A Unicorn-based harness (capstone + unicorn = ~15 MB
+   dependency) would let us execute a shim against a synthetic
+   memory state and assert on side effects.  Deferred because no
+   shim yet has nontrivial runtime state to validate.
 
 ### Ground rules for adding new fields / structs to `azurik.h`
 
