@@ -25,6 +25,10 @@ from azurik_mod.iso.pack import (
 )
 from azurik_mod.iso.xdvdfs import require_xdvdfs
 
+# Importing the patches package runs each feature folder's
+# ``register_feature(...)`` side effect, so the registry is fully
+# populated before cmd_randomize_full walks it.
+import azurik_mod.patches  # noqa: F401
 from azurik_mod.patches.fps_unlock import apply_fps_patches
 from azurik_mod.patches.player_physics import (
     apply_player_physics,
@@ -38,6 +42,12 @@ from azurik_mod.patches.qol import (
     apply_player_character_patch,
 )
 from azurik_mod.patching import verify_patch_spec
+
+# Repo root — three levels up from this file
+# (azurik_mod/randomizer/commands.py -> <repo>).  Used as the
+# repo_root argument to apply_pack when shim-backed features need to
+# resolve compile.sh / the build cache.
+_REPO_ROOT_FOR_RANDOMIZER = Path(__file__).resolve().parent.parent.parent
 
 from azurik_mod.randomizer.shufflers import (
     BARRIER_FOURCCS,
@@ -1095,65 +1105,66 @@ def cmd_randomize_full(args):
         else:
             print(f"\n[6/7] Level connections — skipped")
 
-        # Step 7: XBE patches (granular QoL + FPS unlock + player character + gravity)
+        # Step 7: XBE patches — walk the pack registry instead of
+        # hardcoding each pack's apply-function call.  The user's
+        # CLI / GUI flags set ``want_<pack_tag>`` booleans (see the
+        # wiring table below); we flip each corresponding registered
+        # pack into "enabled", collect parameter values from the
+        # namespace, and then apply_pack does the dispatching.
+        from azurik_mod.patching import apply_pack
+        from azurik_mod.patching.registry import all_packs
+
         gravity_val = getattr(args, 'gravity', None)
-        needs_xbe = (want_gem_popups
-                      or want_other_popups
-                      or want_pickup_anims
-                      or want_skip_logo
-                      or getattr(args, 'fps_unlock', False)
-                      or getattr(args, 'player_character', None)
-                      or gravity_val is not None)
+        walk_scale = float(getattr(args, 'player_walk_scale', None) or 1.0)
+        run_scale = float(getattr(args, 'player_run_scale', None) or 1.0)
+        player_char = getattr(args, 'player_character', None)
+        xbe_path = extract_dir / "default.xbe"
+
+        # CLI-flag -> pack-name map.  Keeps cmd_randomize_full's
+        # argparse surface stable while the actual apply machinery
+        # discovers packs from the registry.
+        _FLAG_PACKS: dict[str, bool] = {
+            "qol_gem_popups": want_gem_popups,
+            "qol_other_popups": want_other_popups,
+            "qol_pickup_anims": want_pickup_anims,
+            "qol_skip_logo": want_skip_logo,
+            "fps_unlock": bool(getattr(args, 'fps_unlock', False)),
+            "player_physics": (gravity_val is not None
+                               or walk_scale != 1.0
+                               or run_scale != 1.0),
+        }
+
+        needs_xbe = any(_FLAG_PACKS.values()) or bool(player_char)
+
         if needs_xbe:
             print(f"\n[7/7] Applying XBE patches to default.xbe...")
-            xbe_path = extract_dir / "default.xbe"
             xbe_data = bytearray(xbe_path.read_bytes())
 
-            if want_gem_popups:
-                apply_gem_popups_patch(xbe_data)
-            if want_other_popups:
-                apply_other_popups_patch(xbe_data)
-            if want_pickup_anims:
-                apply_pickup_anim_patch(xbe_data)
-            if want_skip_logo:
-                apply_skip_logo_patch(xbe_data)
+            # Collect parameter values each pack might consume.  Only
+            # player_physics uses this surface today — extend as
+            # new parametric packs land.
+            _PACK_PARAMS: dict[str, dict[str, float]] = {
+                "player_physics": {
+                    "gravity": (gravity_val if gravity_val is not None else 9.8),
+                    "walk_speed_scale": walk_scale,
+                    "run_speed_scale": run_scale,
+                },
+            }
 
-            if getattr(args, 'fps_unlock', False):
-                apply_fps_patches(xbe_data)
+            for pack in all_packs():
+                if not _FLAG_PACKS.get(pack.name, False):
+                    continue
+                params = _PACK_PARAMS.get(pack.name, {})
+                apply_pack(pack, xbe_data, params,
+                           repo_root=_REPO_ROOT_FOR_RANDOMIZER)
 
-            if gravity_val is not None:
-                apply_player_physics(xbe_data, gravity=gravity_val)
-
-            player_char = getattr(args, 'player_character', None)
+            # Non-pack helper — standalone string-valued CLI flag.
             if player_char:
                 apply_player_character_patch(xbe_data, player_char)
 
             xbe_path.write_bytes(xbe_data)
         else:
             print(f"\n[7/7] XBE patches — skipped (no patches opted in)")
-
-        # Step 7b: Player walk / run speed.  Phase 2 C1 moved these
-        # from config.xbr (dead data) to direct XBE code-site patches.
-        # apply_player_speed injects two per-player float constants and
-        # rewrites the FLD at VA 0x85F65 + FMUL at VA 0x849E4 to
-        # reference them — see azurik_mod/patches/player_physics.py for
-        # the full rationale.  Because these patches target default.xbe
-        # they have to load the XBE we may have already written above,
-        # then re-save.  Small price for avoiding a dead-data slider.
-        walk_scale = float(getattr(args, 'player_walk_scale', None) or 1.0)
-        run_scale = float(getattr(args, 'player_run_scale', None) or 1.0)
-        if walk_scale != 1.0 or run_scale != 1.0:
-            if xbe_path.exists():
-                print(f"\n  Modifying player speed "
-                      f"(walk x{walk_scale}, run x{run_scale})...")
-                xbe_buf = bytearray(xbe_path.read_bytes())
-                if apply_player_speed(xbe_buf,
-                                       walk_scale=walk_scale,
-                                       run_scale=run_scale):
-                    xbe_path.write_bytes(xbe_buf)
-            else:
-                print(f"\n  WARNING: {xbe_path} missing — "
-                      f"skipping player speed patches")
 
         # Config.xbr patches (from --config-mod)
         config_mod_arg = getattr(args, 'config_mod', None)

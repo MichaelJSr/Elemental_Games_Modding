@@ -1,6 +1,6 @@
 """Tests for the Phase-2 A2 relocation-aware COFF loader.
 
-Compiles ``shims/src/_reloc_test.c`` on demand, parses it with
+Compiles ``shims/fixtures/_reloc_test.c`` on demand, parses it with
 :func:`azurik_mod.patching.coff.parse_coff`, runs it through
 :func:`azurik_mod.patching.coff.layout_coff` with a fake VA
 allocator, and verifies:
@@ -42,7 +42,7 @@ from azurik_mod.patching.coff import (  # noqa: E402
 
 
 _COMPILE_SH = _REPO_ROOT / "shims/toolchain/compile.sh"
-_SRC = _REPO_ROOT / "shims/src/_reloc_test.c"
+_SRC = _REPO_ROOT / "shims/fixtures/_reloc_test.c"
 
 
 def _compile_test_shim() -> Path:

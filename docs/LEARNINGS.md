@@ -1,0 +1,455 @@
+# Learnings — Azurik reverse engineering knowledge base
+
+Running accumulation of non-obvious findings from reverse-engineering
+Azurik.  Check here before diving into a Ghidra session — the answer
+may already be written down.
+
+Organisation: one section per system.  Each finding cites the
+Ghidra function it came from so you can re-verify.
+
+---
+
+## Player movement
+
+### The shared `3.0` run-multiplier (VA 0x001A25BC) is read from 45 sites
+
+The `.rdata` float at VA `0x001A25BC` holds the value `3.0`.  It's
+the FMUL factor the running-flag branch of `FUN_00084940` uses to
+boost the player's magnitude.  **But**: the same constant is read
+from 44 other sites across the XBE (audio mixing, collision, AI,
+unrelated physics) — touching the shared constant would affect
+every reader.
+
+✅ **Learning**: when patching a constant you think is player-
+specific, always grep for every xref.  If the constant is shared,
+use the C1-style redirect (rewrite the instruction at the call site
+to reference a freshly-injected per-game constant) instead of
+mutating the shared value.
+
+Reference: `azurik_mod/patches/player_physics.py::apply_player_speed`.
+
+### `CritterData.walkSpeed` and `runSpeed` are dead data
+
+The `critters_critter_data` keyed-table has `walkSpeed` and
+`runSpeed` columns.  Both **look** like they drive player movement,
+but `FUN_00049480` (which populates `CritterData` from config) never
+reads those columns — they're not in the column-name table at all.
+The runtime `base_speed` the movement code reads from
+`CritterData[+0x40]` is defaulted to `1.0` at init time and never
+changed by config.
+
+✅ **Learning**: in keyed-table-backed config, a column existing
+in the `.xbr` isn't enough — verify the populating function actually
+references it via `FUN_000D1420("<key>")`.  Dead columns are common.
+
+Reference: decomp of `FUN_00049480` around the `piVar9[0xE]` /
+`piVar9[0x10]` writes (they come from animation-speed keys, not
+walk/run speed).
+
+### FUN_00085F50 is the walking state; FUN_00088490 / FUN_00087F80 are climbing
+
+Four functions call into `FUN_00085F50` — the velocity-from-magnitude
+computation.  Two are quickly identifiable by their embedded sound-
+path strings:
+
+| Function       | Identifying strings                          | Purpose          |
+|----------------|----------------------------------------------|------------------|
+| FUN_00085F50   | `fx/sound/player/walkl`, `fx/sound/player/walkr` | Walking / running |
+| FUN_00087F80   | `fx/sound/player/climb[u/d/l/r]`             | Climbing         |
+| FUN_00088490   | `PTR_s_m_grab_001a9c60`                       | Grabbing ledges  |
+| FUN_0008CCC0   | State-machine dispatch (calls via case 0 / 6) | Per-frame switcher |
+
+✅ **Learning**: embedded sound-path or animation-ref strings are
+the fastest way to label a movement-state function.
+
+---
+
+## Boot state machine
+
+### Boot state is `DAT_001BF61C`, stepped by `FUN_0005F620`
+
+The game has an 8-state boot state machine:
+
+| State | Name                      | Meaning                              |
+|-------|---------------------------|--------------------------------------|
+| 0     | BOOT_STATE_INIT           | initial dispatch / resource loading  |
+| 1     | BOOT_STATE_PLAY_LOGO      | play AdreniumLogo.bik                |
+| 2     | BOOT_STATE_POLL_LOGO      | polling the logo movie               |
+| 3     | BOOT_STATE_PLAY_PROPHECY  | play prophecy.bik                    |
+| 4     | BOOT_STATE_POLL_PROPHECY  | polling prophecy                     |
+| 5     | BOOT_STATE_FADE_IN        | post-movie transition                |
+| 6     | BOOT_STATE_MENU_ENTER     | enter the main menu                  |
+| 7     | BOOT_STATE_MENU           | main menu active                     |
+| 8     | BOOT_STATE_LOAD_SAVE      | save-selection / load flow           |
+| 9     | BOOT_STATE_INGAME         | in-game: engine update loop runs here |
+
+`FUN_0005F620` is the state-dispatch function.  Writing directly to
+`DAT_001BF61C` from a shim lets you skip forward (e.g. straight to
+`BOOT_STATE_MENU`); backward jumps work but may produce visible
+glitches.
+
+### `play_movie_fn` returns `AL` to signal "enter poll state"
+
+`FUN_00018980` (`play_movie_fn`) is the movie starter.  Its `AL`
+return value tells the boot state machine what to do next:
+
+- `AL == 1`: movie loaded, state machine advances to POLL_* to
+  drive `poll_movie` per frame.
+- `AL == 0`: movie didn't start, state machine skips ahead.
+
+The `qol_skip_logo` shim exploits this: it returns `AL == 0` from
+a naked `XOR AL, AL; RET 8` so the game believes the logo loaded
+AND ended, skipping straight to the next state.
+
+✅ **Learning**: before replacing any state-machine function, map
+out its **return-value contract** — in this game, the boot state
+machine is driven entirely by `AL` returns, and getting one wrong
+produces a black screen with no error.
+
+Reference: `azurik_mod/patches/qol_skip_logo/shim.c` — the five-line fix that replaced
+the original 10-NOP byte patch.
+
+---
+
+## Simulation tick rate
+
+### The 1/30 s constant is `0x3D088889` in .rdata
+
+The per-tick delta is 1/30 second, stored as IEEE 754 float
+`0x3D088889` in `.rdata`.  Multiple sites read it; the FPS-unlock
+patch does NOT change this constant — it changes the CAP on how
+many simulation steps run per render frame.
+
+### FPS unlock operates at VA 0x059AFD + 0x059B37
+
+Two sites control the sim-per-frame cap:
+- `0x059AFD`: `CMP ESI, 0x2` → `CMP ESI, 0x4` (cap 2 → 4 steps)
+- `0x059B37`: `PUSH 0x2` → `PUSH 0x4` (catch-up delta)
+
+Setting the cap to 2 caused BSODs on death transitions (D3D push
+buffer corruption).  Cap 4 is known-stable.  Don't go higher
+without xemu testing — larger caps can produce similar corruption
+on transition-heavy frames.
+
+Reference: `azurik_mod/patches/fps_unlock.py`.
+
+---
+
+## Gravity
+
+### The master gravity constant is a single `.rdata` float at VA 0x001980A8
+
+Gravity value is `9.8` as a 32-bit float at VA `0x001980A8`.  Used
+by `FUN_00085700` as `velocity.z -= gravity * dt`.
+
+Unlike the run-multiplier, **this constant has only one effective
+reader for player physics**, so mutating it in place (via
+`ParametricPatch`) is safe.  Side effects on non-player falling
+entities are acceptable — the user sees gravity apply uniformly.
+
+Reference: `azurik_mod/patches/player_physics.py::GRAVITY_PATCH`.
+
+---
+
+## Config / keyed tables
+
+### `config.xbr` uses a custom keyed-table format
+
+Each named table has:
+1. A column-name row (string tokens).
+2. Rows of data, each cell typed by the column name's `.n` / `.s` /
+   `.f` / `.b` suffix.
+
+Lookup at runtime is via `FUN_000D1420("<key>")` for rows and
+`FUN_000D1520("<key>")` for cells.  Both are `__thiscall` with the
+table pointer in ECX — clang supports them with
+`__attribute__((thiscall))`, but the ergonomics are tricky because
+the first arg is register-passed.
+
+Currently deferred: exposing these as vanilla functions.  The
+`azurik_mod/config/keyed_tables.py` reader can be used offline
+instead.
+
+### Not every `.xbr` cell is referenced
+
+See "`CritterData.walkSpeed` and `runSpeed` are dead data" above.
+More broadly: `.xbr` tables often have historical columns from
+editor workflows that the shipped engine ignores.  ALWAYS trace the
+populating function before trusting a column.
+
+---
+
+## Kernel imports
+
+### 151 kernel functions imported; thunk table at VA 0x0018F3A0
+
+The XBE's kernel thunk table starts at virtual address `0x0018F3A0`
+(after XOR-decrypting the image-header field at file offset `0x158`
+with the retail key `0x5B6D40B6`).  151 four-byte slots, null-
+terminated at `0x0018F5FC`.  Each slot's high bit is set, low 16
+bits give the xboxkrnl export ordinal.
+
+### No trailing slack — extending the table is hard
+
+The byte at `0x0018F600` (immediately after the null terminator) is
+the start of the library-version table (`b1 ae cc 3b` = a
+timestamp).  Can't append new thunks without moving or overwriting
+that data.
+
+Workaround for new kernel calls (when we need one Azurik doesn't
+import): find a vanilla Azurik wrapper and expose it via
+`vanilla_symbols.py`.
+
+Reference: `azurik_mod/patching/kernel_imports.py`.
+
+### Each import is called via `FF 15 <thunk_va>` (6-byte indirect)
+
+The game's own kernel calls use `FF 15 <thunk_va>` — a 6-byte
+indirect jump through the thunk slot.  Our D1 path reproduces this
+exactly: we generate the same 6-byte stub in the shim landing
+region and resolve the shim's `CALL _Foo@N` REL32 to the stub.
+
+### Data exports exist alongside functions
+
+Some kernel "imports" aren't functions at all — they're data:
+
+- `ExEventObjectType`, `ExMutantObjectType`, `ExSemaphoreObjectType`,
+  `ExTimerObjectType`, `PsThreadObjectType`: `POBJECT_TYPE` pointers
+  used by `ObReferenceObjectByHandle` type checks.
+- `XboxHardwareInfo`: DWORD with hardware revision flags.
+- `XboxHDKey`, `XboxSignatureKey`: 16-byte keys.
+- `KeTickCount`, `KeTimeIncrement`: DWORDs readable directly.
+- `LaunchDataPage`: pointer to a page preserved across title launches.
+
+Shims that use them must read via `&Name`, not `Name(...)`.
+
+---
+
+## XBE structure
+
+### Azurik has 23 sections; `.text` is the only executable R-X one
+
+From `parse_xbe_sections`:
+```
+headers  .text  BINK  BINK32  BINK32A  BINK16  BINK4444  BINK5551
+BINK16MX  BINK16X2  BINK16M  BINK32MX  BINK32X2  BINK32M
+D3D  DSOUND  XGRPH  D3DX  XPP  .rdata  .data  BINKDATA  DOLBY
+$$XTIMAGE
+```
+
+`D3D`, `DSOUND`, `XGRPH`, `D3DX`, `DOLBY` are RWX statically-linked
+library code.  `.text` is the game's own code.  `.rdata` holds
+read-only constants + the kernel thunk table.
+
+### `.text` has a 16-byte VA gap before BINK
+
+`.text` runs `0x11000..0x1001D0`; BINK starts at `0x1001E0`.  The
+16-byte gap is our "small shim" landing zone (used by `skip_logo`,
+the walk/run-speed injected floats, and kernel-import stubs).
+
+Larger shims trigger `append_xbe_section`, which adds a new
+executable `SHIMS` section at EOF and shifts the XBE's header-pool
+content forward by 56 bytes (the size of one section-header entry).
+
+### Header growth: section-header array is contiguous, pointers auto-fixup
+
+When `append_xbe_section` adds a section, it:
+1. Shifts all bytes from `end-of-section-header-array` to
+   `size_of_headers` forward by 56.
+2. Re-writes every pointer in the image header that now points into
+   shifted data (debug-pathname-addr, cert-addr, each section's
+   name_addr and head/tail refs).
+3. Writes the new section-header entry into the vacated 56 bytes.
+4. Updates `num_sections`, `size_of_headers`, `size_of_image`.
+
+Azurik's image has ~880 bytes between end-of-array and
+`size_of_headers`, so the 56-byte growth comfortably fits.  **If
+Azurik ever ships an XBE with tighter headers, this room calculation
+needs redoing.**
+
+Reference: `azurik_mod/patching/xbe.py::append_xbe_section`.
+
+---
+
+## COFF + layout
+
+### Auxiliary symbol records must stay in the symbol list
+
+PE-COFF's symbol table has aux records (size-of-function info, etc.)
+interleaved with primary symbols.  Relocation entries index into the
+RAW symbol stream, aux records included.
+
+✅ **Learning**: preserve aux records as placeholder `CoffSymbol`
+entries (with empty name) so the symbol-index arithmetic in
+relocation entries stays correct.  Eliding them breaks REL32
+resolution in non-obvious ways.
+
+### `extern_resolver` is the extension point
+
+`layout_coff` takes an optional `extern_resolver: Callable[[str],
+int | None]`.  The resolution order for undefined externals:
+
+1. `vanilla_symbols` dict (A3).
+2. `extern_resolver` callback (D1 + E).
+3. Raise `ValueError` with a helpful message.
+
+Returning `None` from the resolver means "not mine — keep asking".
+The `ShimLayoutSession.make_extern_resolver` closure implements the
+typical "shared libraries first, then kernel stubs" order.
+
+---
+
+## Tooling / ecosystem
+
+### The OpenXDK xboxkrnl.h is a readable source of truth
+
+`xbox-includes/include/xboxkrnl.h` is the OpenXDK-derived header
+with 304 kernel-function declarations.  131 of Azurik's 151
+imports have matching declarations there; the remaining 20 are
+data exports or fastcall exceptions hand-written in
+`scripts/gen_kernel_hdr.py`.
+
+When adding kernel imports via D1-extend, always cross-reference
+OpenXDK for the signature before inventing one.
+
+### Xemu is the reference emulator
+
+Test on xemu (`/Users/.../xemu-macos/`) — it's strict enough that
+shim bugs cause immediate crashes or black screens, which is great
+for testing.  Do NOT trust "it runs" in other emulators; some are
+lenient about stack imbalance (they paper over calling-convention
+bugs that xemu would catch).
+
+### There are THREE .command launchers / the GUI is the main frontend
+
+`Launch Azurik Mod Tools.command` (macOS/Linux) and the .bat file
+(Windows) are the user-facing entrypoints.  They drop into the
+Tkinter GUI (`gui/app.py`).  The GUI wraps the `azurik_mod` CLI.
+
+---
+
+## Historical bugs worth remembering
+
+### The `qol_skip_logo` black-screen hang
+
+Symptom: after applying the patch, game sits on a black screen
+forever.
+
+Root cause: The original byte-patch overwrote the whole `CALL
+play_movie_fn` instruction with NOPs.  `play_movie_fn` is
+`__stdcall` with 8 bytes of args — NOPping the CALL leaks 8 bytes
+of stack per call AND leaves `AL` undefined.  The boot state
+machine read garbage `AL`, interpreted it as "movie playing, stay
+in poll state", and never advanced.
+
+Fix: the C shim `XOR AL, AL; RET 8` preserves the stdcall ABI and
+returns `AL == 0` explicitly so the state machine advances.
+
+✅ **Learning**: never NOP a CALL to a stdcall function without
+also adding the matching `ADD ESP, N` cleanup and setting the
+expected return register.
+
+### The player-speed dead-data pivot (C1)
+
+Symptom: sliders had no effect on walk/run speed despite clear
+writes to `config.xbr`.
+
+Root cause: `critters_critter_data.walkSpeed` / `runSpeed` are dead
+columns.  The effective `base_speed` reader at VA `0x85F65` reads
+from a struct slot populated by a different code path.
+
+Fix: inject two per-game floats into the XBE and rewrite the FLD
+at `0x85F65` and the FMUL at `0x849E4` to reference those floats
+directly.  Requires dynamic whitelisting (`dynamic_whitelist_from_xbe`)
+because the injected-float VAs aren't known until apply time.
+
+✅ **Learning**: run the `player-speed 2.0× walk` test with xemu
+before declaring victory.  A config patch that writes the right
+bytes but changes nothing in gameplay will pass unit tests silently.
+
+### UnboundLocalError in `cmd_randomize_full`
+
+Symptom: `UnboundLocalError: local variable 'xbe_path' referenced
+before assignment` when only the player-physics pack was enabled.
+
+Root cause: `xbe_path` was defined inside `if needs_xbe:`, but the
+player-speed step (step 7b) referenced it unconditionally.  When
+ONLY player-speed was on, `needs_xbe` was False and the block was
+skipped.
+
+Fix: define `xbe_path` up front, fold player-speed into the main
+XBE block, and include the speed scales in the `needs_xbe`
+calculation.
+
+✅ **Learning**: when a variable is defined in a conditional block,
+audit EVERY later reference — especially in long pipelines where
+sections were refactored independently.
+
+---
+
+## VAs vs file offsets — the player-character trap
+
+Spotted during a post-reorganisation header audit:
+``AZURIK_PLAYER_CHAR_NAME_VA`` was set to ``0x001976C8`` and labelled
+as a VA in ``azurik.h``, but it's actually the **file offset** of
+the ``"garret4\0d:\\0"`` string in ``default.xbe``.  The real VA of
+that string is ``0x0019EA68`` (``.rdata``).
+
+The bug went undetected for two reasons:
+
+1. The runtime Python code (``_player_character.py``) indexes
+   ``xbe_data[PLAYER_CHAR_OFFSET:...]`` directly — it uses the value
+   as a file offset, which is what it actually is, so the patch
+   worked.
+2. No shim had yet tried to reference the constant through a DIR32
+   relocation — which would have resolved to the **wrong memory
+   address** at runtime and read garbage ``.rdata`` bytes.
+
+Fix (current): ``azurik.h`` now exposes both spellings —
+``AZURIK_PLAYER_CHAR_NAME_VA = 0x0019EA68`` (real VA for shim use)
+and ``AZURIK_PLAYER_CHAR_NAME_FILE_OFF = 0x001976C8`` (what the Python
+code expects).  Any shim that references this anchor via ``DIR32`` now
+gets the correct runtime address.
+
+General rule: anything named ``_VA`` should survive ``va_to_file(va)``
+without changing meaning.  If the raw value passes unchanged into
+``xbe_data[raw_value:]`` indexing, it's a file offset and should be
+named accordingly.
+
+## Historical: pre-reorganisation layout
+
+The repo was reorganized into folder-per-feature in an earlier
+refactor.  If you're reading a commit before that reorg, you'll
+see:
+
+| Old path                                      | New path                                                |
+|-----------------------------------------------|---------------------------------------------------------|
+| `azurik_mod/patches/fps_unlock.py`            | `azurik_mod/patches/fps_unlock/__init__.py`             |
+| `azurik_mod/patches/player_physics.py`        | `azurik_mod/patches/player_physics/__init__.py`         |
+| `azurik_mod/patches/qol.py` (4 packs)         | four folders: `qol_gem_popups/`, `qol_other_popups/`, `qol_pickup_anims/`, `qol_skip_logo/` |
+| `shims/src/skip_logo.c`                       | `azurik_mod/patches/qol_skip_logo/shim.c`               |
+| `shims/src/_*.c` (test fixtures)              | `shims/fixtures/_*.c`                                   |
+| Per-pack `AZURIK_SKIP_LOGO_LEGACY=1` env var  | Single `AZURIK_NO_SHIMS=1`                              |
+| Per-pack `apply_*_patch(xbe_data, ...)`       | Unified `apply_pack(pack, xbe_data, params)`            |
+
+Shim `.o` files are keyed on **pack name** now, not source stem,
+so `shims/build/qol_skip_logo.o` (not `skip_logo.o`).  Two features
+whose source files both happen to be called `shim.c` can't collide
+in the shared build cache.
+
+## What to add here next
+
+Things we haven't pinned down but should when a shim needs them:
+
+- [ ] **Camera projection + FOV**.  Likely a `.rdata` float similar
+      to gravity.  Quick win if found.
+- [ ] **Player jump impulse**.  Tracked as `C-jump` in SHIMS.md.
+- [ ] **Controller input struct**.  `DAT_0037BE98 + player_idx * 0x54`
+      is roughly where per-player input lives — sticks, buttons,
+      triggers — but field offsets need Ghidra work.
+- [ ] **Per-entity drop-table layout**.  `CritterData` has
+      drop1..drop5 / dropChance1..5 fields beyond offset `0xB8` that
+      haven't been exposed in `azurik.h` yet.
+- [ ] **Save-file format**.  Partially in `docs/SAVE_PARSER_PLAN.md`
+      — extend `scripts/extract_save.py` + `scripts/xbr_parser.py`
+      when someone wants persistent shim state.

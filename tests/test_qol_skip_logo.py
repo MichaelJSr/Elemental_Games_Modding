@@ -2,9 +2,10 @@
 
 Two paths are exercised:
 
-- The Phase 1 TrampolinePatch backed by ``shims/src/skip_logo.c``.
-- The legacy byte-level PatchSpec kept behind
-  ``AZURIK_SKIP_LOGO_LEGACY=1`` as an escape hatch.
+- The TrampolinePatch backed by
+  ``azurik_mod/patches/qol_skip_logo/shim.c``.
+- The legacy byte-level PatchSpec kept behind ``AZURIK_NO_SHIMS=1``
+  (or the older ``AZURIK_SKIP_LOGO_LEGACY=1``) as an escape hatch.
 
 Both paths share the same observable contract: the AdreniumLogo
 movie never plays, the boot state machine cleanly advances to its
@@ -91,9 +92,12 @@ class TrampolineDescriptor(unittest.TestCase):
         self.assertEqual(SKIP_LOGO_TRAMPOLINE.shim_symbol, "_c_skip_logo")
 
     def test_shim_object_path(self):
-        self.assertEqual(
-            SKIP_LOGO_TRAMPOLINE.shim_object,
-            Path("shims/build/skip_logo.o"))
+        # Post-reorganisation the .o is keyed on the pack name
+        # (``qol_skip_logo``), not the source stem (``shim``), so two
+        # features whose source both sit at ``<folder>/shim.c`` don't
+        # collide in the shared ``shims/build/`` cache.
+        expected = Path(_REPO_ROOT) / "shims/build/qol_skip_logo.o"
+        self.assertEqual(SKIP_LOGO_TRAMPOLINE.shim_object, expected)
 
 
 class LegacyPatchSpecPreserved(unittest.TestCase):
@@ -174,15 +178,17 @@ class TrampolineEndToEnd(unittest.TestCase):
     inspect the trampoline + shim bytes."""
 
     def setUp(self):
-        shim_object = Path(_REPO_ROOT) / SKIP_LOGO_TRAMPOLINE.shim_object
+        shim_object = Path(SKIP_LOGO_TRAMPOLINE.shim_object)
+        if not shim_object.is_absolute():
+            shim_object = Path(_REPO_ROOT) / shim_object
         if not shim_object.exists():
             compile_sh = Path(_REPO_ROOT) / "shims/toolchain/compile.sh"
-            src = Path(_REPO_ROOT) / "shims/src/skip_logo.c"
+            src = Path(_REPO_ROOT) / "azurik_mod/patches/qol_skip_logo/shim.c"
             if not compile_sh.exists() or not src.exists():
                 self.skipTest("shim sources / toolchain script missing")
             try:
                 subprocess.check_call(
-                    ["bash", str(compile_sh), str(src)],
+                    ["bash", str(compile_sh), str(src), str(shim_object)],
                     cwd=_REPO_ROOT)
             except (subprocess.CalledProcessError, FileNotFoundError) as exc:
                 self.skipTest(f"shim compile failed: {exc}")

@@ -58,7 +58,7 @@ from azurik_mod.patching import (
     apply_parametric_patch,
     va_to_file,
 )
-from azurik_mod.patching.registry import PatchPack, register_pack
+from azurik_mod.patching.registry import Feature, register_feature
 
 # ---------------------------------------------------------------------------
 # Phase 1 — gravity
@@ -332,12 +332,39 @@ apply function materialises their values into injected XBE bytes."""
 
 
 def _apply_defaults(xbe_data: bytearray) -> None:
-    """Default pack apply — noop at baseline.  The real work happens via
-    apply_player_physics(..., gravity=..., walk_scale=..., run_scale=...)
-    from the randomize-full / apply-physics pipelines."""
+    """Back-compat apply (no params).  The unified dispatcher uses
+    ``_custom_apply`` below; this wrapper stays for callers that still
+    invoke ``apply=FEATURE.apply`` with no parameters."""
 
 
-register_pack(PatchPack(
+def _custom_apply(
+    xbe_data: bytearray,
+    gravity: float | None = None,
+    walk_speed_scale: float | None = None,
+    run_speed_scale: float | None = None,
+    # Accept the old kwarg spellings too so the CLI doesn't have to
+    # rename them mid-migration.
+    walk_scale: float | None = None,
+    run_scale: float | None = None,
+    **_extra,
+) -> None:
+    """Unified-dispatcher hook — forwards slider kwargs to the full
+    ``apply_player_physics`` implementation.
+
+    ``params`` on the dispatcher side is ``{"gravity": ...,
+    "walk_speed_scale": ..., "run_speed_scale": ...}`` (matching the
+    ParametricPatch names).  We also accept the short aliases
+    (``walk_scale`` / ``run_scale``) used by older CLI code.
+    """
+    apply_player_physics(
+        xbe_data,
+        gravity=gravity,
+        walk_scale=walk_speed_scale if walk_speed_scale is not None else walk_scale,
+        run_scale=run_speed_scale if run_speed_scale is not None else run_scale,
+    )
+
+
+FEATURE = register_feature(Feature(
     name="player_physics",
     description=(
         "Scales world gravity and player walk / run speed.  "
@@ -350,6 +377,7 @@ register_pack(PatchPack(
     included_in_randomizer_qol=False,
     tags=("player", "physics"),
     dynamic_whitelist_from_xbe=_player_speed_dynamic_whitelist,
+    custom_apply=_custom_apply,
 ))
 
 

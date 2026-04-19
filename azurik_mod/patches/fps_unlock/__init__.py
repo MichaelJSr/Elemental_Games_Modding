@@ -13,7 +13,7 @@ Do not fork the byte literals elsewhere; import `FPS_PATCH_SITES` instead.
 from __future__ import annotations
 
 from azurik_mod.patching import PatchSpec, apply_patch_spec
-from azurik_mod.patching.registry import PatchPack, register_pack
+from azurik_mod.patching.registry import Feature, register_feature
 
 # ---------------------------------------------------------------------------
 # 60 FPS unlock — three independent caps must be lifted:
@@ -498,7 +498,7 @@ def apply_fps_patches(xbe_data: bytearray) -> None:
 # ---------------------------------------------------------------------------
 # Register with the central patch-pack registry
 # ---------------------------------------------------------------------------
-register_pack(PatchPack(
+FEATURE = register_feature(Feature(
     name="fps_unlock",
     description="Runs the game at 60 FPS instead of 30 (experimental).",
     sites=FPS_PATCH_SITES,

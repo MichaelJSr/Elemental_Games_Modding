@@ -1,11 +1,13 @@
 """Patch engine: site descriptors + apply/verify + XBE offset map."""
 
+from azurik_mod.patching.feature import ShimSource
 from azurik_mod.patching.spec import (
     ParametricPatch,
     PatchSpec,
     TrampolinePatch,
 )
 from azurik_mod.patching.apply import (
+    apply_pack,
     apply_parametric_patch,
     apply_patch_spec,
     apply_trampoline_patch,
@@ -28,9 +30,11 @@ from azurik_mod.patching.xbe import (
 __all__ = [
     "ParametricPatch",
     "PatchSpec",
+    "ShimSource",
     "TrampolinePatch",
     "XBE_SECTIONS",
     "append_xbe_section",
+    "apply_pack",
     "apply_parametric_patch",
     "apply_patch_spec",
     "apply_trampoline_patch",

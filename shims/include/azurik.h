@@ -7,6 +7,16 @@
  * machine code but keep the source readable and catch struct drift
  * at compile time instead of runtime.
  *
+ * Companion headers a shim typically also includes:
+ *
+ *   - ``azurik_vanilla.h`` — extern declarations for vanilla Azurik
+ *     functions (play_movie_fn, poll_movie, ...).  Picked up by the
+ *     layout pipeline's A3 vanilla-symbol registry.
+ *   - ``azurik_kernel.h`` — extern declarations for xboxkrnl imports
+ *     the game already references (DbgPrint, KeQueryPerformance-
+ *     Counter, ...).  Shimmed via D1's thunk-table stubs; you do
+ *     NOT modify the XBE import table yourself.
+ *
  * Documentation conventions:
  *
  * - Every named field carries its byte offset and the Ghidra
@@ -307,10 +317,43 @@ typedef enum BootState {
  * constant below would affect every other reader. */
 #define AZURIK_SHARED_RUN_MULT_VA    0x001A25BCu
 
-/* Player character name — 12-byte ASCII buffer in .rdata.  The
+/* Player character name — 12-byte ASCII buffer in .rdata at VA
+ * 0x0019EA68 (vanilla bytes: ``"garret4\0d:\\\0"``).  The
  * player_character patch overwrites this to swap models (experimental,
- * animations may not match the target skeleton). */
-#define AZURIK_PLAYER_CHAR_NAME_VA   0x001976C8u
+ * animations may not match the target skeleton).
+ *
+ * NB: the pre-reorganisation code used the FILE OFFSET (0x001976C8)
+ * as if it were a VA.  It happened to work only because the runtime
+ * Python code indexes ``xbe_data[offset:]`` directly, not via
+ * ``va_to_file``.  The name below is the real VA — shims that
+ * access the string via ``DIR32`` relocation must use THIS value.
+ * The file offset lives in ``_player_character.py`` as
+ * ``PLAYER_CHAR_OFFSET = 0x001976C8``.
+ */
+#define AZURIK_PLAYER_CHAR_NAME_VA         0x0019EA68u
+#define AZURIK_PLAYER_CHAR_NAME_FILE_OFF   0x001976C8u  /* for Python/byte-indexed callers */
+
+
+/* ==========================================================================
+ * Time / frame pacing
+ * ========================================================================== */
+
+/* Nominal simulation step in seconds — 1/30 = 0.03333... as a 32-bit
+ * float, stored as the IEEE 754 bit pattern 0x3D088889.  The engine
+ * runs its tick function with this delta regardless of render FPS;
+ * the FPS-unlock patch changes the CAP on consecutive steps per
+ * frame (at VA 0x059AFD / 0x059B37), not this constant.  Shims that
+ * want to scale per-frame effects — velocity integrators, timers —
+ * should multiply by this, never hardcode 1/30. */
+#define AZURIK_SIM_DT_SECONDS_BITS   0x3D088889u
+#define AZURIK_SIM_DT_SECONDS_F32    (1.0f / 30.0f)
+
+/* Kernel tick counter — xboxkrnl exports ``KeTickCount`` via the
+ * thunk table (ordinal 156).  Shim code that wants a monotonic
+ * "ticks since boot" value should ``#include "azurik_kernel.h"``
+ * and call ``KeTickCount()``; the D1 layout pass inserts the
+ * ``JMP [thunk_va]`` stub automatically, so hardcoding the thunk
+ * VA here would be brittle (it moves between builds). */
 
 
 /* ==========================================================================

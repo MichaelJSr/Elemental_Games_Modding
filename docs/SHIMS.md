@@ -1,4 +1,18 @@
-# C-shim modding platform — Phase 1
+# C-shim modding platform
+
+> **First time in this repo?**  Read
+> [`ONBOARDING.md`](./ONBOARDING.md) — zero to a landed feature,
+> two worked examples, a diagram of how the pieces fit.
+>
+> **Authoring a shim?**  Skip to
+> [`SHIM_AUTHORING.md`](./SHIM_AUTHORING.md) — it's the end-to-end
+> guide.  This file covers the platform's design and history.
+>
+> **AI agent picking up a task?**  Start with
+> [`AGENT_GUIDE.md`](./AGENT_GUIDE.md).
+>
+> **Looking for reverse-engineering findings?**  See
+> [`LEARNINGS.md`](./LEARNINGS.md).
 
 Most Azurik patches today are byte-level: we pin an address, declare
 the original opcodes, and hand-assemble a replacement.  That's fine
@@ -22,8 +36,10 @@ Shims are compiled by [`shims/toolchain/compile.sh`](../shims/toolchain/compile.
 using Apple clang (or any clang that accepts ``-target i386-pc-win32``):
 
 ```bash
-bash shims/toolchain/compile.sh shims/src/skip_logo.c
-# → shims/build/skip_logo.o  (Intel 80386 COFF object, .text-only)
+bash shims/toolchain/compile.sh \
+  azurik_mod/patches/qol_skip_logo/shim.c \
+  shims/build/qol_skip_logo.o
+# → Intel 80386 COFF object, .text-only
 ```
 
 No linker, no CRT, no libc.  The compile flags are tight on purpose —
@@ -44,8 +60,10 @@ Target: arm64-apple-darwin25.4.0 (host)  →  i386-pc-win32 (output)
    bash shims/toolchain/new_shim.sh my_feature
    ```
 
-   This produces a pre-filled `shims/src/my_feature.c` with the
-   correct `__stdcall` annotation, the standard includes
+   This produces a pre-filled feature folder at
+   `azurik_mod/patches/my_feature/` containing `__init__.py` + a
+   starter `shim.c` with the correct `__stdcall` annotation and
+   the standard includes
    (`azurik.h` + `azurik_vanilla.h`), and a TODO comment pointing
    at the function body.  Edit that body with your actual logic.
    The scaffold rejects names that aren't valid lowercase C
@@ -144,7 +162,7 @@ Idempotence: if the pipeline sees an already-installed trampoline at
 the site (same opcode shape, trailing NOPs) it leaves everything
 alone instead of stacking a second trampoline.
 
-## Capabilities (Phase 2 A1+A2+A3)
+## Capabilities (Phase 2 A1+A2+A3+D1+E)
 
 - **Unbounded shim size.**  Shims that outgrow the 16-byte `.text`
   VA gap automatically spill into a freshly-appended executable
@@ -171,6 +189,24 @@ alone instead of stacking a second trampoline.
   directly at the vanilla VA.  No runtime thunks needed; the
   pipeline is just a name → VA lookup plus the existing relocation
   math.
+- **Kernel imports (D1).**  Shims can call any of the 151 xboxkrnl
+  functions Azurik already imports (`DbgPrint`,
+  `KeQueryPerformanceCounter`, `NtReadFile`, ...).  The shim layout
+  session parses the XBE's kernel thunk table, generates a 6-byte
+  `FF 25 <thunk_va>` stub for each referenced import, and resolves
+  the shim's `call _Foo@N` REL32 to the stub's VA.  Stubs are
+  cached by mangled name so multiple shims referencing the same
+  kernel function share one stub.  Declarations live in
+  [`shims/include/azurik_kernel.h`](../shims/include/azurik_kernel.h);
+  the full ordinal → name table is in
+  [`azurik_mod/patching/xboxkrnl_ordinals.py`](../azurik_mod/patching/xboxkrnl_ordinals.py).
+- **Shared-library shim layout (E).**  Helper functions that
+  multiple trampolines need can live in a standalone `.o` file
+  and be placed once per session via
+  `ShimLayoutSession.apply_shared_library(path)`.  Subsequent
+  `apply_trampoline_patch` calls resolve those symbols against the
+  single placement — no private copies, no duplicate code.  See
+  [Authoring shared libraries](#authoring-shared-libraries) below.
 
 ### Calling a vanilla function from a shim
 
@@ -213,17 +249,91 @@ alone instead of stacking a second trampoline.
    drift guard that refuses to merge if the Python registry and the
    C header disagree.
 
+### Calling a kernel function from a shim
+
+Declarations for xboxkrnl imports live in
+[`shims/include/azurik_kernel.h`](../shims/include/azurik_kernel.h);
+the full ordinal → name table (every function Azurik's vanilla XBE
+imports) is in
+[`azurik_mod/patching/xboxkrnl_ordinals.py`](../azurik_mod/patching/xboxkrnl_ordinals.py).
+
+```c
+#include "azurik_kernel.h"
+
+void c_my_shim(void) {
+    DbgPrint("frame tick from shim");
+    XBOX_LARGE_INTEGER now;
+    KeQueryPerformanceCounter(&now);
+    /* ... use now.LowPart / now.HighPart ... */
+}
+```
+
+No extra registration is required — the layout session parses the
+XBE's kernel thunk table at apply time, allocates one
+`JMP [thunk_slot]` stub per referenced function, and resolves the
+shim's REL32 relocations to those stubs.  The stub cache is
+session-wide, so multiple shims calling the same kernel function
+share a single stub.
+
+If the extern you want isn't catalogued in `xboxkrnl_ordinals.py`,
+Azurik's vanilla XBE doesn't import it and you have two options:
+
+- Call a vanilla Azurik function that wraps the kernel API (A3
+  route — add the wrapper to `vanilla_symbols.py` and
+  `azurik_vanilla.h`).
+- File a Phase 2 D1-extend task: extending the XBE kernel thunk
+  table to carry new ordinals requires moving the table plus
+  re-linking every existing `CALL [thunk_va]` site in the game,
+  which is substantial XBE surgery.  Not yet supported.
+
+### Authoring shared libraries
+
+If several trampolines share helper code — common math, a lookup
+table, a cheat system's toggle state — factor it into a standalone
+shim `.o` and have the pack's `apply` function place it once:
+
+```python
+# In the pack's apply function
+from azurik_mod.patching.shim_session import get_or_create_session
+
+def apply_my_pack(xbe_data: bytearray) -> None:
+    sess = get_or_create_session(xbe_data)
+
+    # Place the shared library first; it exposes _shared_helper@4.
+    sess.apply_shared_library(
+        Path("shims/build/my_shared_lib.o"),
+        allocate=lambda name, ph: _carve_shim_landing(xbe_data, ph),
+    )
+
+    # Now both trampolines can resolve `_shared_helper@4` via the
+    # session's extern resolver — which layout_coff picks up
+    # automatically through apply_trampoline_patch.
+    apply_trampoline_patch(xbe_data, TRAMPOLINE_A, repo_root=_REPO_ROOT)
+    apply_trampoline_patch(xbe_data, TRAMPOLINE_B, repo_root=_REPO_ROOT)
+```
+
+Both trampolines' COFF externs (`_shared_helper@4` each) resolve to
+the SAME VA — `tests/test_shared_library.py` asserts this directly.
+No private copies; no duplicated machine code.
+
+Shared libraries can themselves call vanilla Azurik functions
+(the A3 registry) and kernel imports (D1 stubs), but **chained
+shared-library → shared-library calls are not yet supported** —
+place all shared libraries before the first consumer shim and keep
+them non-recursive.
+
 ## Limitations (still)
 
-- **No cross-shim calls between different `TrampolinePatch` sites**.
-  Each `apply_trampoline_patch` invocation gets its own placement
-  pass; two sites that want to share a helper function would each
-  install a private copy.  A shared-library layout pass is Phase 3.
-- **No kernel / D3D imports**.  Shims can't call `XKernel*` or
-  `D3D*` routines — the XBE import-table rewrite is Phase 2 D work.
-  Vanilla Azurik functions that wrap those APIs ARE callable via
-  the A3 vanilla-symbol registry (the shim calls Azurik, Azurik
-  calls the kernel).
+- **No kernel imports beyond the existing 151**.  Calling an
+  xboxkrnl function Azurik doesn't already import requires
+  extending the XBE kernel thunk table (D1-extend) — see "Calling
+  a kernel function" above for the workaround.
+- **No D3D / DSOUND imports**.  Xbox XBEs statically link D3D8 and
+  DSound into the game's `.text` (you can see `D3D`, `DSOUND`,
+  `XGRPH` as named sections in the XBE).  Those functions are
+  vanilla-Azurik code from the shim platform's perspective — expose
+  specific ones via `vanilla_symbols.py` + `azurik_vanilla.h` as
+  demand arises.
 - **Escape hatch preserved**.  The legacy byte-patch form of every
   migrated pack stays behind an env var (`AZURIK_SKIP_LOGO_LEGACY=1`
   etc.) so users on a host without the i386 clang toolchain can
@@ -232,7 +342,8 @@ alone instead of stacking a second trampoline.
 ## Troubleshooting
 
 - **`shim object not found`** — run
-  `bash shims/toolchain/compile.sh shims/src/<name>.c` to build the
+  `bash shims/toolchain/compile.sh azurik_mod/patches/<name>/shim.c
+  shims/build/<name>.o` to build the
   `.o`, or set `AZURIK_SKIP_LOGO_LEGACY=1` to fall back to the old
   byte patch for the one shim Phase 1 migrated.
 - **`shim is X B but only 16 B of .text landing space is available`**
@@ -248,44 +359,70 @@ alone instead of stacking a second trampoline.
 ## Directory map
 
 ```
-shims/
-  README.md                     authoring notes (also summarized here)
+azurik_mod/patches/<feature>/       <-- one folder per feature (NEW)
+  __init__.py                       Feature(...) declaration + apply logic
+  shim.c                            (optional) C source for the trampoline
+  README.md                         (optional) per-feature notes
+
+azurik_mod/patches/                 umbrella package — importing it runs
+                                    every feature folder's side-effect
+                                    registration
+  _qol_shared.py                    shared helpers (resource-key nulling)
+  _player_character.py              player-char model-name swap helper
+  qol.py                            back-compat re-exports
+
+shims/                              shared library (NOT feature code)
+  README.md                         what this folder is / isn't
   toolchain/
-    compile.sh                  clang wrapper (i386 PE-COFF cross-compile)
-    new_shim.sh                 scaffold a new shim from the template  (B3)
+    compile.sh                      clang wrapper (i386 PE-COFF)
+    new_shim.sh                     scaffold a new feature folder      (B3)
   include/
-    azurik.h                    named structs (CritterData, PlayerInputState,
-                                flag constants, opaque handles)           (B1)
-    azurik_vanilla.h            extern prototypes for vanilla Azurik fns  (A3)
-  src/
-    skip_logo.c                 Phase 1 proof-of-concept shim
-    _reloc_test.c               fixture — exercises A2 relocation path
-    _vanilla_call_test.c        fixture — exercises A3 vanilla-call path
-  build/                        compiled .o outputs (gitignored)
+    azurik.h                        named structs + VA anchors         (B1)
+    azurik_vanilla.h                vanilla-function externs           (A3)
+    azurik_kernel.h                 xboxkrnl import externs (all 151)  (D1)
+  fixtures/                         test-only shim sources
+    _reloc_test.c                   A2 relocation exercise
+    _vanilla_call_test.c            A3 vanilla-call exercise
+    _shared_lib_test.c              E shared-library exercise
+    _shared_consumer_{a,b}.c        E consumers
+    _kernel_call_test.c             D1 kernel-call exercise
+  build/                            compiled .o cache (gitignored)
 
 azurik_mod/patching/
-  coff.py                       minimal PE-COFF reader + layout_coff
-  spec.py                       Site descriptors (PatchSpec, ParametricPatch,
-                                TrampolinePatch)
-  xbe.py                        XBE section surgery (find_text_padding,
-                                grow_text_section, append_xbe_section)
-  apply.py                      apply_trampoline_patch + verify_* + carve
-  registry.py                   pack enumeration (trampoline- and
-                                dynamic-whitelist-aware)
-  vanilla_symbols.py            registry of exposed vanilla functions   (A3)
+  feature.py                        ShimSource helper                (NEW)
+  registry.py                       Feature / PatchPack, register_feature,
+                                    apply_pack-aware metadata fields
+  apply.py                          primitives + apply_pack dispatcher
+                                    + auto-compile hook
+  coff.py                           minimal PE-COFF reader + layout_coff
+  spec.py                           site descriptors (PatchSpec,
+                                    ParametricPatch, TrampolinePatch)
+  xbe.py                            XBE section surgery
+  vanilla_symbols.py                A3 registry of vanilla functions
+  kernel_imports.py                 D1 runtime thunk-table parser
+  xboxkrnl_ordinals.py              D1 static ordinal table
+  shim_session.py                   D1 + E shim-layout session
 
 tests/
-  test_trampoline_patch.py      low-level COFF + xbe + apply + verify
-  test_append_xbe_section.py    Phase 2 A1 header-shift round-trip + carve
-  test_coff_relocations.py      Phase 2 A2 relocation-aware loader
-  test_vanilla_thunks.py        Phase 2 A3 vanilla-symbol resolution
-  test_shim_authoring.py        Tier B — header offsets + scaffold script
-  test_qol_skip_logo.py         end-to-end through the migrated pack
-  test_player_speed.py          player_physics C1 slider end-to-end
+  test_apply_pack.py                unified dispatcher invariants  (NEW)
+  test_trampoline_patch.py          low-level COFF + xbe + apply + verify
+  test_append_xbe_section.py        A1 header-shift round-trip + carve
+  test_coff_relocations.py          A2 relocation-aware loader
+  test_vanilla_thunks.py            A3 vanilla-symbol resolution
+  test_kernel_imports.py            D1 kernel-import end-to-end
+  test_shared_library.py            E shared-library layout end-to-end
+  test_autocompile.py               on-demand compile heuristic
+  test_shim_authoring.py            Tier B — header offsets + scaffold
+  test_qol_skip_logo.py             end-to-end through the migrated pack
+  test_player_speed.py              player_physics C1 slider end-to-end
 
 docs/
-  SHIMS.md                      this file
-  PATCHES.md                    catalog with shim-backed entries called out
+  SHIMS.md                          this file (architecture)
+  SHIM_AUTHORING.md                 end-to-end authoring walkthrough
+  AGENT_GUIDE.md                    AI-agent-specific workflows
+  LEARNINGS.md                      accumulated RE findings
+  ONBOARDING.md                     zero-to-landed-feature for newcomers
+  PATCHES.md                        per-feature catalog
 ```
 
 
@@ -299,14 +436,19 @@ table whenever a tier lands or a new candidate becomes concrete.
 | A1  | `append_xbe_section` (unbounded shim size)             | **done**          |
 | A2  | Relocation-aware COFF loader                           | **done**          |
 | A3  | Vanilla-function calls (registry + layout resolution)  | **done**          |
-| B1  | `azurik.h` populated with named structs + drift asserts| **done** (this pass re-verified every offset against Ghidra) |
+| B1  | `azurik.h` populated with named structs + drift asserts| **done**          |
 | B3  | `new_shim.sh` scaffolding                              | **done**          |
 | C1  | Player-speed shim (motivating deliverable)             | **done**          |
+| D1  | XKernel imports via thunk-table stubs (`azurik_kernel.h`) | **done** — all 151 ordinals declared |
+| E   | Shared-library shim layout (`ShimLayoutSession`)       | **done**          |
+| Docs | `SHIM_AUTHORING.md`, `AGENT_GUIDE.md`, `LEARNINGS.md` | **done**          |
+| Tool | Auto-compile missing `.o` from `.c` on apply           | **done**          |
+| Tool | `scripts/gen_kernel_hdr.py` regenerator                | **done**          |
+| Layout | Folder-per-feature reorganisation + `apply_pack` dispatcher | **done**     |
 | B2  | Unicorn-backed runtime test harness for shims          | **deferred**      |
 | C-jump | Player jump-velocity patch (requested separately)   | **not started**   |
-| D1  | XKernel / D3D import-table rewriting                   | **not started**   |
+| D1-extend | Adding new kernel imports beyond the 151          | **not started**   |
 | D2  | NXDK integration (real Xbox SDK headers)               | **not started**   |
-| E   | Shared-library shim layout across multiple sites       | **not started**   |
 
 ### Near-term candidates
 

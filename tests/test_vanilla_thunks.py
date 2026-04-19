@@ -8,7 +8,7 @@ Covers:
 - :func:`azurik_mod.patching.coff.layout_coff` — undefined externals
   resolve through ``vanilla_symbols`` to the declared VA; truly
   unresolved symbols still raise.
-- **Real shim compile** — :file:`shims/src/_vanilla_call_test.c` calls
+- **Real shim compile** — :file:`shims/fixtures/_vanilla_call_test.c` calls
   ``play_movie_fn`` via the :file:`shims/include/azurik_vanilla.h`
   declaration.  After :func:`layout_coff`, the REL32 at the CALL site
   must resolve to exactly ``0x00018980``, the vanilla VA.
@@ -51,7 +51,7 @@ from azurik_mod.patching.vanilla_symbols import (  # noqa: E402
 
 
 _COMPILE_SH = _REPO_ROOT / "shims/toolchain/compile.sh"
-_SRC = _REPO_ROOT / "shims/src/_vanilla_call_test.c"
+_SRC = _REPO_ROOT / "shims/fixtures/_vanilla_call_test.c"
 _HEADER = _REPO_ROOT / "shims/include/azurik_vanilla.h"
 
 

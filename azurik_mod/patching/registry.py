@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Union
 
+from azurik_mod.patching.feature import ShimSource
 from azurik_mod.patching.spec import (
     ParametricPatch,
     PatchSpec,
@@ -91,6 +92,35 @@ class PatchPack:
     fails, return an empty list.
     """
 
+    # --- Folder-per-feature authoring surface ---------------------------
+
+    shim: ShimSource | None = None
+    """Optional ``ShimSource`` pointing at this feature's C source and
+    compiled object.  Set when the feature uses a trampoline; the
+    :func:`apply_pack` dispatcher uses it to auto-compile the ``.o``
+    on demand and to fill in any ``TrampolinePatch`` sites whose
+    ``shim_object`` wasn't explicitly set.
+
+    None for byte-only / parametric-only features."""
+
+    legacy_sites: tuple[PatchSpec, ...] = field(default_factory=tuple)
+    """Byte-patch fallbacks used when ``AZURIK_NO_SHIMS=1`` is set in
+    the environment.  The dispatcher substitutes these in place of
+    every :class:`TrampolinePatch` site, so hosts without a working
+    i386 clang toolchain can still ship a patched XBE.
+
+    Empty tuple for packs that have no shim to fall back from."""
+
+    custom_apply: Callable[..., None] | None = None
+    """Escape hatch for packs whose apply logic isn't expressible as
+    "iterate sites, apply each".  When set, :func:`apply_pack`
+    delegates the whole pack to this callable instead of running the
+    generic dispatcher.
+
+    Signature: ``custom_apply(xbe_data: bytearray, **params) -> None``.
+    Use sparingly — every custom_apply is a special case that
+    downstream tooling has to understand separately."""
+
     def patch_specs(self) -> list[PatchSpec]:
         """Return only the PatchSpec entries in this pack."""
         return [s for s in self.sites if isinstance(s, PatchSpec)]
@@ -109,6 +139,13 @@ class PatchPack:
         return tuple(p.name for p in self.parametric_sites())
 
 
+#: Primary feature-authoring type — identical to :class:`PatchPack`.
+#: New feature modules should use this name.  The old ``PatchPack``
+#: spelling stays supported so existing code keeps working during the
+#: folder-per-feature migration.
+Feature = PatchPack
+
+
 _REGISTRY: dict[str, PatchPack] = {}
 
 
@@ -118,6 +155,11 @@ def register_pack(pack: PatchPack) -> PatchPack:
         raise ValueError(f"Duplicate patch pack name: {pack.name!r}")
     _REGISTRY[pack.name] = pack
     return pack
+
+
+def register_feature(feature: Feature) -> Feature:
+    """Alias for :func:`register_pack` used by feature modules."""
+    return register_pack(feature)
 
 
 def get_pack(name: str) -> PatchPack:

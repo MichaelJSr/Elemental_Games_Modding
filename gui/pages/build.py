@@ -126,6 +126,9 @@ class BuildPage(Page):
 
         packs, pack_params = self._merge_packs()
 
+        # Pass the full enabled-packs dict through so the backend
+        # doesn't need per-pack kwargs.  The unified apply_pack
+        # dispatcher handles the actual site-by-site work.
         self._thread, self._msg_queue = backend.run_randomizer(
             iso_path=iso_path,
             output_path=output_path,
@@ -135,17 +138,12 @@ class BuildPage(Page):
             do_gems=config.do_gems,
             do_barriers=config.do_barriers,
             do_connections=config.do_connections,
-            # Each QoL sub-patch is now its own independently-toggleable pack.
-            gem_popups=packs.get("qol_gem_popups", False),
-            other_popups=packs.get("qol_other_popups", False),
-            pickup_anims=packs.get("qol_pickup_anims", False),
-            skip_logo=packs.get("qol_skip_logo", False),
-            fps_unlock=packs.get("fps_unlock", False),
+            packs=packs,
+            pack_params=pack_params,
             item_pool=config.item_pool,
             obsidian_cost=config.obsidian_cost,
             config_edits=config.config_edits,
             force_unsolvable=force or config.force_unsolvable,
-            pack_params=pack_params,
         )
         self._poll_queue()
 

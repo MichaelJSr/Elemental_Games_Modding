@@ -50,24 +50,31 @@ from azurik_mod.patching.apply import (  # noqa: E402
 
 
 _VANILLA_XBE = _REPO_ROOT.parent / "Azurik - Rise of Perathia (USA).xiso/default.xbe"
-_SHIM_SRC = _REPO_ROOT / "shims/src/skip_logo.c"
-_SHIM_OBJ = _REPO_ROOT / "shims/build/skip_logo.o"
+_SHIM_SRC = _REPO_ROOT / "azurik_mod/patches/qol_skip_logo/shim.c"
+_SHIM_OBJ = _REPO_ROOT / "shims/build/qol_skip_logo.o"
 _COMPILE_SH = _REPO_ROOT / "shims/toolchain/compile.sh"
 
 
 def _ensure_skip_logo_shim() -> bool:
-    """Make sure ``shims/build/skip_logo.o`` exists (compile if we can).
+    """Make sure ``shims/build/qol_skip_logo.o`` exists (compile if we
+    can).  Returns True if the shim is available after this call,
+    False if the host environment can't produce one.  Tests that need
+    the shim skip on False.
 
-    Returns True if the shim is available after this call, False if
-    the host environment can't produce one.  Tests that need the shim
-    skip on False."""
+    Post-reorganisation the source lives inside the feature folder
+    at ``azurik_mod/patches/qol_skip_logo/shim.c``; the compiled .o
+    is keyed on the pack name (``qol_skip_logo.o``) so two features
+    whose source files both happen to be called ``shim.c`` can't
+    collide in the shared build cache.
+    """
     if _SHIM_OBJ.exists():
         return True
     if not _SHIM_SRC.exists() or not _COMPILE_SH.exists():
         return False
     try:
+        _SHIM_OBJ.parent.mkdir(parents=True, exist_ok=True)
         subprocess.check_call(
-            ["bash", str(_COMPILE_SH), str(_SHIM_SRC)],
+            ["bash", str(_COMPILE_SH), str(_SHIM_SRC), str(_SHIM_OBJ)],
             cwd=_REPO_ROOT)
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
@@ -212,7 +219,7 @@ class ApplyAndVerify(unittest.TestCase):
             label="Skip AdreniumLogo (C shim)",
             va=0x05F6E5,
             replaced_bytes=bytes([0xE8, 0x96, 0x92, 0xFB, 0xFF]),
-            shim_object=Path("shims/build/skip_logo.o"),
+            shim_object=Path("shims/build/qol_skip_logo.o"),
             shim_symbol="_c_skip_logo",
             mode="call",
         )

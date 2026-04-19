@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Callable, Optional
 
 # --- COFF machine types ---------------------------------------------------
 IMAGE_FILE_MACHINE_I386 = 0x014C
@@ -366,11 +366,21 @@ def _is_landable(section: CoffSection) -> bool:
     return True
 
 
+ExternResolver = Callable[[str], Optional[int]]
+"""Callable that maps a mangled COFF external name to a final VA, or
+returns ``None`` to defer to the next resolver in the chain.  Used by
+:func:`layout_coff` so callers can plug in custom resolution — kernel
+imports (``D1``), shared-library exports (``E``), or test-only fakes
+— without the central resolution logic having to know about every
+upstream registry."""
+
+
 def _resolve_symbol_va(
     symbol: CoffSymbol,
     coff: CoffFile,
     section_vas: dict[str, int],
     vanilla_symbols: dict[str, int] | None = None,
+    extern_resolver: ExternResolver | None = None,
 ) -> int:
     """Compute the final XBE VA for a COFF symbol.
 
@@ -380,16 +390,15 @@ def _resolve_symbol_va(
        that was landed (``section_number`` > 0 and the owning section
        is in ``section_vas``), the VA is the section's final VA plus
        the symbol's intra-section value.
-    2. **Vanilla externals.**  If the symbol is undefined
-       (``section_number <= 0``) and ``vanilla_symbols`` is provided,
-       look up the mangled COFF name in it — returning the mapped VA
-       when found.  This is the Phase-2 A3 path: it lets shims call
-       into any vanilla Azurik function whose address is registered
-       in :mod:`azurik_mod.patching.vanilla_symbols`.
-    3. **Unresolved.**  Raise :class:`ValueError` with an actionable
-       message pointing the shim author at the next step (add a
-       vanilla-symbols entry, or make the reference resolvable in
-       the shim itself).
+    2. **Vanilla externals** (``vanilla_symbols``).  Direct dict
+       lookup on the mangled COFF name.  This is the Phase-2 A3 path.
+    3. **Extern resolver callback** (``extern_resolver``).  Called
+       with the mangled name when the dict lookup misses — this is
+       where Phase 2 D1 (kernel imports) + E (shared-library exports)
+       plug in.  Returning ``None`` means "I don't know this symbol",
+       and we fall through to the unresolved-error path.
+    4. **Unresolved.**  Raise :class:`ValueError` with an actionable
+       message pointing the shim author at the next step.
     """
     if symbol.section_number > 0:
         owning = coff.sections[symbol.section_number - 1]
@@ -406,14 +415,21 @@ def _resolve_symbol_va(
     if vanilla_symbols is not None and symbol.name in vanilla_symbols:
         return vanilla_symbols[symbol.name]
 
+    # Fall through to the caller-supplied resolver (kernel imports,
+    # shared libraries, anything else a session-aware caller wires in).
+    if extern_resolver is not None:
+        resolved = extern_resolver(symbol.name)
+        if resolved is not None:
+            return resolved
+
     raise ValueError(
         f"symbol {symbol.name!r} is undefined (section_number="
         f"{symbol.section_number}) and not registered as a vanilla "
-        f"Azurik function.  To resolve: add a matching "
-        f"VanillaSymbol entry in "
-        f"`azurik_mod/patching/vanilla_symbols.py` and declare the "
-        f"C prototype in `shims/include/azurik_vanilla.h`, then "
-        f"rebuild the shim.")
+        f"Azurik function, kernel import, or shared-library export.  "
+        f"To resolve: add a matching VanillaSymbol entry in "
+        f"`azurik_mod/patching/vanilla_symbols.py`, wire a kernel "
+        f"stub via the shim layout session (for xboxkrnl imports), "
+        f"or declare the symbol in a shared-library shim.")
 
 
 def _apply_relocation(
@@ -466,9 +482,11 @@ def _apply_relocation(
 
 def layout_coff(
     coff: CoffFile,
-    entry_symbol: str,
+    entry_symbol: str | None,
     allocate: Callable[[str, bytes], tuple[int, int]],
     vanilla_symbols: dict[str, int] | None = None,
+    *,
+    extern_resolver: ExternResolver | None = None,
 ) -> LandedShim:
     """Place every landable section via ``allocate``, apply relocations,
     and return the final byte blobs + entry-point VA.
@@ -483,10 +501,22 @@ def layout_coff(
     the relocated final bytes are written over them in a second pass.
 
     ``vanilla_symbols`` is an optional ``{mangled_name -> VA}`` map
-    used to resolve undefined-external COFF symbols.  It's how shim
-    authors call into vanilla Azurik functions — registered VAs take
-    the place of the usual "defined symbol section + value" math
-    (see Phase 2 A3 in :mod:`azurik_mod.patching.vanilla_symbols`).
+    used as the first-class resolver for undefined-external COFF
+    symbols.  Phase 2 A3 (vanilla Azurik calls) plugs in here.
+
+    ``extern_resolver`` is an optional callback — called when a name
+    isn't in ``vanilla_symbols`` — that drives Phase 2 D1 (kernel
+    import stubs) + E (shared-library exports).  See
+    :data:`ExternResolver` for the signature.  Returning ``None`` from
+    the callback means "not mine"; layout then raises the standard
+    unresolved-extern error.
+
+    ``entry_symbol`` names the symbol whose resolved VA goes into the
+    returned :class:`LandedShim.entry_va`.  Passing ``None`` produces
+    a :class:`LandedShim` with ``entry_va == 0`` — used for shared-
+    library placements where the caller doesn't care about a single
+    entry point (they'll query individual exports from the returned
+    placements map instead).
 
     Order of operations:
 
@@ -496,7 +526,7 @@ def layout_coff(
     3. Build the symbol VA map from the section VAs.
     4. For each section, copy its raw bytes into a mutable buffer and
        apply every relocation using the resolved target VAs (defined
-       symbol or vanilla extern).
+       symbol, vanilla extern, kernel stub, or shared-library export).
     5. Write the finalised buffer over the placeholder bytes.
 
     Returns a :class:`LandedShim` populated with the placed sections
@@ -504,7 +534,8 @@ def layout_coff(
     resolved VA of ``entry_symbol``.
 
     Raises ``ValueError`` for unsupported relocation types, missing
-    symbols, or undefined externals that aren't in ``vanilla_symbols``.
+    symbols, or undefined externals that no resolver in the chain
+    accepted.
     """
     placements: dict[str, tuple[int, int, bytearray]] = {}
 
@@ -535,7 +566,8 @@ def layout_coff(
         for reloc in section.relocations:
             symbol = coff.symbols[reloc.symbol_index]
             target_va = _resolve_symbol_va(
-                symbol, coff, section_vas, vanilla_symbols)
+                symbol, coff, section_vas, vanilla_symbols,
+                extern_resolver)
             _apply_relocation(buf, vaddr, reloc, target_va)
         landed.append(LandedSection(
             name=section.name,
@@ -545,7 +577,11 @@ def layout_coff(
         ))
 
     # --- 5. Resolve entry-point VA ---------------------------------------
-    entry = coff.symbol(entry_symbol)
-    entry_va = _resolve_symbol_va(entry, coff, section_vas, vanilla_symbols)
+    if entry_symbol is None:
+        entry_va = 0
+    else:
+        entry = coff.symbol(entry_symbol)
+        entry_va = _resolve_symbol_va(
+            entry, coff, section_vas, vanilla_symbols, extern_resolver)
 
     return LandedShim(sections=landed, entry_va=entry_va)

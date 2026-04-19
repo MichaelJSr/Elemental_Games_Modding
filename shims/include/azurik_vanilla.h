@@ -6,6 +6,11 @@
  * apply time, rewriting REL32 / DIR32 relocation fields so the
  * shim's calls land inside vanilla Azurik code.
  *
+ * For xboxkrnl (kernel) imports — DbgPrint, KeQueryPerformance-
+ * Counter, etc. — see ``azurik_kernel.h`` instead.  Those are
+ * resolved via D1's thunk-table-stub path, not the vanilla-symbol
+ * registry; do NOT add kernel externs to this file.
+ *
  * ABI rules the shim author MUST follow when consuming these:
  *
  *   - Match the calling convention exactly (`__attribute__((stdcall))`

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import struct
+import subprocess
 from pathlib import Path
 
 from azurik_mod.patching.coff import (
@@ -337,6 +339,85 @@ def _extend_appended_section(
     return raw_end, shim_vaddr
 
 
+def _guess_shim_source(
+    shim_object: Path,
+    repo_root: Path | None,
+) -> Path | None:
+    """Infer the C source file for a compiled shim object.
+
+    Lookup order (first hit wins):
+
+    1. **Feature-folder convention** (primary):
+       ``<repo>/shims/build/<name>.o`` → ``<repo>/azurik_mod/patches/<name>/shim.c``.
+       Each feature's Python declaration and its shim C live in the
+       same folder; the .o's stem is the pack's name.
+
+    2. **Test-fixtures layout**:
+       ``<repo>/shims/build/<name>.o`` → ``<repo>/shims/fixtures/<name>.c``.
+       Used by the test-only shim sources (``_reloc_test.c``,
+       ``_vanilla_call_test.c``, ``_shared_lib_test.c``, …) that
+       exercise the layout pipeline without shipping as features.
+
+    3. **Sibling-directory fallback**: ``<dir>/<stem>.o`` →
+       ``<dir>/<stem>.c``.  Handy for ad-hoc setups / one-off tests.
+
+    Returns the first candidate that exists on disk, or — if none do —
+    falls back to the feature-folder guess so the caller's auto-compile
+    error message mentions the canonical path.
+    """
+    stem = shim_object.stem
+    if not stem:
+        return None
+
+    candidates: list[Path] = []
+    if shim_object.parent.name == "build" and repo_root is not None:
+        candidates.append(
+            repo_root / "azurik_mod" / "patches" / stem / "shim.c")
+        candidates.append(
+            repo_root / "shims" / "fixtures" / f"{stem}.c")
+    candidates.append(shim_object.with_suffix(".c"))
+
+    for c in candidates:
+        if c.exists():
+            return c
+    # Nothing exists — return the new-layout guess so the error
+    # message points at where the source SHOULD live.
+    return candidates[0]
+
+
+def _auto_compile(
+    src: Path,
+    expected_out: Path,
+    repo_root: Path | None,
+    label: str,
+) -> bool:
+    """Run ``shims/toolchain/compile.sh`` to produce ``expected_out``.
+
+    Returns True on success, False otherwise — callers fall through
+    to the usual "missing .o" error message if compilation fails so
+    the shim author sees both the toolchain output and a pointer to
+    the manual invocation.
+    """
+    if repo_root is None:
+        return False
+    script = repo_root / "shims/toolchain/compile.sh"
+    if not script.exists():
+        return False
+    expected_out.parent.mkdir(parents=True, exist_ok=True)
+    print(f"  {label} — auto-compiling {src.name} "
+          f"(AZURIK_SHIM_NO_AUTOCOMPILE=1 to disable)")
+    try:
+        subprocess.check_call(
+            ["bash", str(script), str(src), str(expected_out)],
+            cwd=repo_root,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        print(f"  {label} — auto-compile failed ({exc}); falling "
+              f"back to manual-build hint")
+        return False
+    return True
+
+
 def apply_trampoline_patch(
     xbe_data: bytearray,
     patch: TrampolinePatch,
@@ -395,9 +476,27 @@ def apply_trampoline_patch(
     shim_path = patch.shim_object
     if not shim_path.is_absolute() and repo_root is not None:
         shim_path = repo_root / shim_path
+
+    # Auto-compile on demand.  If the .o doesn't exist but its .c
+    # sibling does, invoke compile.sh to build it.  Matches the
+    # conventional feature-folder layout: `shims/build/<name>.o` <->
+    # `azurik_mod/patches/<name>/shim.c` (or, for test fixtures,
+    # `shims/fixtures/<name>.c`).  Opt out with
+    # AZURIK_SHIM_NO_AUTOCOMPILE=1.
+    if not shim_path.exists() and not os.environ.get(
+            "AZURIK_SHIM_NO_AUTOCOMPILE"):
+        src = _guess_shim_source(shim_path, repo_root)
+        if src is not None and src.exists():
+            if _auto_compile(src, shim_path, repo_root, patch.label):
+                pass  # fall through to the existence check below
     if not shim_path.exists():
+        c_hint = _guess_shim_source(shim_path, repo_root)
+        hint = (f" (matching source at {c_hint})"
+                if c_hint and c_hint.exists() else "")
         print(f"  ERROR: {patch.label} — shim object not found at "
-              f"{shim_path}.  Run shims/toolchain/compile.sh first.")
+              f"{shim_path}{hint}.  Run "
+              f"shims/toolchain/compile.sh first, or unset "
+              f"AZURIK_SHIM_NO_AUTOCOMPILE.")
         return False
 
     coff = parse_coff(shim_path.read_bytes())
@@ -454,10 +553,18 @@ def apply_trampoline_patch(
         # so the main `apply` module stays importable in environments
         # that haven't loaded the vanilla-symbol registry yet.
         from azurik_mod.patching.vanilla_symbols import all_symbols
+        # Session-wide resolver handles kernel imports (D1) + shared
+        # library exports (E).  Sessions are attached to the bytearray
+        # so pack apply functions can pre-place shared libraries and
+        # see them here without an explicit session argument.
+        from azurik_mod.patching.shim_session import get_or_create_session
+        session = get_or_create_session(xbe_data)
+        extern_resolver = session.make_extern_resolver(_allocate)
         try:
             landed = layout_coff(
                 coff, patch.shim_symbol, _allocate,
-                vanilla_symbols=all_symbols())
+                vanilla_symbols=all_symbols(),
+                extern_resolver=extern_resolver)
         except (KeyError, ValueError, RuntimeError) as exc:
             print(f"  ERROR: {patch.label} — {exc}")
             return False
@@ -509,6 +616,130 @@ def apply_trampoline_patch(
         shim_text_len = len(text_bytes)
     print(f"  {patch.label} (shim @ 0x{shim_entry_va:X}, +{shim_text_len} B)")
     return True
+
+
+# ---------------------------------------------------------------------------
+# Unified pack dispatcher
+# ---------------------------------------------------------------------------
+#
+# ``apply_pack(pack, xbe_data, params)`` lets callers run any feature
+# without knowing which primitive it uses underneath.  Walks each site in
+# declaration order, dispatches by type, respects the ``AZURIK_NO_SHIMS``
+# legacy-fallback env var, and hands off to ``custom_apply`` when the pack
+# needs multi-step logic that can't be expressed as independent sites.
+
+_NO_SHIMS_ENV = "AZURIK_NO_SHIMS"
+
+
+def _no_shims_requested() -> bool:
+    """Return True when the user asked for the legacy byte-patch form.
+
+    Any truthy spelling (``1`` / ``true`` / ``yes``, case-insensitive)
+    of ``AZURIK_NO_SHIMS`` flips the dispatcher into fallback mode.
+    """
+    return os.environ.get(_NO_SHIMS_ENV, "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def apply_pack(
+    pack,  # registry.PatchPack — imported lazily to avoid circular imports
+    xbe_data: bytearray,
+    params: dict[str, float] | None = None,
+    *,
+    repo_root: Path | None = None,
+) -> None:
+    """Apply every site in ``pack`` to ``xbe_data``.
+
+    Dispatch rules, in order:
+
+    1. If ``pack.custom_apply`` is set, delegate the whole pack to it.
+       ``params`` is forwarded as keyword arguments — slider names
+       become kwargs.  Use this for packs (like ``player_physics``)
+       whose apply logic crosses multiple sites.
+    2. If ``AZURIK_NO_SHIMS`` is truthy AND the pack has
+       ``legacy_sites``, every :class:`TrampolinePatch` in the pack
+       is replaced by the legacy-site list.  Byte-only packs are
+       unaffected.
+    3. Walk the (possibly-substituted) site list in declaration order.
+       Per type:
+         - :class:`PatchSpec` → :func:`apply_patch_spec`
+         - :class:`ParametricPatch` (non-virtual) →
+           :func:`apply_parametric_patch` with the value from
+           ``params[site.name]`` (or ``site.default`` if absent).
+           Virtual parametric sites (``va == 0``) are silently
+           skipped — the pack's ``custom_apply`` owns them.
+         - :class:`TrampolinePatch` → :func:`apply_trampoline_patch`
+           with ``repo_root`` (defaults to the pack's shim folder's
+           repo root when the pack has a ``ShimSource``).
+
+    Returns ``None``.  Individual site failures print warnings via
+    the underlying primitives but don't raise — keeps batch apply
+    going when one site's vanilla bytes have drifted.
+
+    ``params`` is a dict of ``{parameter_name: float_value}`` where
+    keys are the ``name`` fields of the pack's parametric sites.
+    Missing keys fall back to the site's ``default``.
+    """
+    # Lazy import — avoids the registry <-> apply circular dependency.
+    from azurik_mod.patching.registry import PatchPack
+
+    if not isinstance(pack, PatchPack):
+        raise TypeError(
+            f"apply_pack expected a PatchPack, got {type(pack).__name__}")
+
+    params = params or {}
+
+    # 1. Custom apply wins outright.  Pack authors who need multi-step
+    #    logic (e.g. the player-physics gravity + injected-floats combo)
+    #    opt in via the `custom_apply` field.
+    if pack.custom_apply is not None:
+        pack.custom_apply(xbe_data, **params)
+        return
+
+    # 2. Derive the effective site list.  AZURIK_NO_SHIMS swaps every
+    #    TrampolinePatch for the pack's declared legacy fallbacks.
+    sites = list(pack.sites)
+    if _no_shims_requested() and pack.legacy_sites:
+        sites = [s for s in sites if not isinstance(s, TrampolinePatch)]
+        sites.extend(pack.legacy_sites)
+
+    # 3. Resolve repo_root.  If the caller didn't supply one but the
+    #    pack ships a shim, take it from the shim folder (folder is
+    #    `<repo>/azurik_mod/patches/<name>/`).
+    effective_repo_root = repo_root
+    if effective_repo_root is None and pack.shim is not None:
+        # shim.folder sits at <repo>/azurik_mod/patches/<name>/.
+        effective_repo_root = pack.shim.folder.parent.parent.parent
+
+    # 4. Walk sites in declaration order.
+    for site in sites:
+        if isinstance(site, PatchSpec):
+            apply_patch_spec(xbe_data, site)
+        elif isinstance(site, ParametricPatch):
+            if site.is_virtual:
+                continue  # owned by custom_apply if the pack has one
+            value = params.get(site.name, site.default)
+            apply_parametric_patch(xbe_data, site, float(value))
+        elif isinstance(site, TrampolinePatch):
+            # If the pack declared a ShimSource and the site's
+            # shim_object is a stub, substitute the ShimSource-derived
+            # path so feature modules don't have to hardcode a build path.
+            effective_site = site
+            if (pack.shim is not None and effective_repo_root is not None):
+                derived = pack.shim.object_path(pack.name, effective_repo_root)
+                if (site.shim_object.name == f"{pack.name}.o"
+                        or site.shim_object == derived):
+                    # Already canonical — leave alone.
+                    pass
+                else:
+                    effective_site = site._replace(shim_object=derived)
+            apply_trampoline_patch(
+                xbe_data, effective_site,
+                repo_root=effective_repo_root)
+        else:
+            raise TypeError(
+                f"pack {pack.name!r} has site of unsupported type "
+                f"{type(site).__name__}")
 
 
 def verify_trampoline_patch(xbe_data: bytes, patch: TrampolinePatch) -> str:

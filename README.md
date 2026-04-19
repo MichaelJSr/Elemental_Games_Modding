@@ -4,6 +4,10 @@ A reverse engineering and modding toolkit for **Azurik: Rise of Perathia** (clas
 
 No original game assets or proprietary binaries are included.  You must own a legitimate copy of the game and supply your own ISO.
 
+> **New here?**  Read [`docs/ONBOARDING.md`](docs/ONBOARDING.md) —
+> zero to a landed feature in two worked examples, plus a map of
+> where to look when something breaks.
+
 ---
 
 ## Quick start
@@ -37,38 +41,48 @@ Elemental_Games_Modding/
   Launch Azurik Mod Tools.command    macOS / Linux launcher
   Launch Azurik Mod Tools.bat        Windows launcher
   docs/                              Research notes and per-subsystem docs
-    MODDING_GUIDE.md
-    PATCHES.md                       catalog of every patch pack
-    DECOMP.md                        pointer to the Ghidra project + function index
-    PR_BRANCHES.md
-    SAVE_PARSER_PLAN.md
+    ONBOARDING.md                    zero-to-landed-feature walkthrough (start here)
+    SHIMS.md                         C-shim platform architecture
+    SHIM_AUTHORING.md                end-to-end authoring guide
+    AGENT_GUIDE.md                   AI-agent-specific playbook
+    LEARNINGS.md                     accumulated RE findings
+    PATCHES.md                       catalog of every feature pack
+    MODDING_GUIDE.md                 legacy modding notes
+    DECOMP.md                        pointer to the Ghidra project
   azurik_mod/                        Library (pip-installable)
     cli.py                           argparse dispatcher ("azurik-mod")
-    patching/                        PatchSpec engine (apply / verify / XBE map)
-    patches/                         per-feature patch packs (fps_unlock, qol, player_physics)
+    patching/                        patch engine (apply_pack, COFF, XBE map)
+    patches/                         ONE FOLDER PER FEATURE
+      fps_unlock/                      50-site PatchSpec pack
+      player_physics/                  gravity + walk + run sliders
+      qol_gem_popups/                  hide 5 first-pickup popups
+      qol_other_popups/                hide 9 tutorial / powerup popups
+      qol_pickup_anims/                skip pickup celebration
+      qol_skip_logo/                   C-shim feature (includes shim.c)
     iso/                             xdvdfs locator / downloader / pack
     randomizer/                      solver + level editor + logic db
     config/                          config.xbr registry + schema + keyed tables
+  shims/                             Shared shim library (NOT feature code)
+    include/                           azurik.h, azurik_vanilla.h, azurik_kernel.h
+    toolchain/                         compile.sh + new_shim.sh (scaffold)
+    fixtures/                          test-only shim sources (_*.c)
+    build/                             compiled .o cache (gitignored)
   gui/                               Tkinter GUI ("azurik-gui")
     app.py
     backend.py                       in-process calls into azurik_mod
     pages/                           one module per screen
   scripts/                           Stand-alone utilities
-    xbr_parser.py
-    extract_save.py
-    analysis/                        XBE analysis scanners (fps-constant, int30, frame-counter, ghidra hexdump)
   examples/                          Ready-to-use mod JSONs
   iso/                               Drop your base ISO here (auto-detected by the GUI)
-  tests/                             pytest-based unit tests (patch-loader, FPS safety, physics)
+  tests/                             pytest-based unit tests (190+)
 ```
 
 ### Key sub-packages
 
-- `azurik_mod.patching` — `PatchSpec`, `ParametricPatch`, apply/verify helpers, the XBE section map, and a central pack registry that everything else iterates.
-- `azurik_mod.patches.fps_unlock` — 50 PatchSpec sites implementing the 60 FPS unlock.  Comes with a safety-critical guard that pins the simulation step cap at 4 so the game stays at real-time speed down to 15 FPS rendered (see `tests/test_fps_safety.py`).
-- `azurik_mod.patches.qol` — gem popup suppression + unified pickup-celebration animation skip + player-character swap.
-- `azurik_mod.patches.player_physics` — slider-driven gravity + player walk / run speed (uses `ParametricPatch` so GUI and CLI share the same declarations).
+- `azurik_mod.patching` — `Feature` / `PatchPack` descriptor, apply/verify primitives, the unified `apply_pack(pack, xbe, params)` dispatcher, the XBE section map, and the central pack registry.
+- `azurik_mod.patches.<feature>/` — one folder per feature, containing the `Feature(...)` declaration and (if shim-backed) its C source.  Importing the package runs every feature's `register_feature(...)` side effect automatically.
 - `azurik_mod.randomizer` — forward-fill logic solver, shuffle pools, level editor helpers, and the logic DB.
+- `shims/` — shared headers, clang toolchain wrapper, and test fixtures used by every shim-backed feature.  Feature-specific C code lives inside the feature folder, not here.
 - `azurik_mod.iso.xdvdfs` — auto-downloader with `$AZURIK_XDVDFS`, PATH, and user-cache resolution.
 
 ### Library entry points

@@ -1,28 +1,84 @@
-# Azurik C-shim Library
+# Azurik C-shim library
 
-This folder holds C sources for **shim functions** that get compiled and
-injected into Azurik's XBE via the `TrampolinePatch` mechanism in
-[`azurik_mod.patching`](../azurik_mod/patching/).  Each shim is a small
-C function; at apply time, the patcher:
+This folder is the **shared library** for Azurik's C-shim modding
+platform.  It holds the headers, toolchain, and compiled build cache
+used by every shim-backed feature in the repo — but it does NOT hold
+individual feature code anymore.
 
-1. Compiles the shim into an i386 PE-COFF `.o` (via
-   [`toolchain/compile.sh`](toolchain/compile.sh)).
-2. Extracts the shim's `.text` bytes and copies them into unused
-   padding at the end of the XBE's `.text` section (or appends a new
-   XBE section if padding is insufficient).
-3. Writes a 5-byte `CALL rel32` / `JMP rel32` trampoline at the
-   target VA to divert control flow into the shim.
+**Feature shims live next to their Python declaration** under
+[`azurik_mod/patches/<name>/`](../azurik_mod/patches/).  For example,
+the `qol_skip_logo` feature is a self-contained folder:
 
-This replaces the byte-level patch style (writing raw machine-code
-bytes directly via `PatchSpec`) for features that are easier to
-express in C than in hand-assembled opcodes.
+```
+azurik_mod/patches/qol_skip_logo/
+  __init__.py   # Feature(...) declaration + Python apply logic
+  shim.c        # C source that implements the trampoline body
+```
+
+The feature-folder layout means deleting a feature = removing one
+folder, and every moving part for a given mod is visible in one
+`ls` command.
+
+## What lives here
+
+```
+shims/
+  README.md              # this file
+  include/               # shared C headers every shim pulls in
+    azurik.h             #   - runtime struct layouts (CritterData, ...)
+    azurik_vanilla.h     #   - externs for vanilla Azurik functions
+    azurik_kernel.h      #   - externs for xboxkrnl imports (151 of them)
+  toolchain/
+    compile.sh           # clang wrapper: i386 PE-COFF + freestanding
+    new_shim.sh          # scaffold a new feature folder with shim.c
+  fixtures/              # test-only shim sources — NOT shipped features
+    _reloc_test.c        #   A2 relocation exercise
+    _vanilla_call_test.c #   A3 vanilla-function-call exercise
+    _shared_lib_test.c   #   E shared-library layout exercise
+    _shared_consumer_a.c #   E consumer #1
+    _shared_consumer_b.c #   E consumer #2
+    _kernel_call_test.c  #   D1 kernel-import exercise
+  build/                 # compiled .o cache (gitignored)
+```
+
+Every `.o` file in `build/` is keyed on its **pack name** (not the
+source stem) so two features whose sources both happen to be called
+`shim.c` can't collide.  The auto-compile hook in `apply_trampoline_patch`
+maps `shims/build/<pack>.o` back to `azurik_mod/patches/<pack>/shim.c`.
+
+## Adding a new shim-backed feature
+
+Use the scaffold:
+
+```bash
+bash shims/toolchain/new_shim.sh my_feature
+# creates azurik_mod/patches/my_feature/__init__.py
+#         azurik_mod/patches/my_feature/shim.c
+```
+
+Then:
+
+1. Fill in the trampoline VA + `replaced_bytes` in `__init__.py`
+   (use Ghidra to confirm).
+2. Write your shim body in `shim.c`.
+3. Run the tests (`python -m pytest tests/ -q`).  Auto-compile
+   rebuilds `shims/build/my_feature.o` on demand.
+4. Boot the patched ISO in xemu to verify gameplay behaviour.
+
+Full walkthrough: [`docs/SHIM_AUTHORING.md`](../docs/SHIM_AUTHORING.md).
 
 ## Toolchain
 
-Apple clang (i386 cross-target) on macOS is enough for Phase 1 shims
-— no kernel imports, no D3D, just arithmetic / branching.  The exact
-invocation is pinned in [`toolchain/compile.sh`](toolchain/compile.sh)
-and was verified to produce a working PE-COFF output on:
+Apple clang (i386 cross-target) is enough — no NXDK, no linker, no
+CRT.  `compile.sh` pins the exact invocation:
+
+```
+clang -target i386-pc-win32 -ffreestanding -nostdlib -fno-pic \
+      -fno-stack-protector -fno-asynchronous-unwind-tables \
+      -I shims/include -Os -c -o <out>.o <src>.c
+```
+
+Verified on:
 
 ```
 Apple clang version 21.0.0 (clang-2100.0.123.102)
@@ -30,59 +86,39 @@ Target: arm64-apple-darwin25.4.0 (host) -> i386-pc-win32 (output)
 ```
 
 Other platforms (Linux, Windows) can swap in any clang that accepts
-`-target i386-pc-win32`; the PE-COFF output format is stable across
-clang versions.
+`-target i386-pc-win32`.
 
-## Directory layout
+## Relationship to the Python pipeline
 
-```
-shims/
-  README.md                     this file
-  toolchain/
-    compile.sh                  clang wrapper (i386 + PE-COFF + freestanding)
-  include/
-    azurik.h                    shared typedefs; grows as subsystems are shimmed
-  src/
-    skip_logo.c                 first shim: void c_skip_logo(void) {}
-  build/                        .o outputs (gitignored)
-```
+| Python              | C-side                                      |
+|---------------------|---------------------------------------------|
+| `Feature(...)` in   | `shim.c` in the same folder                 |
+| `azurik_mod/patches/<name>/__init__.py` |                         |
+| `TrampolinePatch`   | Emits a 5-byte `CALL rel32` into the shim   |
+| `apply_pack(...)`   | Invokes `compile.sh` → places `.text` →     |
+|                     | wires REL32 relocations via `layout_coff`   |
+| `ShimLayoutSession` | Dedupes kernel-import stubs / shared libs   |
 
-## Authoring a new shim
+Docs: [`docs/SHIMS.md`](../docs/SHIMS.md) (architecture) and
+[`docs/SHIM_AUTHORING.md`](../docs/SHIM_AUTHORING.md) (end-to-end
+walkthrough).
 
-1. Drop `src/<feature>.c` with your C function(s).  Export each with
-   a `c_` prefix by convention (e.g. `void c_my_feature(void)`).
-2. Run `toolchain/compile.sh src/<feature>.c` to produce
-   `build/<feature>.o`.
-3. Declare a `TrampolinePatch` in the relevant pack module (e.g.
-   [`azurik_mod/patches/qol.py`](../azurik_mod/patches/qol.py)) with:
-   ```python
-   MY_FEATURE_TRAMPOLINE = TrampolinePatch(
-       name="my_feature",
-       label="My feature",
-       va=0xDEADBEEF,              # site in vanilla XBE
-       replaced_bytes=bytes([...]),
-       shim_object=Path("shims/build/my_feature.o"),
-       shim_symbol="_c_my_feature", # note the leading underscore
-       mode="call",                 # or "jmp"
-   )
-   ```
-4. Add the trampoline to a `PatchPack`'s `sites=[...]` list.
-5. Write a pytest in `tests/test_*.py` that pins the VA + the expected
-   `CALL rel32` after apply.
-6. Run `azurik-mod verify-patches --xbe <patched>.xbe --original
-   <vanilla>.xbe --strict` to confirm the whitelist diff stays clean.
+## Phase status
 
-## Phase 1 scope
+All platform pieces are done and regression-tested:
 
-- Shims with no imports (no `XKernel*`, no `D3D*`, no game-function
-  calls).  Pure arithmetic / branching only.
-- `.text`-only `.o` files (no `.data`, no `.rdata`, no relocations).
-- One symbol per shim, explicitly named.
+| Tier  | Feature                                         | Status |
+|-------|-------------------------------------------------|--------|
+| A1    | `append_xbe_section` (unbounded shim size)      | done   |
+| A2    | Relocation-aware COFF loader                    | done   |
+| A3    | Vanilla-function calls via `vanilla_symbols`    | done   |
+| B1    | `azurik.h` populated with named structs         | done   |
+| B3    | `new_shim.sh` scaffold                          | done   |
+| C1    | Player-speed shim (motivating deliverable)      | done   |
+| D1    | xboxkrnl imports (all 151)                      | done   |
+| E     | Shared-library shim layout                      | done   |
+| Tool  | Auto-compile missing `.o` on apply              | done   |
+| Layout| Folder-per-feature reorganisation               | done   |
 
-Phase 2 (later) will add:
-- Kernel / D3D import table rewriting for shims that call into Xbox
-  system libraries.
-- Relocation handling for shims with `.rdata` or cross-section refs.
-- Shim-to-vanilla calls (trampoline back into original game functions
-  at known VAs).
-- NXDK integration for shims that need real Xbox SDK APIs.
+See [`docs/SHIMS.md`](../docs/SHIMS.md) for the full roadmap + what
+remains deferred (Unicorn-backed test harness, D1-extend, NXDK).

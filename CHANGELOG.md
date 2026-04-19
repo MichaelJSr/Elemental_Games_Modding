@@ -2,6 +2,181 @@
 
 ## Unreleased
 
+### Folder-per-feature reorganisation + unified `apply_pack` dispatcher
+
+- **Every feature is now one self-contained folder** under
+  `azurik_mod/patches/<name>/` — Python declaration in `__init__.py`,
+  optional shim C source alongside as `shim.c`, optional `README.md`
+  for per-feature notes.  Deleting a feature = removing one folder;
+  no orphaned references scattered across `shims/src/` and
+  `azurik_mod/patches/`.  The six pre-existing packs migrated:
+  `fps_unlock/`, `player_physics/`, `qol_gem_popups/`,
+  `qol_other_popups/`, `qol_pickup_anims/`, `qol_skip_logo/`.
+- **`shims/` is now a shared library, not a feature bucket.**
+  `shims/src/` → `shims/fixtures/` (only test-only shim sources
+  remain — `_reloc_test.c`, `_vanilla_call_test.c`, `_shared_lib_test.c`,
+  `_shared_consumer_{a,b}.c`, `_kernel_call_test.c`).  Feature shims
+  (currently `skip_logo.c`) moved into their feature folders.
+- **`Feature` descriptor + `ShimSource` helper** (new
+  `azurik_mod/patching/feature.py` + extended `registry.py`).  Three
+  new optional fields on `PatchPack` / `Feature`:
+  - `shim: ShimSource` — no hardcoded `Path("shims/build/...")`.
+  - `legacy_sites: tuple[PatchSpec, ...]` — byte-patch fallback.
+  - `custom_apply: Callable` — multi-step apply escape hatch.
+- **Unified `apply_pack(pack, xbe_data, params)` dispatcher**
+  (`azurik_mod/patching/apply.py`).  Dispatches by site type;
+  `params` values feed parametric sliders; `custom_apply` short-
+  circuits the generic loop; `AZURIK_NO_SHIMS=1` swaps every
+  `TrampolinePatch` for the pack's `legacy_sites`.  One env var now
+  replaces the per-pack sprawl (`AZURIK_SKIP_LOGO_LEGACY=1` still
+  works, kept as an alias).
+- **`cmd_randomize_full` walks the registry.**  Replaced the
+  handwritten `if want_gem_popups: apply_gem_popups_patch(...)` /
+  `if want_skip_logo: ...` / … pipeline with a single loop that
+  calls `apply_pack` on every enabled feature.  Pack-specific
+  apply-function names stay exported for backward compat; the
+  randomizer uses the dispatcher.
+- **GUI backend simplified.**  `gui/backend.run_randomizer` now
+  accepts unified `packs: dict[str, bool]` + `pack_params` dicts
+  instead of per-pack boolean kwargs.  Legacy kwargs still accepted
+  and folded into `packs` before dispatch.  `gui/pages/build.py`
+  passes the dicts directly.
+- **`shims/toolchain/new_shim.sh`** scaffolds a full feature folder
+  (`__init__.py` + `shim.c`) instead of just writing a C file.
+- **Auto-compile heuristic** updated for the new layout:
+  `shims/build/<name>.o` looks for the source at
+  `azurik_mod/patches/<name>/shim.c` first, then
+  `shims/fixtures/<name>.c` for test fixtures.  `.o` filenames are
+  now keyed on the pack name (not the source stem) so two features
+  whose source both happens to be called `shim.c` can't collide in
+  the shared build cache.
+- **Tests (+9)** — `tests/test_apply_pack.py` pins every dispatch
+  route: pure `PatchSpec`, parametric (including default fallback
+  and virtual-site skip), `TrampolinePatch`, `custom_apply`,
+  `AZURIK_NO_SHIMS=1` fallback, type validation.  Existing tests
+  updated to the new paths; full suite at 191 passing.
+- **Docs refreshed** — `SHIMS.md` directory map,
+  `SHIM_AUTHORING.md` scaffold step + authoring flow,
+  `AGENT_GUIDE.md` repo-shape + "folder-per-feature invariant"
+  landmine, `PATCHES.md` pack catalog table, `LEARNINGS.md`
+  "Historical: pre-reorganisation layout" lookup table,
+  `shims/README.md` rewritten as library overview,
+  `docs/ONBOARDING.md` written for newcomers.
+
+### C-shim modding platform (polish — full header coverage + auto-compile + docs)
+
+- **`shims/include/azurik_kernel.h` now covers ALL 151 xboxkrnl imports** Azurik's vanilla
+  XBE references.  Previously only ~10 hand-picked functions were declared; the expanded
+  header groups every import by subsystem (Av / Dbg / Ex / Fsc / Hal / Io / Ke / Kf /
+  Mm / Nt / Ob / Ps / Rtl / Xbox / Xc) and ships with a full set of kernel typedefs
+  (`NTSTATUS`, `HANDLE`, `PVOID`, `LARGE_INTEGER*`, the object-type aliases, the
+  `PK*_ROUTINE` callback types).  Drift guard updated to skip C keywords and
+  function-pointer typedef scaffolding.
+- **`scripts/gen_kernel_hdr.py`** regenerates the header from OpenXDK's `xboxkrnl.h`
+  (at `xbox-includes/include/xboxkrnl.h`) zipped against
+  `azurik_mod/patching/xboxkrnl_ordinals.py`.  131 of 151 signatures come from OpenXDK
+  directly; the remaining 20 (data exports, fastcall exceptions, varargs) are hand-
+  written at the top of the generator and documented there.
+- **Auto-compile** — `apply_trampoline_patch` now invokes `shims/toolchain/compile.sh`
+  on demand when a shim's `.o` is missing but its `.c` source exists.  Heuristic:
+  `shims/build/<name>.o` ↔ `shims/src/<name>.c`.  Opt out with
+  `AZURIK_SHIM_NO_AUTOCOMPILE=1` (used in CI to pin pre-built artifacts).
+- **Documentation pass** (three new files in `docs/`):
+  * `docs/SHIM_AUTHORING.md` — end-to-end authoring guide (decision tree, 8-step
+    workflow, common pitfalls, debug playbook).
+  * `docs/AGENT_GUIDE.md` — AI-agent-specific guide with standard workflows, observed
+    failure modes, and "before you make any change" checklist.
+  * `docs/LEARNINGS.md` — accumulated reverse-engineering findings (the 151-import
+    ceiling, `config.xbr` dead-data pattern, boot-state machine contract, the
+    UnboundLocalError regression, etc.).  Cited from Ghidra function names so future
+    agents can re-verify.
+- **`azurik.h`** picked up a small "Time / frame pacing" section pointing at the 1/30 s
+  constant and cross-referencing `azurik_kernel.h`.
+- **Cross-refs** — every header now points at its companions; `docs/SHIMS.md` status
+  table updated to mark the coverage work done.
+
+### C-shim modding platform (Phase 2 D1 — xboxkrnl kernel imports)
+
+- **Shims can now call xboxkrnl kernel functions directly.**  Any of
+  the 151 kernel ordinals Azurik's vanilla XBE already imports
+  (`DbgPrint`, `KeQueryPerformanceCounter`, `NtReadFile`,
+  `HalReturnToFirmware`, ...) can be declared as a C extern in
+  `shims/include/azurik_kernel.h` and called from a shim exactly
+  like a local function.  The shim layout session parses the XBE's
+  kernel thunk table, generates a 6-byte `FF 25 <thunk_va>` stub
+  per referenced import, and resolves the shim's `call _Foo@N`
+  REL32 to the stub's VA.  No XBE import-table surgery; no runtime
+  loader; no name-resolution code injected into the game.
+- **`azurik_mod/patching/xboxkrnl_ordinals.py`** — full ordinal →
+  name table for the 151 imports Azurik ships with, cross-checked
+  against Ghidra's import pane and the parsed thunk table on disk.
+  Bijective (no duplicates); sorted by ordinal for binary-search
+  audits.
+- **`azurik_mod/patching/kernel_imports.py`** — XBE thunk-table
+  decryption (retail / debug / chihiro XOR keys tried in turn),
+  parser that walks the table to its null terminator and yields
+  `(thunk_va, ordinal, name)` entries, `demangle_stdcall` /
+  `demangle_cdecl` helpers, and a `stub_bytes_for(va)` generator.
+- **`shims/include/azurik_kernel.h`** — extern declarations for the
+  imports we've so far needed in shims: debug (`DbgPrint`), timing
+  (`KeQueryPerformanceCounter` / `Frequency`, `KeStallExecution-
+  Processor`, `KeTickCount`), synchronisation (`KeSetEvent`,
+  `KeWaitForSingleObject`), and title management
+  (`HalReturnToFirmware`).  The header carries an ABI checklist
+  shim authors must follow and a "what cannot be called" note for
+  kernel functions Azurik doesn't already import.
+- **Tests (+33 tests)** — `tests/test_kernel_imports.py` covers:
+  ordinal-table invariants (count, uniqueness, sorting), demangle
+  helpers, stub-byte shape, thunk-table parse against the vanilla
+  XBE (VA `0x18F3A0`; 151 entries; every parsed ordinal resolves
+  to a known name), `ShimLayoutSession` stub caching (allocator
+  called exactly once per kernel function, dedup across shims), an
+  end-to-end compile that has a shim call `DbgPrint` and asserts
+  the REL32 lands on a stub whose indirect target is the correct
+  thunk slot, and a header ↔ ordinal-map drift guard.
+- **Not yet supported**: adding a NEW kernel import (one Azurik
+  doesn't already reference).  The thunk table has zero trailing
+  slack in Azurik's XBE, so extending it would require a move +
+  re-link of every existing `CALL [thunk_va]` in the game.
+  Tracked as `D1-extend` in `docs/SHIMS.md`.
+
+### C-shim modding platform (Phase 2 E — shared-library shim layout)
+
+- **`ShimLayoutSession.apply_shared_library(path)`** places a shim
+  `.o` once per session and exposes its exported symbols to every
+  subsequent `apply_trampoline_patch` call.  Two trampolines that
+  both reference `_shared_helper@4` now resolve to a SINGLE VA —
+  no duplicated machine code, no linker required.
+- **`azurik_mod/patching/shim_session.py`** — new module that
+  unifies D1 (kernel stubs) and E (shared libraries) under a single
+  session object attached to the XBE bytearray.  The extern
+  resolver threaded into `layout_coff` consults, in order: vanilla-
+  symbol registry → shared-library exports → kernel-import stubs
+  (auto-allocated) → session's fallback.  Stubs and library
+  placements are cached for idempotence.
+- **`azurik_mod/patching/coff.layout_coff`** gains an
+  `extern_resolver: Callable[[str], int | None]` parameter.
+  Unresolved externals that aren't in `vanilla_symbols` are passed
+  to the resolver; `None` means "not mine, keep going".  The old
+  `vanilla_symbols` dict-only API still works — `extern_resolver`
+  is additive and defaults to `None`.  `layout_coff` also accepts
+  `entry_symbol=None` for library-style placements (no single
+  entry point to resolve).
+- **`apply_trampoline_patch`** now instantiates / reuses a
+  `ShimLayoutSession` attached to `xbe_data` automatically — pack
+  apply functions can pre-place shared libraries via
+  `get_or_create_session` without plumbing a new argument through.
+- **Fixtures** — three new files under `shims/src/`:
+  `_shared_lib_test.c` exports two stdcall helpers;
+  `_shared_consumer_a.c` and `_shared_consumer_b.c` each call the
+  first helper.  Used by the test below.
+- **Tests (+6 tests)** — `tests/test_shared_library.py` covers:
+  a shared library places its two exports with unique VAs, re-
+  applying the same path is idempotent, export VAs lie inside the
+  placed region, the "no externally-visible" error fires on
+  static-only / DCE'd sources, and — the headline assertion — two
+  independent consumer shims' REL32s resolve to the same helper VA.
+
 ### C-shim modding platform (Tier B — authoring ergonomics)
 
 - **`shims/include/azurik.h` grew real struct definitions.**  Shim

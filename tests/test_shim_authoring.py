@@ -148,6 +148,66 @@ class AzurikHeaderStructOffsets(unittest.TestCase):
                     msg=f"offset 0x{offset:X} for CritterData.{field} "
                         f"not found in compiled .o — layout drift?")
 
+    def test_va_anchors_point_at_expected_xbe_data(self):
+        """Validate every ``AZURIK_*_VA`` constant in azurik.h against
+        the real XBE.  Catches the regression where a constant was
+        labelled ``_VA`` but was actually a file offset — see
+        docs/LEARNINGS.md 'VAs vs file offsets — the player-character trap'.
+
+        Skips if the vanilla XBE isn't present in its usual location."""
+        import struct as _struct
+
+        vanilla = _REPO_ROOT.parent / "Azurik - Rise of Perathia (USA).xiso/default.xbe"
+        if not vanilla.exists():
+            self.skipTest(f"vanilla XBE fixture required at {vanilla}")
+
+        import sys
+        if str(_REPO_ROOT) not in sys.path:
+            sys.path.insert(0, str(_REPO_ROOT))
+        from azurik_mod.patching.xbe import va_to_file, parse_xbe_sections
+
+        xbe = vanilla.read_bytes()
+        _, sections = parse_xbe_sections(xbe)
+
+        def section_of(va: int) -> str | None:
+            for s in sections:
+                if s['vaddr'] <= va < s['vaddr'] + s['vsize']:
+                    return s['name']
+            return None
+
+        # Each tuple: (anchor_name, VA, expected_section, expected_value_pred)
+        # where expected_value_pred(bytes) returns either
+        #   - True/False for a simple predicate, or
+        #   - a diagnostic message string for context.
+        anchors = [
+            ("AZURIK_GRAVITY_VA", 0x001980A8, ".rdata",
+             lambda b: abs(_struct.unpack('<f', b[:4])[0] - 9.8) < 1e-5),
+            ("AZURIK_SHARED_RUN_MULT_VA", 0x001A25BC, ".rdata",
+             lambda b: _struct.unpack('<f', b[:4])[0] == 3.0),
+            ("AZURIK_PLAYER_CHAR_NAME_VA", 0x0019EA68, ".rdata",
+             lambda b: b.startswith(b"garret4\x00")),
+            ("AZURIK_BOOT_STATE_VA", 0x001BF61C, ".data",
+             # BSS-initialised DWORD — sits in the VA portion of
+             # .data that's past raw_size, so on-disk reads return
+             # empty bytes.  Xbox loader zero-fills at load time.
+             # Accept either empty (past raw) or literal zeros.
+             lambda b: b == b"" or b[:4] == b"\x00\x00\x00\x00"),
+        ]
+
+        for name, va, want_section, pred in anchors:
+            with self.subTest(anchor=name, va=f"0x{va:X}"):
+                got_section = section_of(va)
+                self.assertEqual(
+                    got_section, want_section,
+                    msg=f"{name} expected in section {want_section} "
+                        f"but resolves to {got_section}")
+                data = xbe[va_to_file(va):va_to_file(va) + 16]
+                self.assertTrue(
+                    pred(data),
+                    msg=f"{name} (VA 0x{va:X}) bytes {data.hex()} "
+                        f"fail the value predicate — either the VA "
+                        f"is wrong or the vanilla XBE has drifted")
+
     def test_flag_constants_match_engine_values(self):
         """``PLAYER_FLAG_RUNNING`` and ``PLAYER_FLAG_FALLING`` must
         match what ``FUN_00084940`` tests against (bits 0x40 and 0x01
@@ -193,25 +253,32 @@ class NewShimScaffolding(unittest.TestCase):
             capture_output=True, text=True)
 
     def test_good_name_produces_compilable_stub(self):
-        """Happy path: valid name -> src file created -> compiles ->
-        produces a 1-byte RET shim by default."""
+        """Happy path: valid name -> feature folder created ->
+        shim.c compiles -> produces a 1-byte RET shim by default."""
         if not _toolchain_available():
             self.skipTest("i386 clang toolchain required")
 
         # Use a unique name so we don't collide with real shims.
         name = "test_scaffold_" + os.urandom(4).hex()
-        src = _REPO_ROOT / f"shims/src/{name}.c"
-        obj_dir = _REPO_ROOT / "shims/build"
+        feature_dir = _REPO_ROOT / "azurik_mod" / "patches" / name
+        src = feature_dir / "shim.c"
+        init_py = feature_dir / "__init__.py"
+        obj_dir = _REPO_ROOT / "shims" / "build"
         obj = obj_dir / f"{name}.o"
         try:
             proc = self._run_scaffold(name)
             self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(feature_dir.is_dir(),
+                msg=f"scaffold should have created {feature_dir}")
             self.assertTrue(src.exists(),
                 msg=f"scaffold should have created {src}")
+            self.assertTrue(init_py.exists(),
+                msg=f"scaffold should have created {init_py}")
 
-            # Compile the generated stub.
+            # Compile the generated stub into the shared build cache.
+            obj.parent.mkdir(parents=True, exist_ok=True)
             subprocess.check_call(
-                ["bash", str(_COMPILE_SH), str(src)],
+                ["bash", str(_COMPILE_SH), str(src), str(obj)],
                 cwd=_REPO_ROOT)
             self.assertTrue(obj.exists())
             data = obj.read_bytes()
@@ -222,8 +289,9 @@ class NewShimScaffolding(unittest.TestCase):
                 msg="generated shim must export the expected "
                     "c_<name> stdcall symbol")
         finally:
-            if src.exists():
-                src.unlink()
+            import shutil
+            if feature_dir.exists():
+                shutil.rmtree(feature_dir)
             if obj.exists():
                 obj.unlink()
 
@@ -242,19 +310,20 @@ class NewShimScaffolding(unittest.TestCase):
 
     def test_refuses_to_overwrite_existing(self):
         """Re-scaffolding the same name fails rather than destroying
-        an in-progress shim."""
+        an in-progress feature folder."""
         name = "test_scaffold_dup_" + os.urandom(4).hex()
-        src = _REPO_ROOT / f"shims/src/{name}.c"
+        feature_dir = _REPO_ROOT / "azurik_mod" / "patches" / name
         try:
             self.assertEqual(self._run_scaffold(name).returncode, 0)
-            self.assertTrue(src.exists())
+            self.assertTrue(feature_dir.is_dir())
             proc = self._run_scaffold(name)
             self.assertNotEqual(
                 proc.returncode, 0,
-                msg="scaffold must not overwrite an existing shim")
+                msg="scaffold must not overwrite an existing feature folder")
         finally:
-            if src.exists():
-                src.unlink()
+            import shutil
+            if feature_dir.exists():
+                shutil.rmtree(feature_dir)
 
 
 if __name__ == "__main__":

@@ -1,17 +1,17 @@
 # Patch Pack Catalog
 
-Each pack is a module under [`azurik_mod/patches/`](../azurik_mod/patches/) that exports a list of `PatchSpec` / `ParametricPatch` / `TrampolinePatch` sites and registers itself with the central registry.  The CLI (`azurik-mod verify-patches`) and the GUI ([`gui/pages/patches.py`](../gui/pages/patches.py)) discover packs automatically — there is no hard-coded list to update when a new pack ships.
+Each pack is a **folder** under [`azurik_mod/patches/`](../azurik_mod/patches/) — one folder per feature.  The folder holds `__init__.py` (the `Feature(...)` declaration + any apply logic) and, for shim-backed features, `shim.c`.  The CLI (`azurik-mod verify-patches`) and the GUI ([`gui/pages/patches.py`](../gui/pages/patches.py)) discover packs automatically by importing the package — there is no hard-coded list to update when a new pack ships.
 
-Packs tagged **c-shim** are backed by compiled C code from the [`shims/`](../shims/) tree rather than hand-assembled bytes.  See [docs/SHIMS.md](SHIMS.md) for the authoring workflow.
+Packs tagged **c-shim** are backed by compiled C code from the feature folder's `shim.c` rather than hand-assembled bytes.  See [docs/SHIM_AUTHORING.md](SHIM_AUTHORING.md) for the authoring workflow.
 
-| Pack                 | Sites | Default-on | Tags                | Module |
+| Pack                 | Sites | Default-on | Tags                | Folder |
 |----------------------|-------|------------|---------------------|--------|
-| `fps_unlock`         | 50    | no         | fps, experimental   | [azurik_mod/patches/fps_unlock.py](../azurik_mod/patches/fps_unlock.py) |
-| `qol_gem_popups`     | 0     | no         | qol                 | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
-| `qol_other_popups`   | 0     | no         | qol                 | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
-| `qol_pickup_anims`   | 1     | no         | qol                 | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
-| `qol_skip_logo`      | 1     | no         | qol, c-shim         | [azurik_mod/patches/qol.py](../azurik_mod/patches/qol.py) |
-| `player_physics`     | 1     | no         | player, physics     | [azurik_mod/patches/player_physics.py](../azurik_mod/patches/player_physics.py) |
+| `fps_unlock`         | 50    | no         | fps, experimental   | [azurik_mod/patches/fps_unlock/](../azurik_mod/patches/fps_unlock/) |
+| `qol_gem_popups`     | 0     | no         | qol                 | [azurik_mod/patches/qol_gem_popups/](../azurik_mod/patches/qol_gem_popups/) |
+| `qol_other_popups`   | 0     | no         | qol                 | [azurik_mod/patches/qol_other_popups/](../azurik_mod/patches/qol_other_popups/) |
+| `qol_pickup_anims`   | 1     | no         | qol                 | [azurik_mod/patches/qol_pickup_anims/](../azurik_mod/patches/qol_pickup_anims/) |
+| `qol_skip_logo`      | 1     | no         | qol, c-shim         | [azurik_mod/patches/qol_skip_logo/](../azurik_mod/patches/qol_skip_logo/) |
+| `player_physics`     | 3     | no         | player, physics     | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
 
 ---
 
@@ -108,7 +108,7 @@ Skips the unskippable Adrenium logo movie that plays when the game first boots, 
 
 Replacing the 10-byte `PUSH imm32; CALL rel32` pair with 10 NOPs (as an earlier version of this patch tried) corrupts the game in two ways: `PUSH EBP` leaks 4 bytes of stack every iteration, and `NEG AL` operates on whatever garbage AL happens to hold from a prior function — so the state machine drifts into **case 2 (poll a movie that never started)** and spins forever.  That's the black-screen-on-boot symptom.
 
-**Phase 1 implementation (C-shim).**  A `TrampolinePatch` replaces **only the 5-byte CALL** at VA 0x05F6E5 with `CALL rel32` into [`shims/src/skip_logo.c`](../shims/src/skip_logo.c).  The preceding two PUSHes are left intact, so the shim receives both `__stdcall` args on its stack and can clean them up the same way the real callee would.  The shim itself is a naked 5-byte stub:
+**C-shim implementation.**  A `TrampolinePatch` replaces **only the 5-byte CALL** at VA 0x05F6E5 with `CALL rel32` into [`azurik_mod/patches/qol_skip_logo/shim.c`](../azurik_mod/patches/qol_skip_logo/shim.c).  The preceding two PUSHes are left intact, so the shim receives both `__stdcall` args on its stack and can clean them up the same way the real callee would.  The shim itself is a naked 5-byte stub:
 
 ```c
 __attribute__((naked))
@@ -142,7 +142,7 @@ The adjacent call to `prophecy.bik` uses the same calling pattern at VA 0x05F73F
 
 ### Player character swap (`--player-character <name>`)
 
-Replaces the `garret4` string at file offset 0x1976C8 with an arbitrary ≤11-char ASCII model name.  Not a pack — there's no GUI toggle yet, only the CLI flag.  Marked experimental; animation mismatches are likely.
+Replaces the `garret4` string at file offset `0x1976C8` (VA `0x0019EA68`, in `.rdata`) with an arbitrary ≤11-char ASCII model name.  Not a pack — there's no GUI toggle yet, only the CLI flag.  Marked experimental; animation mismatches are likely.
 
 ---
 

@@ -172,26 +172,49 @@ def run_randomizer(
     do_gems: bool = False,
     do_barriers: bool = False,
     do_connections: bool = False,
+    packs: dict[str, bool] | None = None,
+    pack_params: dict[str, dict[str, float]] | None = None,
+    item_pool: dict[str, int] | None = None,
+    obsidian_cost: int | None = None,
+    config_edits: dict | None = None,
+    force_unsolvable: bool = False,
+    on_output: Callable[[str], None] | None = None,
+    on_done: Callable[[BuildResult], None] | None = None,
+    # --- Back-compat keyword kwargs (pre-reorganisation) -------------
+    # Old call sites passed each pack as its own boolean kwarg.  Any
+    # True value here is folded into ``packs`` before dispatch so
+    # downstream scripts don't break mid-migration.
     gem_popups: bool = False,
     other_popups: bool = False,
     pickup_anims: bool = False,
     skip_logo: bool = False,
     fps_unlock: bool = False,
-    item_pool: dict[str, int] | None = None,
-    obsidian_cost: int | None = None,
-    config_edits: dict | None = None,
-    force_unsolvable: bool = False,
-    pack_params: dict[str, dict[str, float]] | None = None,
-    on_output: Callable[[str], None] | None = None,
-    on_done: Callable[[BuildResult], None] | None = None,
 ) -> tuple[threading.Thread, "queue.Queue[tuple[str, object]]"]:
     """Run the full randomizer in a background thread using the in-process
     library.
+
+    ``packs`` is a ``{pack_name: enabled}`` dict driven by the Patches
+    page; ``pack_params`` carries slider values keyed by pack and
+    parameter name.  The legacy per-pack boolean kwargs are still
+    accepted for one release so downstream scripts have time to
+    migrate.
 
     Returns (thread, msg_queue). The caller should poll `msg_queue` from
     the main/GUI thread via `after()` for ("output", line) and
     ("done", BuildResult) messages.
     """
+    # Merge legacy kwargs into the unified packs dict so the rest of
+    # the function only deals with one input shape.
+    packs = dict(packs or {})
+    for old_name, canonical in (
+        ("gem_popups", "qol_gem_popups"),
+        ("other_popups", "qol_other_popups"),
+        ("pickup_anims", "qol_pickup_anims"),
+        ("skip_logo", "qol_skip_logo"),
+        ("fps_unlock", "fps_unlock"),
+    ):
+        if locals()[old_name]:
+            packs[canonical] = True
     msg_queue: queue.Queue[tuple[str, object]] = queue.Queue()
 
     def _run() -> None:
@@ -208,15 +231,14 @@ def run_randomizer(
             ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             log_path = LOG_DIR / f"build-{ts}-seed{seed}.log"
             log_file = open(log_path, "w", encoding="utf-8", buffering=1)
+            enabled = sorted(n for n, v in packs.items() if v)
             log_file.write(
                 f"# Azurik Mod Tools build log\n"
                 f"# started : {datetime.datetime.now().isoformat(timespec='seconds')}\n"
                 f"# seed    : {seed}\n"
                 f"# iso     : {iso_path}\n"
                 f"# output  : {output_path}\n"
-                f"# patches : fps={fps_unlock}  gem_popups={gem_popups}  "
-                f"other_popups={other_popups}  pickup_anims={pickup_anims}  "
-                f"skip_logo={skip_logo}\n"
+                f"# packs   : {', '.join(enabled) or '(none)'}\n"
                 f"# pools   : major={do_major} keys={do_keys} gems={do_gems} "
                 f"barriers={do_barriers} connections={do_connections}\n"
                 f"# pack_params: {pack_params}\n"
@@ -259,11 +281,14 @@ def run_randomizer(
             no_barriers=not do_barriers,
             no_connections=not do_connections,
             hard_barriers=False,
-            # New opt-in QoL flags (one per sub-patch).
-            gem_popups=gem_popups,
-            other_popups=other_popups,
-            pickup_anims=pickup_anims,
-            skip_logo=skip_logo,
+            # Pack toggles derived from the unified packs dict.  One
+            # field per pack that cmd_randomize_full's CLI surface
+            # still understands; new packs just need an entry here.
+            gem_popups=packs.get("qol_gem_popups", False),
+            other_popups=packs.get("qol_other_popups", False),
+            pickup_anims=packs.get("qol_pickup_anims", False),
+            skip_logo=packs.get("qol_skip_logo", False),
+            fps_unlock=packs.get("fps_unlock", False),
             # Legacy grouped flags stay False so they're no-ops.
             no_qol=False,
             no_gem_popups=False,
@@ -274,8 +299,8 @@ def run_randomizer(
             item_pool=json.dumps(item_pool) if item_pool else None,
             force=force_unsolvable,
             player_character=None,
-            fps_unlock=fps_unlock,
             config_mod=json.dumps(config_edits) if config_edits else None,
+            # Parametric slider values for player_physics.
             gravity=gravity,
             player_walk_scale=walk_scale,
             player_run_scale=run_scale,
