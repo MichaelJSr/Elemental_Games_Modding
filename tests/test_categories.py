@@ -257,6 +257,13 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         """Shipped packs produce 6 tabs, in the registered
         Category.order order: performance (10) → player (20) →
         boot (30) → qol (40) → randomize (50) → experimental (80).
+
+        Note: this tests the RAW ``PackBrowser`` behaviour
+        (every non-empty category renders).  The Patches PAGE
+        deliberately hides ``randomize`` — see
+        ``gui/pages/patches.py``'s ``HIDDEN_CATEGORIES`` +
+        ``PatchesPageHidesRandomize`` below for the page-level
+        assertion.
         """
         from azurik_mod.patching.registry import all_packs
         from gui.widgets import PackBrowser
@@ -337,6 +344,88 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         # by Tk.
         browser.select("player")
         browser.select("nonexistent")  # should be a no-op, not raise
+
+
+@unittest.skipUnless(True, "tkinter required")
+class PatchesPageHidesRandomize(unittest.TestCase):
+    """The Patches PAGE (not just the underlying PackBrowser)
+    must NOT render a Randomize tab — shuffle pools live on the
+    dedicated Randomize page + we don't want to surface them
+    twice in the GUI.
+
+    This is the guard that catches the regression if someone
+    accidentally drops the HIDDEN_CATEGORIES filter in
+    ``gui/pages/patches.py``.
+    """
+
+    def setUp(self) -> None:
+        try:
+            import tkinter as tk  # noqa: F401
+        except ImportError:
+            self.skipTest("tkinter not available")
+        import azurik_mod.patches  # noqa: F401
+        self._tk = __import__("tkinter")
+        self._root = self._tk.Tk()
+        self._root.withdraw()
+
+    def tearDown(self) -> None:
+        self._root.destroy()
+
+    def test_patches_page_omits_randomize_tab(self):
+        """Build a real PatchesPage against a lightweight app
+        stub, then assert the rendered tab strip has no
+        'randomize' entry."""
+        from gui.pages.patches import HIDDEN_CATEGORIES, PatchesPage
+
+        class _AppStub:
+            class _State:
+                enabled_packs: dict = {}
+                pack_params: dict = {}
+
+                def set_pack(self, name, value):
+                    self.enabled_packs[name] = value
+            state = _State()
+
+        page = PatchesPage(self._root, _AppStub())
+        self.assertNotIn("randomize", page.tabs(),
+            msg="Patches page must NOT render the randomize tab "
+                "(it lives on the dedicated Randomize page)")
+        self.assertIn("randomize", HIDDEN_CATEGORIES)
+
+    def test_patches_page_still_shows_other_five_tabs(self):
+        """Hiding ``randomize`` must not accidentally hide anyone
+        else — the remaining 5 categories must still render."""
+        from gui.pages.patches import PatchesPage
+
+        class _AppStub:
+            class _State:
+                enabled_packs: dict = {}
+                pack_params: dict = {}
+
+                def set_pack(self, name, value):
+                    self.enabled_packs[name] = value
+            state = _State()
+
+        page = PatchesPage(self._root, _AppStub())
+        self.assertEqual(
+            page.tabs(),
+            ["performance", "player", "boot", "qol",
+             "experimental"],
+            msg="Dropping randomize must not drop any other tabs")
+
+    def test_randomize_packs_still_registered(self):
+        """Hiding the tab must NOT affect registration — the
+        five ``rand_*`` features must still be in the global
+        registry so the backend + Randomize page see them."""
+        from azurik_mod.patching.registry import all_packs
+        randomize_packs = {p.name for p in all_packs()
+                           if p.category == "randomize"}
+        self.assertEqual(
+            randomize_packs,
+            {"rand_major", "rand_keys", "rand_gems",
+             "rand_barriers", "rand_connections"},
+            msg="Randomize pool Features must stay in the "
+                "registry even though we hide their Patches tab")
 
 
 if __name__ == "__main__":

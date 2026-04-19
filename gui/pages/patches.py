@@ -9,6 +9,22 @@ needed to onboard a fresh category.
 Parametric sliders for a pack live inline right under the pack's
 checkbox (no more scattered "Parametric sliders" section at the
 bottom of the page).
+
+Categories hidden here
+----------------------
+Some categories are "owned" by a dedicated page and are omitted
+from the Patches tab strip to avoid user-facing duplication:
+
+- ``randomize`` — the shuffle-pool toggles live on the dedicated
+  **Randomize** page, which also owns the seed + advanced
+  options.  They're still real :class:`Feature` entries + still
+  flow through ``AppState.enabled_packs``, so everything the
+  Build page reads works unchanged; we just don't render them
+  twice in the GUI.
+
+See :data:`HIDDEN_CATEGORIES` below for the authoritative list.
+Plugins that want to hide their own category from the Patches
+tab should extend this set (or offer their own dedicated page).
 """
 
 from __future__ import annotations
@@ -21,6 +37,15 @@ import tkinter as tk
 import azurik_mod.patches  # noqa: F401
 from azurik_mod.patching.registry import all_packs
 
+
+#: Category ids rendered elsewhere in the GUI, so we drop them
+#: from the Patches-page tab strip.  Each entry is a ``category``
+#: id exactly as it appears in the registry.
+HIDDEN_CATEGORIES: frozenset[str] = frozenset({
+    "randomize",
+})
+
+
 from ..widgets import PackBrowser, Page
 
 
@@ -28,7 +53,8 @@ class PatchesPage(Page):
     title = "Patches"
     description = ("Switch to a category tab and tick the patches you "
                    "want to apply.  Everything is off by default.  "
-                   "Sliders only take effect when their patch is ticked.")
+                   "Sliders only take effect when their patch is "
+                   "ticked.  Shuffle pools live on the Randomize page.")
 
     def _build(self) -> None:
         self._vars: dict[str, tk.BooleanVar] = {}
@@ -47,9 +73,16 @@ class PatchesPage(Page):
             # a "pack_param_changed" event on the bus).
             pass
 
+        # Filter out categories that have their own dedicated GUI
+        # page (see module docstring + HIDDEN_CATEGORIES).  Packs
+        # stay registered globally so the backend / CLI / plugin
+        # system keep working; we just don't render their tab here.
+        visible_packs = [p for p in all_packs()
+                         if p.category not in HIDDEN_CATEGORIES]
+
         self._browser = PackBrowser(
             self._body,
-            all_packs(),
+            visible_packs,
             self._vars,
             pack_params=pack_params,
             on_param_change=_mirror_param,
