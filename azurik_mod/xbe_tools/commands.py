@@ -947,6 +947,81 @@ def cmd_assets_fingerprint_diff(args) -> None:
               f"sha1 {old.sha1[:8]}->{new.sha1[:8]})")
 
 
+def cmd_save_key_recover(args) -> None:
+    """``azurik-mod save key-recover --dump <binary> --save <slot> …``.
+
+    Brute-force search a memory / binary dump for the 16-byte
+    HMAC-SHA1 key that signs one-or-more known save slots.
+    See :mod:`azurik_mod.save_format.key_recover` for the full
+    design note.
+    """
+    import time
+    from azurik_mod.save_format.key_recover import (
+        load_save_sample, recover_keys)
+
+    dump_path = Path(args.dump)
+    if not dump_path.is_file():
+        print(f"save key-recover: dump not found: {dump_path}",
+              file=sys.stderr)
+        sys.exit(1)
+
+    samples = []
+    for slot in args.save or []:
+        try:
+            samples.append(load_save_sample(Path(slot)))
+        except FileNotFoundError as exc:
+            print(f"save key-recover: {exc}", file=sys.stderr)
+            sys.exit(1)
+    if not samples:
+        print("save key-recover: pass --save <slot> at least once",
+              file=sys.stderr)
+        sys.exit(2)
+
+    dump = dump_path.read_bytes()
+    print(f"scanning {len(dump):,} B of {dump_path.name} "
+          f"against {len(samples)} save slot(s), "
+          f"alignment={args.alignment}")
+    t0 = time.perf_counter()
+    last_pct = [-1]
+
+    def progress(done, total):
+        pct = 100 * done // max(1, total)
+        if pct != last_pct[0] and pct % 5 == 0:
+            last_pct[0] = pct
+            elapsed = time.perf_counter() - t0
+            print(f"  {pct:3d}%  ({done:,} / {total:,}, "
+                  f"{elapsed:.1f}s elapsed)", file=sys.stderr)
+
+    hits = list(recover_keys(
+        dump, samples,
+        alignment=args.alignment,
+        early_exit_after=args.max_hits or None,
+        progress_cb=progress if not args.quiet else None,
+    ))
+    elapsed = time.perf_counter() - t0
+
+    if not hits:
+        print(f"\nNo matching 16-byte key found in {dump_path.name} "
+              f"(scanned {len(dump):,} B in {elapsed:.1f}s).")
+        if args.json:
+            _emit({"hits": [], "elapsed_seconds": round(elapsed, 3)},
+                  as_json=True)
+        sys.exit(3)
+
+    print(f"\n{len(hits)} matching key(s):")
+    for h in hits:
+        print(f"  off=0x{h.offset:08x}  key={h.hex_key()}")
+    print(f"\nScan completed in {elapsed:.1f}s.")
+    if args.json:
+        _emit({
+            "hits": [
+                {"offset": h.offset, "key": h.hex_key()}
+                for h in hits
+            ],
+            "elapsed_seconds": round(elapsed, 3),
+        }, as_json=True)
+
+
 def cmd_save_edit(args) -> None:
     """``azurik-mod save edit <in> <out> --set <spec>``."""
     from azurik_mod.save_format.editor import (

@@ -308,37 +308,81 @@ The entry point at ``0x0005c920`` confirms ``flags=0`` via the
 ### Why we don't emit valid signatures yet
 
 The open unknown is **what `XboxSignatureKey` actually is**.
-On retail hardware it's a runtime value the kernel derives from
-a combination of the XBE certificate (bzSignatureKey @
-cert+0x110) and the EEPROM's HDKey (per console).  The naive
-candidates we tried against one real save (hex
-``5be4d9fc94655232eebde358556bdaeede2aa043``) — the XBE cert
-bytes and the cert LAN key, with every reasonable walk-order
-permutation — all produced wrong signatures.
+On retail hardware it's a runtime value the kernel derives
+from a combination of the XBE certificate (bzSignatureKey @
+cert+0x110) and the EEPROM's HDKey (per console).
 
-Two pragmatic unblockers:
+### Exhaustive static-recovery attempts (April 2026)
 
-1. **Round-trip through the game** — export the slot, edit text
-   saves (see § 4a), re-import, boot the game once.  The game
-   re-signs on first save operation; subsequent loads succeed.
-   This works today with no additional code.
-2. **Ship a `qol_skip_save_signature` shim patch** — NOP the
-   verify callsite so edited saves load regardless of signature
-   validity.  Spec'd in `docs/TOOLING_ROADMAP.md`; not yet
-   implemented — the verify site wasn't exposed in the xrefs
-   scan (the whole `signature.sav` read path appears to be
-   called through a vtable / method ptr).  Tracked as a
-   follow-up; requires runtime tracing in xemu to locate.
+With three real save slots + EEPROM + the base Xbox HDD
+image kindly provided as fixtures, we confirmed the key is
+**not** recoverable from any static source:
+
+| Source scanned | Alignment | Candidates | Hits |
+|----------------|-----------|------------|------|
+| XBE certificate (464 B) | 4 | 116 | 0 |
+| Every XBE cert field by name | — | 11 | 0 |
+| Raw EEPROM (256 B) | 1 | 240 | 0 |
+| EEPROM v1.0 / v1.1 / v1.2 / v1.6 RC4-decrypted HDKey | — | 4 | 0 |
+| XBE body (3.7 MiB) | 4 | 446 460 | 0 |
+| SaveMeta.xbx / saveimage.xbx heads | 1 | 262 | 0 |
+| HMAC-SHA1(A, B)[:16] for every (A, B) ∈ 10 ingredients² | — | 100 | 0 |
+| SHA-1(A ‖ B)[:16] for same ingredient set | — | 100 | 0 |
+
+None of these produced a key that HMAC-SHA1'd **any** of the 3
+expected signatures — let alone all of them.
+
+**Conclusion:** ``XboxSignatureKey`` lives in xemu's synthetic
+xboxkrnl memory at runtime.  It's populated when the kernel
+(hard-wired into the emulator) resolves the import thunk at
+VA ``0x0018F4D4``.  We cannot recover it statically from any
+file the user hands us — but we can recover it dynamically
+(see below).
+
+### Three practical unblockers
+
+1. **Round-trip through the game** (zero code, works today).
+   Edit the slot's text saves with
+   ``azurik-mod save edit``, drop the result back into
+   ``UDATA\\4d530007\\<slot>\\``, boot the game, let it
+   auto-save once — at that point the game re-signs with the
+   correct console key.  Subsequent loads succeed.
+2. **`qol_skip_save_signature` shim** (future work).  NOP the
+   verify callsite so any save loads regardless of signature
+   validity.  The verify site wasn't exposed by the xref scan;
+   the whole ``signature.sav`` read path appears to be invoked
+   via a vtable / method-ptr call.  Requires runtime tracing
+   in xemu to locate.  Tracked in
+   ``docs/TOOLING_ROADMAP.md``.
+3. **Dynamic key recovery** — dump xemu RAM during a save
+   operation (via xemu's debug monitor, ``gdb-stub``, or
+   ``qemu -monitor``) and feed the dump to the built-in
+   scanner:
+
+   ```
+   azurik-mod save key-recover \\
+       --dump xemu-ram.bin \\
+       --save exported/slot1 \\
+       --save exported/slot2
+   ```
+
+   The scanner brute-forces every 16-byte window in the dump
+   against the known (walk, signature) pairs and returns keys
+   that match.  Provide at least two slots to rule out random
+   2^-160 collisions.  Once recovered, feed the key back via
+   ``azurik-mod save edit --xbox-signature-key HEX32`` for
+   portable signed edits on this specific console.
 
 ### Python helper
 
 The traced walker lives in
 :func:`azurik_mod.save_format.signature.compute_signature_walk`
 so future work can iterate on the key-derivation side without
-re-solving the tree-walk order.  ``SaveEditor`` exposes an
-``--xbox-signature-key`` override so power-users who've
-extracted their console's key can produce a valid signature
-in-place.
+re-solving the tree-walk order.  The recovery brute-forcer
+lives in :mod:`azurik_mod.save_format.key_recover`.
+``SaveEditor`` exposes an ``--xbox-signature-key`` override so
+power-users who've recovered their console's key can produce a
+valid signature in-place.
 - **`inv.sav` full record layout.**  The implausibly-large
   `record_count` field suggests the second u32 isn't a count.
   Candidates: item-bitmask, seed, or flags.  Dump a save with

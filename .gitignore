@@ -26,5 +26,11 @@ tools/xdvdfs.exe
 
 # Extracted save data (user-specific; may contain personal saves)
 scripts/save_data/
+scripts/save*_extracted/
 save_data/
+save*_extracted/
 *.qcow2
+# Xbox EEPROM dumps carry per-console identity material — don't
+# commit user EEPROMs even when pulled in for signature research.
+eeprom.bin
+*.eeprom

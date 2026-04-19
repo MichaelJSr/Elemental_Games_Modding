@@ -1023,6 +1023,47 @@ def main() -> None:
              "workflow.")
     p_save_edit.add_argument("--json", action="store_true")
 
+    # save key-recover — brute-force find XboxSignatureKey in a dump
+    p_save_key = p_save_sub.add_parser(
+        "key-recover",
+        help="Scan a memory / binary dump for the HMAC-SHA1 "
+             "key that signs a known save slot (#xbox-signature-key)",
+        description=(
+            "Use this when you have:\n"
+            "  - one or more save slots with valid signature.sav\n"
+            "  - a memory dump or binary that MAY contain the 16-byte\n"
+            "    XboxSignatureKey value (xemu RAM dump, extracted\n"
+            "    xbdm RAM, etc.)\n"
+            "\n"
+            "Pass at least 2 slots to rule out random 2^-160\n"
+            "collisions.  The returned key can be fed back into\n"
+            "``azurik-mod save edit --xbox-signature-key HEX32``.\n"
+            "\n"
+            "Examples:\n"
+            "  azurik-mod save key-recover --dump xemu-ram.bin \\\n"
+            "      --save exported/slot1 --save exported/slot2\n"
+            "  azurik-mod save key-recover --dump xemu-ram.bin \\\n"
+            "      --save exported/slot1 --alignment 1  # paranoid\n"
+            "\n"
+            "See docs/SAVE_FORMAT.md § 7 for why static recovery\n"
+            "(XBE cert / EEPROM / derivations) doesn't work."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_save_key.add_argument("--dump", required=True,
+        help="Path to the binary to scan (RAM dump, file, …)")
+    p_save_key.add_argument("--save", action="append", default=[],
+        help="Path to a save slot dir with valid signature.sav "
+             "(repeat at least twice to rule out collisions)")
+    p_save_key.add_argument("--alignment", type=int, default=4,
+        help="Byte alignment for the scan (default 4; use 1 "
+             "for paranoid unaligned scans)")
+    p_save_key.add_argument("--max-hits", type=int, default=0,
+        help="Stop after this many matches; 0 = exhaustive")
+    p_save_key.add_argument("--quiet", action="store_true",
+        help="Suppress progress output")
+    p_save_key.add_argument("--json", action="store_true")
+
     # #18 xbr edit (extends existing xbr subcommand)
     p_xbre = _xbr_sub.add_parser(
         "edit",
@@ -1309,11 +1350,14 @@ def _dispatch_shim_inspect(args) -> None:
 def _dispatch_save(args) -> None:
     """Dispatch the ``save`` subcommand to its implementation."""
     from azurik_mod.save_format.commands import cmd_save_inspect
-    from azurik_mod.xbe_tools.commands import cmd_save_edit
+    from azurik_mod.xbe_tools.commands import (
+        cmd_save_edit, cmd_save_key_recover)
     if args.save_command in (None, "inspect"):
         cmd_save_inspect(args)
     elif args.save_command == "edit":
         cmd_save_edit(args)
+    elif args.save_command == "key-recover":
+        cmd_save_key_recover(args)
     else:
         raise SystemExit(
             f"unknown save subcommand: {args.save_command!r}.  "
