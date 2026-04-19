@@ -276,6 +276,11 @@ def main() -> None:
                              "range 0.1-10.0).  Scales the 10.0 FMUL at "
                              "VA 0x8B7BF inside FUN_0008b700 (swim "
                              "state).  Independent of walk/roll.")
+    p_full.add_argument("--player-jump-scale", type=float, metavar="X",
+                        help="Player jump-height multiplier (default 1.0, "
+                             "range 0.1-5.0).  Scales the 9.0 jump-"
+                             "velocity imm32 at all five FUN_00089060 "
+                             "airborne-state entry sites.")
 
     # apply-physics (standalone physics slider runner)
     p_physics = sub.add_parser(
@@ -315,6 +320,10 @@ def main() -> None:
     p_physics.add_argument("--swim-speed", type=float, metavar="X",
         help="Player swim speed multiplier (default 1.0; range 0.1-10.0).  "
              "Scales the 10.0 FMUL at VA 0x8B7BF inside FUN_0008b700.")
+    p_physics.add_argument("--jump-speed", type=float, metavar="X",
+        help="Player jump height multiplier (default 1.0; range 0.1-5.0).  "
+             "Scales the 9.0 jump-velocity imm32 at five airborne-state "
+             "init sites (including FUN_00089060, the main ground jump).")
 
     # save (inspect / introspect save directories)
     p_save = sub.add_parser(

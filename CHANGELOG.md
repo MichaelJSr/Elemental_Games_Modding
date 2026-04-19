@@ -2,6 +2,104 @@
 
 ## Unreleased
 
+### player_physics — jump slider + roll edge-lock NOP; GUI slider unclamp
+
+Four user-reported issues addressed in one pass.
+
+**#1. GUI text-box now accepts values outside the slider range.**
+`ParametricSlider` previously clamped typed values to
+`[slider_min, slider_max]` on commit.  Power users who wanted to
+push `walk_speed_scale=25` couldn't — the typed value got silently
+snapped to 10.  The text-box is now unclamped: any finite float
+commits verbatim as the exact value, the slider thumb rests at
+whichever bound is closer, and a `[!]` badge in the header
+indicates the exact value is outside the slider's visual range.
+`get_value()` returns the exact typed value.  Slider drags still
+operate inside the declared range.
+
+**#2. New `jump_speed_scale` slider.**  Reverse-engineered the
+main jump initialiser (`FUN_00089060`, plays
+`fx/sound/player/jump`).  The jump velocity scalar lives directly
+in the player entity at `+0x140`, written by five
+`MOV [reg+0x140], 0x41100000` instructions (5 airborne-state
+entry paths — main ground jump, water exit, wall kick, double-
+jump, mid-air state transition).  The new slider rewrites the
+4-byte IEEE-754 imm32 at each site with `9.0 × jump_scale`.  No
+shared constants touched; no shim required.
+
+- `JUMP_SPEED_SCALE` ParametricPatch added to `PLAYER_PHYSICS_SITES`.
+- CLI: `--player-jump-scale` (full build), `--jump-speed`
+  (physics-only) accept any float.
+- GUI Patches page renders a new "Player jump height" slider
+  (range 0.1–5.0, default 1.0, text-box unclamped).
+- Dynamic whitelist auto-whitelists the 5 imm32 sites.
+
+**#3. Roll slider now fires on sustained WHITE-button hold.**
+Confirmed via fresh Ghidra trace that the 3× boost at VA
+`0x849E4` IS player-specific, but its activation flag is gated
+by either `RIGHT_THUMB` (click) or `WHITE` (one-frame tap, then
+edge-locked).  Result: `roll_scale` was invisible during normal
+play because the engine set the flag for only a single frame per
+WHITE tap.  Fix: additionally NOP the 2-byte `JNZ +8` at VA
+`0x00085200` whenever `roll_scale != 1.0`, removing the WHITE
+edge-lock so holding WHITE now gives sustained 3× magnitude
+boost for every frame the button is down.  The byte patch was
+always correct — this change makes it observable in gameplay.
+
+**#4. `enable_dev_menu` rewritten (v4) to trampoline
+`FUN_00053750`'s entry prologue.**  v1-v3 patched various upstream
+branches inside `dev_menu_flag_check`, but the main New-Game →
+cutscene → first-level flow goes through `FUN_00055AB0` which
+calls the universal level loader `FUN_00053750` **directly** with
+a hardcoded level name (e.g. `"levels/water/w1"` after the
+prophecy cutscene), bypassing `dev_menu_flag_check` entirely.
+That's why v1-v3 looked like "nothing happens".
+
+v4 hooks the universal entry point itself.  At VA `0x00053750`,
+install a 7-byte trampoline (5-byte `JMP rel32` + 2 NOPs) that
+jumps to a 27-byte shim landed in the shim-landing slot.  The
+shim:
+
+1. Checks `param_4` (at `[ESP+0x10]`) — if nonzero (bink movie
+   path) it skips the override so cutscenes still play.
+2. Overwrites `param_2` (the level-name pointer at `[ESP+8]`)
+   with the VA of the `"levels/selector"` string at
+   `0x001A1E3C`.
+3. Replays the clobbered `MOV EAX, [ESP+4] ; MOV ECX, [EAX+0x40]`
+   instructions so EAX/ECX are correct when the function
+   continues.
+4. Jumps back to the `SUB ESP, 0x824` at VA `0x00053757`.
+
+Every level transition in the game — New Game, Load Save,
+cutscene-end, developer console loadlevel — now routes to
+`levels/selector` regardless of the upstream caller's intent.
+Movies (bink:) keep playing.
+
+**Docs updated**:
+
+- `docs/LEARNINGS.md`: new "WHITE-button sustained roll" section
+  documenting the edge-lock mechanism and the NOP fix.
+  Previous "enable_dev_menu — three-stage validator chain"
+  section supplemented with the direct-call-from-FUN_00055AB0
+  discovery note.
+- `docs/PATCHES.md`: updated player_physics entry for the 4th
+  slider (jump).  Updated enable_dev_menu site count to 1.
+- `azurik_mod/patches/enable_dev_menu/README.md` + module
+  docstring rewritten to document the trampoline design.
+
+**Tests**: 744 passed (+7).  New coverage:
+- `ApplyJumpSpeedBehaviour` (6 tests: the 5 imm32 sites, scale
+  multipliers, site-isolation guards, `apply_player_physics`
+  routing).
+- `test_roll_scale_nops_white_edge_lock` (pins edge-lock NOP
+  behaviour).
+- `DynamicWhitelistFromXbe` updated for the new jump + edge-
+  lock ranges.
+- `EnableDevMenuFeature` rewritten for the v4 trampoline
+  (8 tests pinning hook VA, vanilla prologue, selector-string
+  drift, JMP installation, shim layout byte-by-byte, section-
+  landing, idempotency, whitelist shape).
+
 ### player_physics — rename run→roll, add swim slider
 
 Two semantic fixes triggered by user testing ("run speed seems to

@@ -124,6 +124,52 @@ patches that layer on top of `CritterData.run_speed` must either
 preserve vanilla at scale=1 or clearly document the non-identity
 semantics.
 
+### WHITE-button sustained roll — bypassing the edge-lock (April 2026)
+
+The 3× boost at VA `0x849E4` (`FMUL [0x001A25BC]` inside
+`FUN_00084940`) is gated by bit `0x40` of the input-state flags
+byte at `+0x20`.  That bit is set by `FUN_00084f90` when either:
+
+1. `RIGHT_THUMB` (R3 click) is held — sustained activation, or
+2. `WHITE` analog button is tapped for the first frame —
+   edge-locked to a single frame per tap.
+
+The edge-lock is enforced by a 2-byte `JNZ +8` at VA
+`0x00085200`:
+
+```asm
+0x851FB  8A 41 4D   MOV AL, [ECX + 0x4D]     ; WHITE edge-lock byte
+0x851FE  84 C0       TEST AL, AL
+0x85200  75 08       JNZ 0x0008520A           ; if set, SKIP setting
+                                              ; bit 0x40 for this frame
+0x85202  C6 41 4D 01 MOV [ECX + 0x4D], 1      ; set edge-lock
+0x85206  B0 01       MOV AL, 1                 ; cVar5 = 1 (set bit 0x40)
+```
+
+So pressing WHITE:
+- Frame 1: edge-lock byte is 0 → JNZ doesn't fire → set
+  edge-lock to 1, set bit 0x40, magnitude × 3
+- Frame 2+: edge-lock byte is 1 → JNZ fires → skip, bit 0x40
+  NOT set, magnitude × 1
+
+This makes `roll_speed_scale` effectively invisible in sustained
+gameplay — the 3× boost fires for a SINGLE frame per WHITE tap,
+producing a velocity pulse too short to feel.
+
+**Fix**: NOP the 2-byte `JNZ +8` at VA `0x00085200` (replace
+`75 08` with `90 90`).  With the skip gone, the `MOV [ECX+0x4D], 1`
++ `MOV AL, 1` run unconditionally every frame WHITE is held —
+producing a SUSTAINED 3× boost.  (Other bits in the
+`cVar5`-accumulation chain have their own per-button edge-lock
+bytes at `+0x48..+0x4C`, so this NOP is safely isolated to the
+WHITE / bit 0x40 path.)
+
+`apply_player_speed` now installs this NOP automatically whenever
+`roll_scale != 1.0`, so users who configure `roll_speed_scale`
+see the effect on WHITE-held input without any extra steps.
+Vanilla activation (single-frame tap) is preserved if the user
+keeps `roll_scale = 1.0`.
+
 ### Roll, not run — the 3.0 at VA 0x001A25BC is WHITE-button only
 
 The slider that shipped as `run_speed_scale` until April 2026
@@ -158,6 +204,47 @@ The slider is therefore now labelled **`roll_speed_scale`**.
 The old `run_*` kwargs / attr names remain as transparent
 aliases so pinned callers don't break, but all documentation
 and tests use the new name.
+
+### Jump velocity is an imm32 at 5 call sites (April 2026)
+
+The main jump function is `FUN_00089060` (plays
+`fx/sound/player/jump` and transitions the player into airborne
+state 2).  It writes a **plain immediate** into the player
+entity's jump velocity slot at `+0x140`:
+
+```asm
+   C7 87 40 01 00 00 00 00 10 41
+   │  │  └─ disp32 = 0x00000140 ─┘└─ imm32 = 0x41100000 = 9.0
+   │  └─ ModR/M = [EDI+disp32]
+   └─ MOV r/m32, imm32
+```
+
+Vanilla jump velocity = `9.0`.  The airborne-state physics
+function (`FUN_00089480`) later reads `+0x140` and multiplies it
+by `PlayerInputState.magnitude` for the per-frame velocity, so
+scaling the initial value cleanly scales jump height.
+
+Five airborne-state entry sites all write the same `0x41100000`
+imm32 into `entity+0x140`:
+
+| VA         | Context                                         |
+|-----------:|:------------------------------------------------|
+| `0x84ECD` | airborne init reachable from ground walk path   |
+| `0x856CE` | early jump entry branch                          |
+| `0x890E4` | `FUN_00089060` (main jump), `+0x68 == 0` branch  |
+| `0x89120` | `FUN_00089060`, non-zero `+0x68` branch          |
+| `0x8D31C` | alternate mid-air state transition               |
+
+Patching the imm32 in-place (no shim, no trampoline) scales
+every jump variant uniformly.  `apply_jump_speed` rewrites all
+five with `9.0 × jump_scale` packed LE IEEE-754 — zero side
+effects on shared constants.
+
+✅ **Learning**: when a game stores a physics parameter as an
+immediate in MULTIPLE `MOV r/m32, imm32` instructions, scanning
+the XBE for the packed float bytes (here `00 00 10 41`) inside
+a disp32 context is faster than tracing each code path by hand.
+The 5 sites found here were discovered in one regex pass.
 
 ### Swim speed lives in FUN_0008b700 (April 2026)
 
@@ -1148,6 +1235,46 @@ v1 patch sat one branch too early in the decision chain.
 force a specific outcome — just make the earlier stages
 artificially fail and let the last stage (usually a hardcoded
 safe default) win.
+
+### v4: trampoline FUN_00053750 directly (April 2026)
+
+After shipping v3 (XOR-EAX on validators 1 and 2), byte patches
+verified correct, tests green — but users still reported
+*"still does nothing"*.  The real blocker: **`FUN_00055AB0`
+(main game state machine) calls `FUN_00053750` DIRECTLY** for
+cutscene-end transitions, passing hardcoded level names.  That
+path never enters `dev_menu_flag_check`, so v3's validator short-
+circuits had nothing to intercept.
+
+**v4 strategy**: hook the universal entry.  Patch
+`FUN_00053750`'s prologue (first 7 bytes → `JMP rel32 + 2 NOPs`)
+to jump into a 27-byte shim that:
+
+1. Guards: only override when `param_4 == 0` (non-bink path) —
+   cutscenes continue to play normally.
+2. Rewrites `param_2` at `[ESP+8]` to point at the
+   `"levels/selector"` string at VA `0x001A1E3C`.
+3. Replays the clobbered `MOV EAX, [ESP+4] ; MOV ECX, [EAX+0x40]`
+   so register state matches vanilla at the return point.
+4. `JMP`s back to `SUB ESP, 0x824` at VA `0x00053757`.
+
+Now every level transition — regardless of upstream caller —
+routes to selector.  Bink movie loads (`param_4 != 0`) pass
+through untouched.
+
+✅ **When an upstream patch has "no visible effect" despite
+correct bytes, the target isn't on the execution path.**  Scan
+the call graph for direct paths to the SHARED downstream
+function and patch THAT — avoids the combinatorics of
+enumerating every upstream caller.
+
+✅ **Trampoline-based stack-argument rewriting** is viable with
+zero register clobbers if you (a) guard on unrelated stack args
+(here `param_4`) to preserve alternative code paths, and (b)
+replay the clobbered-prologue instructions inside the shim before
+JMPing back.  27 bytes of shim is enough to hook any `__cdecl`
+function entry that doesn't immediately branch on the replaced
+instructions' outputs.
 
 ✅ **Preserving stack balance** is trivial with `XOR reg,reg +
 NOPs` because the replacement is exactly the same size as the

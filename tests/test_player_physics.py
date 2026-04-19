@@ -15,6 +15,7 @@ if _REPO_ROOT not in sys.path:
 from azurik_mod.patches.player_physics import (  # noqa: E402
     GRAVITY_BASELINE,
     GRAVITY_PATCH,
+    JUMP_SPEED_SCALE,
     ROLL_SPEED_SCALE,
     RUN_SPEED_SCALE,   # back-compat alias -> ROLL_SPEED_SCALE
     SWIM_SPEED_SCALE,
@@ -108,6 +109,7 @@ class VirtualSlidersAreHandled(unittest.TestCase):
         self.assertTrue(WALK_SPEED_SCALE.is_virtual)
         self.assertTrue(ROLL_SPEED_SCALE.is_virtual)
         self.assertTrue(SWIM_SPEED_SCALE.is_virtual)
+        self.assertTrue(JUMP_SPEED_SCALE.is_virtual)
         # Back-compat alias points at the same descriptor as roll.
         self.assertIs(RUN_SPEED_SCALE, ROLL_SPEED_SCALE)
 

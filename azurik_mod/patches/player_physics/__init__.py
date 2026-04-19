@@ -55,6 +55,22 @@
   unrelated to player movement), so we patch only the swim-state
   load.
 
+- **Jump height / velocity** (new, April 2026).  ``FUN_00089060``
+  is the main jump initiation (plays ``fx/sound/player/jump``) and
+  stores the jump velocity scalar directly into the player entity
+  at ``+0x140`` with the imm32 ``0x41100000`` (= ``9.0``).  Four
+  other sites (at VAs ``0x84ECD``, ``0x856CE``, ``0x890E4``,
+  ``0x89120``, ``0x8D31C``) initialise the same entity field for
+  alternate airborne paths (double-jump, water exit, mid-air
+  kick-off, etc.) — all five use the same ``0x41100000`` imm32
+  baseline.  Our patch rewrites the 4-byte imm32 at each site
+  with ``9.0 × jump_scale`` packed as IEEE 754.  No shared
+  constants are modified; no shim needed.  The rest of the jump
+  physics (gravity drag, ``FUN_00089480`` per-frame update) use
+  ``entity + 0x140`` as a multiplier on the stick magnitude, so
+  scaling the initial value cleanly scales the resulting jump
+  height.
+
 **Our approach** — inject three per-player 4-byte floats into the
 XBE's appended SHIMS section, rewrite three player-site instructions
 to reference them:
@@ -203,6 +219,21 @@ SWIM_SPEED_SCALE = ParametricPatch(
     decode=lambda b: struct.unpack("<d", b)[0],
 )
 
+JUMP_SPEED_SCALE = ParametricPatch(
+    name="jump_speed_scale",
+    label="Player jump height",
+    va=0,
+    size=0,
+    original=b"",
+    default=1.0,
+    slider_min=0.1,
+    slider_max=5.0,
+    slider_step=0.05,
+    unit="x",
+    encode=lambda v: struct.pack("<d", float(v)),
+    decode=lambda b: struct.unpack("<d", b)[0],
+)
+
 # Back-compat alias: the old name `RUN_SPEED_SCALE` shipped before we
 # realised the 3.0 multiplier is the roll boost, not a run modifier.
 # Keep as an import alias so any external code still works.
@@ -227,6 +258,19 @@ _ROLL_SITE_VANILLA = bytes([
 _RUN_SITE_VA = _ROLL_SITE_VA
 _RUN_SITE_VANILLA = _ROLL_SITE_VANILLA
 
+# WHITE-button edge-lock inside FUN_00084f90.  The 2-byte ``JNZ +8``
+# at VA 0x00085200 tests ``piVar7[0x4d]`` (the WHITE edge-lock byte)
+# and, when set, skips the flag-setting code path — making WHITE a
+# one-frame pulse.  NOPing this JNZ makes WHITE-held produce a
+# SUSTAINED 3× magnitude boost for every frame the button is down,
+# which is what users actually want when they configure roll_scale.
+# (Before this patch, roll_scale only affected gameplay for a single
+# frame per WHITE tap, making the slider effectively invisible in
+# normal use — see docs/LEARNINGS.md § "WHITE-button sustained roll".)
+_ROLL_EDGE_LOCK_VA = 0x00085200
+_ROLL_EDGE_LOCK_VANILLA = bytes.fromhex("7508")   # JNZ +8
+_ROLL_EDGE_LOCK_PATCH = bytes.fromhex("9090")     # NOP NOP
+
 _SWIM_SITE_VA = 0x0008B7BF
 _SWIM_SITE_VANILLA = bytes([
     0xD8, 0x0D,
@@ -245,6 +289,34 @@ _VANILLA_RUN_MULTIPLIER = _VANILLA_ROLL_MULTIPLIER
 # own state function (FUN_0008b700), independent of the walk/roll FLD
 # chain, so the injected value is simply 10.0 × swim_scale.
 _VANILLA_SWIM_MULTIPLIER = 10.0
+
+# Baseline jump-velocity scalar stored into `entity + 0x140` by five
+# `MOV [reg+0x140], imm32` instructions across the airborne-state
+# initialisation functions (main ground jump in FUN_00089060, plus
+# four alternate entry points).  Vanilla imm32 is `0x41100000` =
+# `9.0`.  The per-site imm32 offsets are stored in
+# ``_JUMP_SPEED_IMM_SITES`` below.
+_VANILLA_JUMP_VELOCITY = 9.0
+_JUMP_SPEED_IMM32_VANILLA = struct.pack("<f", _VANILLA_JUMP_VELOCITY)
+
+# Five sites (VA of the first byte of the 4-byte IEEE 754 imm32).
+# Each site is embedded in a 10-byte
+# ``MOV DWORD [reg_or_ebp + 0x140], 0x41100000`` instruction whose
+# imm32 starts 6 bytes after the opcode.  The opcode structure is:
+#   C7 <ModR/M> 40 01 00 00   <imm32>
+#                             ^^^^^^^^ this is what we rewrite
+#
+# Mix of ModR/M bytes — some functions use ``[EDI+0x140]``, others
+# ``[ESI+0x140]`` or ``[EBP+0x140]`` — reflected in the raw pattern
+# scan (``_JUMP_SITE_PREFIXES``).  The byte BEFORE the imm32 is
+# always ``0x00`` (last byte of the ``0x00000140`` disp32).
+_JUMP_SITE_VAS = [
+    0x00084ED3,   # inside airborne-state setup reachable from walk/ground state
+    0x000856D4,   # early jump-entry branch
+    0x000890EA,   # FUN_00089060 (main jump), `+0x68 == 0` branch
+    0x00089126,   # FUN_00089060 (main jump), non-zero +0x68 branch
+    0x0008D322,   # alternate mid-air entry (state-machine dispatch path)
+]
 
 # Vanilla runtime value of CritterData.run_speed (+0x40) for the
 # player entity.  Confirmed via lldb at VA 0x00085F65 — the FLD
@@ -272,6 +344,7 @@ def apply_player_physics(
     walk_scale: float | None = None,
     roll_scale: float | None = None,
     swim_scale: float | None = None,
+    jump_scale: float | None = None,
     # Back-compat alias: callers that still pass run_scale get
     # transparently routed to roll_scale (the new name).
     run_scale: float | None = None,
@@ -279,7 +352,7 @@ def apply_player_physics(
 ) -> None:
     """Apply the XBE-side portion of the player physics pack.
 
-    All four adjustments operate on ``default.xbe`` directly.  Speed
+    All five adjustments operate on ``default.xbe`` directly.  Speed
     sliders no longer touch ``config.xbr`` — the values there turned
     out to be dead data (see module docstring).
     """
@@ -298,6 +371,10 @@ def apply_player_physics(
     s = 1.0 if swim_scale is None else float(swim_scale)
     if s != 1.0:
         apply_swim_speed(xbe_data, swim_scale=s)
+
+    j = 1.0 if jump_scale is None else float(jump_scale)
+    if j != 1.0:
+        apply_jump_speed(xbe_data, jump_scale=j)
 
 
 def apply_player_speed(
@@ -406,6 +483,26 @@ def apply_player_speed(
     xbe_data[roll_off:roll_off + 6] = (
         b"\xD8\x0D" + struct.pack("<I", roll_va))
 
+    # --- Remove the WHITE-button edge-lock so roll_scale is visible
+    # during sustained WHITE-held input rather than only on the
+    # first frame of a tap.  Idempotent: if the JNZ is already
+    # NOPed (second apply, drift), silently keep the NOPs.
+    if roll_scale != 1.0:
+        el_off = va_to_file(_ROLL_EDGE_LOCK_VA)
+        current = bytes(xbe_data[el_off:el_off + 2])
+        if current == _ROLL_EDGE_LOCK_VANILLA:
+            xbe_data[el_off:el_off + 2] = _ROLL_EDGE_LOCK_PATCH
+            print(f"  Player roll edge-lock: NOPed "
+                  f"(VA 0x{_ROLL_EDGE_LOCK_VA:X}) — WHITE-held "
+                  f"now gives sustained {roll_scale:.2f}× boost.")
+        elif current != _ROLL_EDGE_LOCK_PATCH:
+            print(f"  WARNING: player_speed — roll edge-lock at VA "
+                  f"0x{_ROLL_EDGE_LOCK_VA:X} drifted (got "
+                  f"{current.hex()}); sustained WHITE boost not "
+                  f"activated, but the FMUL injection is still "
+                  f"applied — roll will fire on 1-frame WHITE "
+                  f"taps and on RIGHT_THUMB clicks.")
+
     print(f"  Player walk speed: {walk_scale:.3f}x vanilla  "
           f"(injected base = {inject_base:.3f}, VA 0x{walk_va:X})")
     print(f"  Player roll speed: {roll_scale:.3f}x vanilla  "
@@ -459,6 +556,51 @@ def apply_swim_speed(
     return True
 
 
+def apply_jump_speed(
+    xbe_data: bytearray,
+    *,
+    jump_scale: float = 1.0,
+) -> bool:
+    """Patch ``default.xbe`` so the player jumps at a custom height.
+
+    Rewrites the 4-byte IEEE-754 imm32 at each of
+    ``_JUMP_SITE_VAS`` (five sites inside the airborne-state init
+    functions, including ``FUN_00089060`` — the main ground jump)
+    with ``9.0 × jump_scale``.  Each instruction is a
+    ``MOV DWORD [reg+0x140], imm32`` writing the jump-velocity
+    scalar directly into the player-entity struct, so no shared
+    constant is touched and no shim infrastructure is needed.
+
+    Returns True when any site was rewritten, False on no-op or
+    when ALL sites were drifted (in which case the buffer is left
+    unchanged and a warning is printed per-site).
+    """
+    if jump_scale == 1.0:
+        return False
+
+    new_imm_bytes = struct.pack("<f",
+                                _VANILLA_JUMP_VELOCITY * float(jump_scale))
+    patched_sites = 0
+    for site_va in _JUMP_SITE_VAS:
+        off = va_to_file(site_va)
+        current = bytes(xbe_data[off:off + 4])
+        if current != _JUMP_SPEED_IMM32_VANILLA:
+            print(f"  WARNING: player_speed — jump imm32 at VA "
+                  f"0x{site_va:X} already patched or drifted "
+                  f"(got {current.hex()}), skipping this site.")
+            continue
+        xbe_data[off:off + 4] = new_imm_bytes
+        patched_sites += 1
+
+    if patched_sites == 0:
+        return False
+
+    print(f"  Player jump height: {jump_scale:.3f}x vanilla  "
+          f"({patched_sites}/{len(_JUMP_SITE_VAS)} sites rewritten, "
+          f"imm32 = {_VANILLA_JUMP_VELOCITY * jump_scale:.3f})")
+    return True
+
+
 def _player_speed_dynamic_whitelist(
     xbe: bytes,
 ) -> list[tuple[int, int]]:
@@ -488,15 +630,27 @@ def _player_speed_dynamic_whitelist(
     except Exception:  # noqa: BLE001
         return []
 
-    # Static: the three 6-byte instruction rewrite sites are always
-    # whitelisted.  On a vanilla XBE these ranges are unchanged and
-    # the diff reports zero bytes in them, so whitelisting them is
+    # Static: the three 6-byte instruction rewrite sites + the
+    # 2-byte roll edge-lock JNZ + five 4-byte jump-imm32 sites are
+    # always whitelisted.  On a vanilla XBE these ranges hold their
+    # pristine bytes so the diff reports zero, keeping whitelisting
     # safe.
     ranges: list[tuple[int, int]] = [
         (walk_off, walk_off + 6),
         (roll_off, roll_off + 6),
         (swim_off, swim_off + 6),
     ]
+    try:
+        el_off = va_to_file(_ROLL_EDGE_LOCK_VA)
+        ranges.append((el_off, el_off + 2))
+    except Exception:  # noqa: BLE001
+        pass
+    for site_va in _JUMP_SITE_VAS:
+        try:
+            jump_off = va_to_file(site_va)
+        except Exception:  # noqa: BLE001
+            continue
+        ranges.append((jump_off, jump_off + 4))
 
     # Dynamic: if a site has been rewritten to `FLD/FMUL [abs32]`,
     # follow the abs32 pointer through the section table and whitelist
@@ -535,11 +689,13 @@ PLAYER_PHYSICS_SITES = [
     WALK_SPEED_SCALE,
     ROLL_SPEED_SCALE,
     SWIM_SPEED_SCALE,
+    JUMP_SPEED_SCALE,
 ]
 """Registered Patches-page sites.  Gravity writes to a .rdata float
-directly; walk/roll/swim speed sliders are "virtual" (va=0) and the
-pack's apply function materialises their values into injected XBE
-bytes."""
+directly; walk/roll/swim/jump speed sliders are "virtual" (va=0)
+and the pack's apply function materialises their values into
+injected XBE bytes (walk/roll/swim via shim-landing FLD/FMUL
+rewrites, jump via direct imm32 overwrites at five call sites)."""
 
 
 def _apply_defaults(xbe_data: bytearray) -> None:
@@ -554,6 +710,7 @@ def _custom_apply(
     walk_speed_scale: float | None = None,
     roll_speed_scale: float | None = None,
     swim_speed_scale: float | None = None,
+    jump_speed_scale: float | None = None,
     # Back-compat: the old kwarg spellings.  New callers should use
     # the *_speed_scale forms, but CLI / serialized configs that
     # predate the rename still work.
@@ -562,6 +719,7 @@ def _custom_apply(
     roll_scale: float | None = None,
     run_scale: float | None = None,
     swim_scale: float | None = None,
+    jump_scale: float | None = None,
     **_extra,
 ) -> None:
     """Unified-dispatcher hook — forwards slider kwargs to the full
@@ -569,9 +727,9 @@ def _custom_apply(
 
     ``params`` on the dispatcher side is ``{"gravity": ...,
     "walk_speed_scale": ..., "roll_speed_scale": ...,
-    "swim_speed_scale": ...}`` (matching the ParametricPatch names).
-    We also accept the short aliases and the legacy ``run_*`` names
-    used by older CLI code.
+    "swim_speed_scale": ..., "jump_speed_scale": ...}`` (matching
+    the ParametricPatch names).  We also accept the short aliases
+    and the legacy ``run_*`` names used by older CLI code.
     """
     walk = walk_speed_scale if walk_speed_scale is not None else walk_scale
     roll = (
@@ -581,22 +739,24 @@ def _custom_apply(
         else run_scale
     )
     swim = swim_speed_scale if swim_speed_scale is not None else swim_scale
+    jump = jump_speed_scale if jump_speed_scale is not None else jump_scale
     apply_player_physics(
         xbe_data,
         gravity=gravity,
         walk_scale=walk,
         roll_scale=roll,
         swim_scale=swim,
+        jump_scale=jump,
     )
 
 
 FEATURE = register_feature(Feature(
     name="player_physics",
     description=(
-        "Scales world gravity and player walk / roll / swim speed.  "
-        "Gravity is global; walk, roll (WHITE-button boost), and "
-        "swim are player-only (enemies keep their vanilla "
-        "behaviour)."
+        "Scales world gravity and player walk / roll / swim / "
+        "jump speed.  Gravity is global; walk, roll (WHITE-button "
+        "boost), swim, and jump are player-only (enemies keep "
+        "their vanilla behaviour)."
     ),
     sites=PLAYER_PHYSICS_SITES,
     apply=_apply_defaults,
@@ -612,11 +772,13 @@ FEATURE = register_feature(Feature(
 __all__ = [
     "GRAVITY_BASELINE",
     "GRAVITY_PATCH",
+    "JUMP_SPEED_SCALE",
     "PLAYER_PHYSICS_SITES",
     "ROLL_SPEED_SCALE",
     "RUN_SPEED_SCALE",
     "SWIM_SPEED_SCALE",
     "WALK_SPEED_SCALE",
+    "apply_jump_speed",
     "apply_player_physics",
     "apply_player_speed",
     "apply_swim_speed",

@@ -579,14 +579,26 @@ class ParametricSlider(ttk.Frame):
 
     Two bidirectional inputs:
     - `ttk.Scale` for quick visual tuning across the slider range.
-    - `ttk.Entry` for typing an exact numeric value; any float is
-      accepted and clamped to `[slider_min, slider_max]` on commit,
-      so users can dial in precise values (e.g. gravity = 12.34) that
-      the slider's step granularity alone wouldn't allow.
+      The slider range is strictly ``[slider_min, slider_max]``;
+      the slider thumb clamps at those bounds.
+    - `ttk.Entry` for typing an **arbitrary** numeric value — the
+      entry box accepts values *outside* the slider's declared
+      range so power users can dial in extreme values (e.g.
+      ``gravity = 200.0``, ``walk_scale = 100.0``) that the slider
+      physically can't represent.  When an out-of-range value is
+      committed, the entry shows a ``[!]`` badge to communicate
+      that the slider thumb no longer reflects the true value.
 
-    Both controls share the same DoubleVar: editing one updates the
-    other.  `on_change(value)` fires on every change.  Reset returns
-    to the patch's `default`.
+    Both controls share state via an internal "exact value" that
+    is the source of truth — ``get_value()`` returns the exact
+    value regardless of slider bounds.  When the slider thumb is
+    at a position, the exact value equals the slider's numeric
+    position.  When the user types an out-of-range number, the
+    slider thumb sits at ``slider_min`` or ``slider_max`` (whichever
+    is closer), but ``get_value()`` still returns the typed value.
+
+    ``on_change(value)`` fires on every change.  Reset returns to
+    the patch's ``default``.
     """
 
     def __init__(self, parent, patch, *,
@@ -595,9 +607,15 @@ class ParametricSlider(ttk.Frame):
         super().__init__(parent)
         self._patch = patch
         self._on_change = on_change
-        self._var = tk.DoubleVar(
-            value=initial if initial is not None else patch.default)
-        self._entry_var = tk.StringVar(value=f"{self._var.get():g}")
+        initial_value = (initial if initial is not None
+                         else float(patch.default))
+        # Source of truth: the exact value the user wants, WITHOUT
+        # slider-bound clamping.  Callers read this via get_value().
+        self._exact_value = float(initial_value)
+        # Slider-backing var: tracks the slider's visual thumb
+        # position, clamped to [slider_min, slider_max].
+        self._var = tk.DoubleVar(value=self._clamp_to_slider(initial_value))
+        self._entry_var = tk.StringVar(value=f"{self._exact_value:g}")
         self._building = False  # suppress re-entrant callbacks
 
         # Row 1: label + current value / default + range hint.
@@ -607,12 +625,13 @@ class ParametricSlider(ttk.Frame):
             side=tk.LEFT)
         self._value_lbl = ttk.Label(
             head,
-            text=self._header_text(self._var.get()),
+            text=self._header_text(self._exact_value),
             foreground="gray")
         self._value_lbl.pack(side=tk.LEFT, padx=(6, 0))
         ttk.Label(
             head,
-            text=(f"  range: {patch.slider_min:g}..{patch.slider_max:g}"),
+            text=(f"  slider range: {patch.slider_min:g}.."
+                  f"{patch.slider_max:g}  (entry: unrestricted)"),
             foreground="gray",
         ).pack(side=tk.RIGHT)
 
@@ -637,19 +656,51 @@ class ParametricSlider(ttk.Frame):
         SecondaryButton(row, text="Reset",
                         command=self._reset).pack(side=tk.LEFT)
 
+    # --- private helpers ----------------------------------------------
+
+    def _clamp_to_slider(self, v: float) -> float:
+        """Clamp to the slider's visual range for thumb positioning.
+        Does NOT constrain ``_exact_value`` — the entry box remains
+        free to hold out-of-range values."""
+        return max(float(self._patch.slider_min),
+                   min(float(self._patch.slider_max), float(v)))
+
+    def _is_out_of_range(self, v: float) -> bool:
+        return (v < self._patch.slider_min - 1e-9
+                or v > self._patch.slider_max + 1e-9)
+
     def _header_text(self, value: float) -> str:
+        badge = (" [!]"
+                 if self._is_out_of_range(value) else "")
         return (f"= {value:g} {self._patch.unit}"
-                f"  (default {self._patch.default:g})")
+                f"  (default {self._patch.default:g}){badge}")
 
     # --- public --------------------------------------------------------
 
     def get_value(self) -> float:
-        return float(self._var.get())
+        """Return the exact value the user set — possibly out of
+        the slider's visual range when the user typed a power-user
+        value into the entry box."""
+        return float(self._exact_value)
 
-    def set_value(self, v: float) -> None:
-        v = max(self._patch.slider_min, min(self._patch.slider_max, float(v)))
+    def set_value(self, v: float, *, clamp: bool = True) -> None:
+        """Programmatic setter.
+
+        ``clamp=True`` (default, used by slider drag + reset button):
+        the value is clamped to ``[slider_min, slider_max]`` so
+        the slider thumb and exact value stay in sync.
+
+        ``clamp=False`` (used by the entry-box commit path):
+        accept any finite float the user typed, move the slider
+        thumb to the nearest bound, but keep ``_exact_value`` at
+        the typed value so ``get_value()`` returns it verbatim.
+        """
+        v = float(v)
+        if clamp:
+            v = self._clamp_to_slider(v)
+        self._exact_value = v
         self._building = True
-        self._var.set(v)
+        self._var.set(self._clamp_to_slider(v))
         self._entry_var.set(f"{v:g}")
         self._value_lbl.configure(text=self._header_text(v))
         self._building = False
@@ -672,7 +723,10 @@ class ParametricSlider(ttk.Frame):
         # onto the same canonical representation.
         if self._building:
             return
+        # Slider drags always produce in-range values; sync
+        # _exact_value to match.
         v = float(self._var.get())
+        self._exact_value = v
         self._entry_var.set(f"{v:g}")
         self._value_lbl.configure(text=self._header_text(v))
         if self._on_change:
@@ -684,10 +738,14 @@ class ParametricSlider(ttk.Frame):
         try:
             v = float(self._entry_var.get())
         except ValueError:
-            # Snap back to last valid value
-            self._entry_var.set(f"{self._var.get():g}")
+            # Snap back to last valid exact value.
+            self._entry_var.set(f"{self._exact_value:g}")
             return
-        self.set_value(v)
+        # User-typed values bypass the slider clamp so power users
+        # can exceed the slider's declared range.
+        self.set_value(v, clamp=False)
 
     def _reset(self):
-        self.set_value(self._patch.default)
+        # Reset uses clamp=True so the slider thumb visibly snaps
+        # back to the default value.
+        self.set_value(self._patch.default, clamp=True)

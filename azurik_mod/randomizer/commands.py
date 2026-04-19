@@ -1294,6 +1294,7 @@ def cmd_randomize_full(args):
             or getattr(args, 'player_run_scale', None)
             or 1.0)
         swim_scale = float(getattr(args, 'player_swim_scale', None) or 1.0)
+        jump_scale = float(getattr(args, 'player_jump_scale', None) or 1.0)
         player_char = getattr(args, 'player_character', None)
         xbe_path = extract_dir / "default.xbe"
 
@@ -1309,7 +1310,8 @@ def cmd_randomize_full(args):
             "player_physics": (gravity_val is not None
                                or walk_scale != 1.0
                                or roll_scale != 1.0
-                               or swim_scale != 1.0),
+                               or swim_scale != 1.0
+                               or jump_scale != 1.0),
         }
 
         needs_xbe = any(_FLAG_PACKS.values()) or bool(player_char)
@@ -1327,6 +1329,7 @@ def cmd_randomize_full(args):
                     "walk_speed_scale": walk_scale,
                     "roll_speed_scale": roll_scale,
                     "swim_speed_scale": swim_scale,
+                    "jump_speed_scale": jump_scale,
                 },
             }
 
@@ -1750,14 +1753,17 @@ def cmd_apply_physics(args):
         or getattr(args, "run_speed", None)
         or 1.0)
     swim_scale = float(getattr(args, "swim_speed", None) or 1.0)
+    jump_scale = float(getattr(args, "jump_speed", None) or 1.0)
 
     if (gravity is None
             and walk_scale == 1.0
             and roll_scale == 1.0
-            and swim_scale == 1.0):
+            and swim_scale == 1.0
+            and jump_scale == 1.0):
         print("No physics changes requested.  "
               "Pass --gravity, --walk-speed, --roll-speed (or "
-              "legacy --run-speed), and/or --swim-speed.")
+              "legacy --run-speed), --swim-speed, and/or "
+              "--jump-speed.")
         return
 
     def _patch_xbe_in_place(xbe_path: Path) -> None:
@@ -1768,6 +1774,7 @@ def cmd_apply_physics(args):
             walk_scale=walk_scale if walk_scale != 1.0 else None,
             roll_scale=roll_scale if roll_scale != 1.0 else None,
             swim_scale=swim_scale if swim_scale != 1.0 else None,
+            jump_scale=jump_scale if jump_scale != 1.0 else None,
         )
         xbe_path.write_bytes(data)
 

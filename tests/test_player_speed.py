@@ -45,15 +45,19 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from azurik_mod.patches.player_physics import (  # noqa: E402
+    _JUMP_SITE_VAS,
+    _JUMP_SPEED_IMM32_VANILLA,
     _ROLL_SITE_VA,
     _ROLL_SITE_VANILLA,
     _SWIM_SITE_VA,
     _SWIM_SITE_VANILLA,
+    _VANILLA_JUMP_VELOCITY,
     _VANILLA_PLAYER_BASE_SPEED,
     _VANILLA_ROLL_MULTIPLIER,
     _VANILLA_SWIM_MULTIPLIER,
     _WALK_SITE_VA,
     _WALK_SITE_VANILLA,
+    apply_jump_speed,
     apply_player_physics,
     apply_player_speed,
     apply_swim_speed,
@@ -235,6 +239,36 @@ class ApplyPlayerSpeedBehaviour(unittest.TestCase):
                 "fail safe (we'd otherwise leave the injected float "
                 "orphaned and clobber the absolute-ref VA).")
 
+    def test_roll_scale_nops_white_edge_lock(self):
+        """April 2026: when roll_scale != 1.0, apply_player_speed
+        also NOPs the 2-byte ``JNZ +8`` at VA 0x00085200 inside
+        FUN_00084f90.  That NOP removes the WHITE-button edge-lock,
+        letting the 3× roll boost fire every frame WHITE is held
+        rather than just the first frame of a tap.  Without this
+        NOP, ``roll_scale`` is effectively invisible in sustained
+        gameplay since WHITE-held resets the flag on frame 2+."""
+        from azurik_mod.patches.player_physics import (
+            _ROLL_EDGE_LOCK_PATCH,
+            _ROLL_EDGE_LOCK_VA,
+            _ROLL_EDGE_LOCK_VANILLA,
+        )
+        # roll_scale=1.0 must leave the edge-lock alone.
+        data = bytearray(self.orig)
+        self.assertTrue(apply_player_speed(data, walk_scale=2.0,
+                                            roll_scale=1.0))
+        off = va_to_file(_ROLL_EDGE_LOCK_VA)
+        self.assertEqual(bytes(data[off:off + 2]),
+                         _ROLL_EDGE_LOCK_VANILLA,
+            msg="roll_scale=1.0 must not NOP the edge-lock")
+
+        # roll_scale != 1.0 must NOP the edge-lock.
+        data2 = bytearray(self.orig)
+        self.assertTrue(apply_player_speed(data2, roll_scale=2.0))
+        self.assertEqual(bytes(data2[off:off + 2]),
+                         _ROLL_EDGE_LOCK_PATCH,
+            msg="roll_scale=2.0 must NOP the edge-lock so WHITE-"
+                "held gives sustained boost")
+
     def test_legacy_run_scale_kwarg_still_works(self):
         """Back-compat: the old ``run_scale`` kwarg must still
         route to the roll multiplier.  Ensures users with pinned
@@ -319,6 +353,91 @@ class ApplySwimSpeedBehaviour(unittest.TestCase):
 
 @unittest.skipUnless(_XBE_PATH,
     "vanilla default.xbe fixture not available")
+class ApplyJumpSpeedBehaviour(unittest.TestCase):
+    """Jump slider rewrites the 4-byte ``0x41100000`` (= 9.0)
+    imm32 at each of the five ``MOV [reg+0x140], 9.0`` sites
+    that initialise the jump velocity scalar before the
+    airborne state uses it as a per-frame multiplier."""
+
+    def setUp(self):
+        self.orig = _XBE_PATH.read_bytes()
+
+    def test_default_is_noop(self):
+        data = bytearray(self.orig)
+        self.assertFalse(apply_jump_speed(data))
+        self.assertEqual(bytes(data), self.orig,
+            msg="jump_scale=1.0 must leave the XBE byte-identical.")
+
+    def test_all_five_sites_vanilla_is_9_point_0(self):
+        """Drift check: every declared jump-imm32 site must
+        currently hold the 4-byte float ``9.0``."""
+        for va in _JUMP_SITE_VAS:
+            off = va_to_file(va)
+            current = bytes(self.orig[off:off + 4])
+            self.assertEqual(current, _JUMP_SPEED_IMM32_VANILLA,
+                msg=f"jump-imm32 site at VA 0x{va:X} drifted "
+                    f"from 9.0 (got {current.hex()})")
+
+    def test_scale_2_doubles_all_five_sites(self):
+        """At jump_scale=2.0, every site must hold 18.0 (= 9×2)."""
+        data = bytearray(self.orig)
+        self.assertTrue(apply_jump_speed(data, jump_scale=2.0))
+        for va in _JUMP_SITE_VAS:
+            off = va_to_file(va)
+            value = struct.unpack("<f",
+                                  bytes(data[off:off + 4]))[0]
+            self.assertAlmostEqual(value, 18.0, places=3,
+                msg=f"VA 0x{va:X} should be 18.0, got {value}")
+
+    def test_scale_05_halves_all_five_sites(self):
+        data = bytearray(self.orig)
+        self.assertTrue(apply_jump_speed(data, jump_scale=0.5))
+        for va in _JUMP_SITE_VAS:
+            off = va_to_file(va)
+            value = struct.unpack("<f",
+                                  bytes(data[off:off + 4]))[0]
+            self.assertAlmostEqual(value, 4.5, places=3)
+
+    def test_reapply_refused(self):
+        """Re-apply on already-patched buffer must refuse — the
+        drifted bytes no longer match the vanilla 9.0."""
+        data = bytearray(self.orig)
+        self.assertTrue(apply_jump_speed(data, jump_scale=2.0))
+        # Second apply: sites now hold 18.0, not 9.0, so nothing
+        # should rewrite and the function returns False.
+        self.assertFalse(apply_jump_speed(data, jump_scale=3.0),
+            msg="second apply on already-patched buffer must "
+                "refuse (would otherwise silently scale the "
+                "scaled value).")
+
+    def test_does_not_touch_walk_roll_swim_sites(self):
+        """Site isolation — jump apply must leave the walk / roll /
+        swim instruction bytes at vanilla."""
+        data = bytearray(self.orig)
+        self.assertTrue(apply_jump_speed(data, jump_scale=3.0))
+        for va, vanilla in (
+            (_WALK_SITE_VA, _WALK_SITE_VANILLA),
+            (_ROLL_SITE_VA, _ROLL_SITE_VANILLA),
+            (_SWIM_SITE_VA, _SWIM_SITE_VANILLA),
+        ):
+            off = va_to_file(va)
+            self.assertEqual(bytes(data[off:off + 6]), vanilla,
+                msg=f"jump apply touched VA 0x{va:X}")
+
+    def test_apply_player_physics_routes_jump(self):
+        """High-level apply_player_physics(jump_scale=X) must
+        rewrite the imm32s via apply_jump_speed."""
+        data = bytearray(self.orig)
+        apply_player_physics(data, jump_scale=1.5)
+        off = va_to_file(_JUMP_SITE_VAS[0])
+        value = struct.unpack("<f",
+                              bytes(data[off:off + 4]))[0]
+        self.assertAlmostEqual(value, _VANILLA_JUMP_VELOCITY * 1.5,
+                               places=3)
+
+
+@unittest.skipUnless(_XBE_PATH,
+    "vanilla default.xbe fixture not available")
 class ApplyPlayerPhysicsRouting(unittest.TestCase):
     """`apply_player_physics` accepts gravity + walk + roll + swim
     kwargs together and routes each to its own sub-patch."""
@@ -384,13 +503,16 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
     ``verify-patches --strict`` over the THREE instruction rewrites
     (walk, roll, swim) + up to three injected per-player floats."""
 
-    def test_vanilla_xbe_includes_all_three_static_sites(self):
-        """On a vanilla XBE the three 6-byte instruction-site ranges
-        are ALWAYS whitelisted.  The roll + swim sites look like
+    def test_vanilla_xbe_includes_all_static_sites(self):
+        """On a vanilla XBE the three 6-byte instruction-site
+        ranges (walk, roll, swim) + the 2-byte roll edge-lock
+        range + five 4-byte jump-imm32 ranges are ALWAYS
+        whitelisted.  The roll + swim sites look like
         ``FMUL [abs32]`` natively so the callback also follows each
         abs32 and whitelists a 4-byte range at the shared constants
         (harmless — those never change)."""
         from azurik_mod.patches.player_physics import (
+            _ROLL_EDGE_LOCK_VA,
             _player_speed_dynamic_whitelist,
         )
         xbe = _XBE_PATH.read_bytes()
@@ -398,12 +520,19 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         walk_off = va_to_file(_WALK_SITE_VA)
         roll_off = va_to_file(_ROLL_SITE_VA)
         swim_off = va_to_file(_SWIM_SITE_VA)
+        edge_off = va_to_file(_ROLL_EDGE_LOCK_VA)
         self.assertIn((walk_off, walk_off + 6), ranges)
         self.assertIn((roll_off, roll_off + 6), ranges)
         self.assertIn((swim_off, swim_off + 6), ranges)
-        # 3 instr sites + up to 2 extra 4-byte ranges (shared roll
-        # constant + shared swim constant) = 3..5.
-        self.assertIn(len(ranges), (3, 4, 5),
+        self.assertIn((edge_off, edge_off + 2), ranges)
+        for va in _JUMP_SITE_VAS:
+            self.assertIn((va_to_file(va), va_to_file(va) + 4),
+                          ranges,
+                msg=f"jump-imm32 site at VA 0x{va:X} missing "
+                    f"from whitelist")
+        # 3 instr sites + 1 edge-lock + 5 jump-imm32 sites + up to 2
+        # extra 4-byte ranges (shared roll constant + shared swim).
+        self.assertIn(len(ranges), (9, 10, 11),
             msg=f"unexpected range count {len(ranges)}: {ranges}")
 
     def test_patched_xbe_adds_injected_float_ranges(self):
@@ -417,17 +546,22 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         self.assertTrue(apply_player_speed(
             data, walk_scale=2.0, roll_scale=1.5))
         self.assertTrue(apply_swim_speed(data, swim_scale=2.0))
+        self.assertTrue(apply_jump_speed(data, jump_scale=1.5))
         ranges = _player_speed_dynamic_whitelist(bytes(data))
-        # Three instruction-site ranges + three float ranges = 6.
         four_byte_ranges = [(lo, hi) for lo, hi in ranges
                             if hi - lo == 4]
         six_byte_ranges = [(lo, hi) for lo, hi in ranges
                            if hi - lo == 6]
+        two_byte_ranges = [(lo, hi) for lo, hi in ranges
+                           if hi - lo == 2]
         self.assertEqual(len(six_byte_ranges), 3,
-            msg="3 instruction-site rewrites")
-        self.assertEqual(len(four_byte_ranges), 3,
-            msg="3 injected float ranges (walk base + roll mult + "
-                "swim mult)")
+            msg="3 instruction-site rewrites (walk/roll/swim)")
+        # 3 injected floats (walk/roll/swim) + 5 jump-imm32 sites = 8.
+        self.assertEqual(len(four_byte_ranges), 8,
+            msg="3 injected floats + 5 jump-imm32 sites = 8 "
+                "four-byte ranges")
+        self.assertEqual(len(two_byte_ranges), 1,
+            msg="1 edge-lock range (roll sustained patch)")
 
     def test_callback_does_not_raise_on_all_zero_buffer(self):
         """Drift-safety: if called on something that isn't an XBE at
