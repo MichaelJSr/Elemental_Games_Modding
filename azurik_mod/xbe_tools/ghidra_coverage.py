@@ -207,6 +207,7 @@ def _parse_va(raw) -> int | None:
 
 def build_coverage_report(snapshot_path: Path | None = None, *,
                           azurik_h: Path | None = None,
+                          live_client: "GhidraClient | None" = None,
                           ) -> CoverageReport:
     """Produce a :class:`CoverageReport` from the current workspace.
 
@@ -214,8 +215,21 @@ def build_coverage_report(snapshot_path: Path | None = None, *,
     the repo root.  Pass an explicit path in tests to exercise the
     harvester on a fixture header.
 
-    ``snapshot_path`` is optional — when None, the report skips the
-    cross-reference and populates only the Python-side totals.
+    Data sources for the Ghidra side are resolved in priority
+    order:
+
+    1. ``live_client`` — a
+       :class:`~azurik_mod.xbe_tools.ghidra_client.GhidraClient`
+       pointed at a running Ghidra instance.  Pulls functions +
+       labels via paginated GETs.  Use this when Ghidra is open
+       and you want a fresh read.
+    2. ``snapshot_path`` — a saved JSON dump (schema documented
+       in this module's docstring).  Use in CI / offline.
+    3. Neither — the report runs Python-side-only with empty
+       ``unlabeled_known`` / ``orphan_ghidra``.
+
+    If both ``live_client`` and ``snapshot_path`` are supplied,
+    ``live_client`` wins.
     """
     repo_root = _find_repo_root()
     azurik_h = (azurik_h or (repo_root / "shims" / "include" /
@@ -240,39 +254,81 @@ def build_coverage_report(snapshot_path: Path | None = None, *,
 
     report = CoverageReport(known_symbols=uniq)
 
-    if snapshot_path is not None and snapshot_path.exists():
+    # Ghidra-side sources
+    funcs: dict[int, str] = {}
+    labels: dict[int, str] = {}
+    source_label: str | None = None
+    if live_client is not None:
+        funcs, labels = _live_ghidra_snapshot(live_client)
+        source_label = f"live:{live_client.base_url}"
+    elif snapshot_path is not None and snapshot_path.exists():
         funcs, labels = load_ghidra_snapshot(snapshot_path)
-        report.ghidra_functions = funcs
-        report.ghidra_labels = labels
-        report.snapshot_path = str(snapshot_path)
+        source_label = str(snapshot_path)
 
-        # Unlabeled known: our VA isn't in funcs + isn't in labels,
-        # OR the function name is still a Ghidra auto-label
-        # (``FUN_``, ``LAB_``, ``DAT_``).
-        def is_meaningful(name: str | None) -> bool:
-            if not name:
-                return False
-            return not (name.startswith("FUN_") or
-                        name.startswith("LAB_") or
-                        name.startswith("DAT_"))
+    if source_label is None:
+        return report
 
-        for s in uniq:
-            fn = funcs.get(s.va)
-            lb = labels.get(s.va)
-            if not (is_meaningful(fn) or is_meaningful(lb)):
-                report.unlabeled_known.append(s)
+    report.ghidra_functions = funcs
+    report.ghidra_labels = labels
+    report.snapshot_path = source_label
 
-        # Orphan Ghidra: meaningful function names that we don't
-        # track Python-side.
-        known_vas = {s.va for s in uniq}
-        for va, name in funcs.items():
-            if va in known_vas:
-                continue
-            if is_meaningful(name):
-                report.orphan_ghidra.append((va, name))
-        report.orphan_ghidra.sort(key=lambda pair: pair[0])
+    # Unlabeled known: our VA isn't in funcs + isn't in labels,
+    # OR the function name is still a Ghidra auto-label
+    # (``FUN_``, ``LAB_``, ``DAT_``).
+    def is_meaningful(name: str | None) -> bool:
+        if not name:
+            return False
+        return not (name.startswith("FUN_") or
+                    name.startswith("LAB_") or
+                    name.startswith("DAT_"))
+
+    for s in uniq:
+        fn = funcs.get(s.va)
+        lb = labels.get(s.va)
+        if not (is_meaningful(fn) or is_meaningful(lb)):
+            report.unlabeled_known.append(s)
+
+    # Orphan Ghidra: meaningful function names that we don't
+    # track Python-side.
+    known_vas = {s.va for s in uniq}
+    for va, name in funcs.items():
+        if va in known_vas:
+            continue
+        if is_meaningful(name):
+            report.orphan_ghidra.append((va, name))
+    report.orphan_ghidra.sort(key=lambda pair: pair[0])
 
     return report
+
+
+def _live_ghidra_snapshot(client,
+                          include_labels: bool = False
+                          ) -> tuple[dict[int, str], dict[int, str]]:
+    """Pull the function + label table off a live Ghidra over HTTP.
+
+    Returns ``(funcs_by_va, labels_by_va)`` matching the shape the
+    snapshot-file loader produces.  Labels whose address isn't a
+    plain hex VA (e.g. ``EXTERNAL:00000001`` thunks) are skipped
+    — they don't map to a Python-side VA anyway.
+
+    Label iteration is OFF by default because Azurik's Ghidra
+    project has ~45 k symbols (kernel imports dominate); pulling
+    all of them takes ~30 s and adds no coverage info the
+    function list doesn't already provide.  Pass
+    ``include_labels=True`` when you actually need them.
+    """
+    funcs: dict[int, str] = {}
+    for fn in client.iter_functions(page_size=1000):
+        funcs[fn.address] = fn.name
+    labels: dict[int, str] = {}
+    if include_labels:
+        for lbl in client.iter_labels(page_size=1000):
+            try:
+                addr = int(lbl.address, 16)
+            except ValueError:
+                continue
+            labels[addr] = lbl.name
+    return funcs, labels
 
 
 def format_report(report: CoverageReport) -> str:

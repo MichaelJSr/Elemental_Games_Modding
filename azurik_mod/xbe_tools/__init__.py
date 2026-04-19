@@ -15,4 +15,22 @@ prioritisation rationale.  Shipped tools live in:
 - :mod:`.commands` — thin argparse-to-function dispatcher wrappers
 """
 
-__all__: list[str] = []
+from azurik_mod.xbe_tools.ghidra_client import (
+    GhidraClient,
+    GhidraClientError,
+    GhidraFunction,
+    GhidraLabel,
+    GhidraProgramInfo,
+    client_from_env,
+)
+from azurik_mod.xbe_tools.mock_ghidra import MockGhidraServer
+
+__all__ = [
+    "GhidraClient",
+    "GhidraClientError",
+    "GhidraFunction",
+    "GhidraLabel",
+    "GhidraProgramInfo",
+    "MockGhidraServer",
+    "client_from_env",
+]

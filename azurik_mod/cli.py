@@ -481,8 +481,50 @@ def main() -> None:
     p_gc.add_argument("--snapshot",
         help="Path to a Ghidra snapshot JSON "
              "(schema documented in azurik_mod/xbe_tools/ghidra_coverage.py)")
+    p_gc.add_argument("--live", action="store_true",
+        help="Pull from a running Ghidra instance over HTTP "
+             "instead of a snapshot file")
+    p_gc.add_argument("--host", default=None,
+        help="Ghidra host (default localhost; only used with --live)")
+    p_gc.add_argument("--port", type=int, default=None,
+        help="Ghidra port (default 8193; only used with --live)")
     p_gc.add_argument("--json", action="store_true",
         help="Emit JSON instead of the human-readable report")
+
+    # ------------------------------------------------------------------
+    # ghidra-sync — push Python-side knowledge to a live Ghidra
+    # ------------------------------------------------------------------
+    p_gs = sub.add_parser(
+        "ghidra-sync",
+        help="Rename + annotate functions in a live Ghidra project "
+             "based on our Python-side knowledge",
+        description=(
+            "Takes every named VA we track in Python (azurik.h\n"
+            "anchors + vanilla_symbols + registered patch sites)\n"
+            "and writes them back into the open Ghidra project as\n"
+            "renamed functions + plate comments.\n\n"
+            "Dry-run is the default.  Pass --apply to actually\n"
+            "modify Ghidra; --force lets rename overwrite functions\n"
+            "that already have a human-meaningful name (otherwise\n"
+            "the tool skips them).\n\n"
+            "Examples:\n"
+            "  azurik-mod ghidra-sync               # dry-run plan\n"
+            "  azurik-mod ghidra-sync --apply       # apply to :8193\n"
+            "  azurik-mod ghidra-sync --apply --force --port 8193"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_gs.add_argument("--apply", action="store_true",
+        help="Actually modify Ghidra state (default: dry-run only)")
+    p_gs.add_argument("--force", action="store_true",
+        help="Overwrite functions that already have a user-meaningful "
+             "name (default: skip)")
+    p_gs.add_argument("--host", default=None,
+        help="Ghidra host (default localhost)")
+    p_gs.add_argument("--port", type=int, default=None,
+        help="Ghidra port (default 8193)")
+    p_gs.add_argument("--json", action="store_true",
+        help="Emit JSON plan instead of the human-readable report")
 
     # ------------------------------------------------------------------
     # shim-inspect — preview bytes a compiled shim .o will emit
@@ -634,6 +676,7 @@ def main() -> None:
         "iso-verify": _dispatch_iso_verify,
         "xbe": _dispatch_xbe,
         "ghidra-coverage": _dispatch_ghidra_coverage,
+        "ghidra-sync": _dispatch_ghidra_sync,
         "shim-inspect": _dispatch_shim_inspect,
         "test-for-va": _dispatch_test_for_va,
         "plan-trampoline": _dispatch_plan_trampoline,
@@ -641,6 +684,11 @@ def main() -> None:
         "xbr": _dispatch_xbr,
     }
     dispatch[args.command](args)
+
+
+def _dispatch_ghidra_sync(args) -> None:
+    from azurik_mod.xbe_tools.commands import cmd_ghidra_sync
+    cmd_ghidra_sync(args)
 
 
 def _dispatch_test_for_va(args) -> None:

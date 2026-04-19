@@ -176,28 +176,56 @@ classes.
 
 ## Tier 2 — Planned (high ROI, remaining)
 
-### 4. Ghidra knowledge-sync — push Python-side annotations to MCP
+### 4. Ghidra knowledge-sync — push Python-side annotations to Ghidra
 
-One-way sync that takes every VA anchor in `azurik.h`, every
-`VanillaSymbol`, every documented patch site, and writes them
-back into the open Ghidra project via the MCP's
-`functions_rename` + `comments_set` + `data_create` tools.
+Status: **shipped** (see
+`azurik_mod/xbe_tools/ghidra_client.py`,
+`azurik_mod/xbe_tools/ghidra_sync.py`,
+`azurik_mod/xbe_tools/mock_ghidra.py`).
 
-Effect: open any of those VAs in Ghidra and see:
+Takes every named VA we track in Python (``azurik.h`` anchors,
+``vanilla_symbols.py``, patch-site registry) and writes them
+back into a live Ghidra project as renamed functions + plate
+comments — so the next time a human opens those addresses they
+see our Python-side understanding instead of ``FUN_00085700``.
 
-- Function renamed from `FUN_00085700` → `gravity_integrate`
-- Docstring-as-plate-comment explaining the ABI
-- Struct fields applied to the `this` pointer
+Built on a fresh zero-dependency HTTP client
+(:class:`GhidraClient`) that speaks directly to the GhydraMCP
+plugin's REST API, bypassing the ``mcp`` / ``fastmcp`` stack
+that makes the bridge CI-hostile.  Tests drive the same client
+against a :class:`MockGhidraServer` that re-implements just
+enough of the Ghidra endpoint contract for unit testing:
 
-**Sketch**:
+- ``GET /program``, ``GET /functions``, ``GET /functions/{addr}``
+- ``PATCH /functions/{addr}`` (rename + signature)
+- ``POST /memory/{addr}/comments/{kind}``
+- ``GET /symbols/labels``
+
+Dry-run is the default.  ``--apply`` actually mutates Ghidra;
+``--force`` allows overwriting functions that ALREADY have a
+human-meaningful name (default: skip).
 
 ```bash
-azurik-mod ghidra-sync --dry-run
-azurik-mod ghidra-sync --apply      # writes to :8193
-azurik-mod ghidra-sync --apply --port 8193
+azurik-mod ghidra-sync               # dry-run plan
+azurik-mod ghidra-sync --apply       # apply to :8193
+azurik-mod ghidra-sync --apply --force --port 8193
 ```
 
-Dry-run is critical — Ghidra project state is precious.
+Typical first-run plan against the default.xbe instance:
+
+    === rename  (9) ===
+      0x00018980  'FUN_00018980' → 'play_movie_fn'
+      0x00085700  'FUN_00085700' → 'gravity_integrate_raw'
+      ...
+    === comment  (33) ===
+      0x0005F6E5  'FUN_0005f620'  annotate: [azurik_mod.patch_site]
+                                  qol_skip_logo:Skip AdreniumLogo ...
+      ...
+
+**Bonus**: ``ghidra-coverage --live`` now uses the same client
+to pull a fresh function list out of the running instance in
+~3 seconds, removing the need for snapshot JSON files for the
+common "I'm working right now with Ghidra open" workflow.
 
 ### 5. Trampoline planner
 
@@ -342,7 +370,7 @@ upstream PRs.
 | 1 | `xbe` swiss-army CLI        | 9     | 2    | 10  | shipped  |
 | 2 | `ghidra-coverage`           | 7     | 2    | 9   | shipped  |
 | 3 | `shim-inspect`              | 6     | 2    | 8   | shipped  |
-| 4 | Ghidra knowledge-sync       | 9     | 3    | 10  | planned  |
+| 4 | Ghidra knowledge-sync       | 9     | 3    | 10  | **shipped** |
 | 5 | Trampoline planner          | 7     | 2    | 9   | **shipped** |
 | 6 | Shim scaffolder w/ ABI      | 6     | 2    | 8   | planned  |
 | 7 | XBR layout inspector        | 5     | 3    | 7   | **shipped** |

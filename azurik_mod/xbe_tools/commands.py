@@ -248,13 +248,70 @@ def cmd_ghidra_coverage(args) -> None:
     """Dispatch into :mod:`.ghidra_coverage`."""
     from .ghidra_coverage import build_coverage_report, format_report
 
+    live_client = None
+    if getattr(args, "live", False):
+        from .ghidra_client import GhidraClient
+        live_client = GhidraClient(
+            host=args.host or "localhost",
+            port=args.port or 8193)
+
     report = build_coverage_report(
-        snapshot_path=Path(args.snapshot) if args.snapshot else None)
+        snapshot_path=Path(args.snapshot) if args.snapshot else None,
+        live_client=live_client)
 
     if args.json:
         _emit(report.to_json_dict(), as_json=True)
     else:
         print(format_report(report))
+
+
+# ---------------------------------------------------------------------------
+# ghidra-sync — push Python-side knowledge to a live Ghidra
+# ---------------------------------------------------------------------------
+
+def cmd_ghidra_sync(args) -> None:
+    """Dispatch into :mod:`.ghidra_sync`."""
+    from .ghidra_client import GhidraClient, GhidraClientError
+    from .ghidra_sync import apply_sync, format_plan, plan_sync
+
+    client = GhidraClient(
+        host=args.host or "localhost",
+        port=args.port or 8193)
+    if not client.ping():
+        print(f"ghidra-sync: no Ghidra instance reachable at "
+              f"{client.base_url}", file=sys.stderr)
+        sys.exit(2)
+
+    try:
+        actions = plan_sync(client)
+    except GhidraClientError as exc:
+        print(f"ghidra-sync: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.json:
+        _emit([{
+            "va": a.va, "kind": a.kind,
+            "current_name": a.current_name,
+            "new_name": a.new_name,
+            "comment": a.comment,
+            "rationale": a.rationale,
+        } for a in actions], as_json=True)
+    else:
+        print(format_plan(actions))
+
+    if args.apply:
+        print("\nApplying actions to "
+              f"{client.base_url}  (force={args.force})")
+        report = apply_sync(client, actions, force=args.force)
+        print(f"  attempted:  {report.attempted}")
+        print(f"  renamed:    {report.renamed}")
+        print(f"  commented:  {report.commented}")
+        print(f"  skipped:    {report.skipped}")
+        if report.errors:
+            print(f"  errors     ({len(report.errors)}):")
+            for err in report.errors[:20]:
+                print(f"    - {err}")
+            sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +525,7 @@ def cmd_xbr_inspect(args) -> None:
 __all__ = [
     "cmd_entity_diff",
     "cmd_ghidra_coverage",
+    "cmd_ghidra_sync",
     "cmd_plan_trampoline",
     "cmd_shim_inspect",
     "cmd_test_for_va",
