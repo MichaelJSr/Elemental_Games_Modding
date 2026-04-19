@@ -511,17 +511,49 @@ callers' register-setup pattern is the authoritative signal:
   Azurik emitted** — you need a naked-asm wrapper that shuffles
   registers before the call.  Deferred.
 
-Skipped example: `FUN_00085700` (gravity integration).  Ghidra
-decomps it as `__fastcall(param_1, param_2, float param_3)` but the
-body also reads `in_EAX` as an implicit output-pointer (Microsoft
-RVO pattern).  Clang's `__attribute__((fastcall))` doesn't let you
-declare an implicit EAX parameter.  Safe exposure would require a
-4-line assembly wrapper that saves EAX into a stack arg before the
-call.  Deferred until a concrete shim needs it.
-
 Working example: `FUN_0004B510` (entity_lookup) — both callers
 confirmed pure __fastcall (ECX=name, EDX=fallback).  Now registered
 at `entity_lookup@8`.
+
+### Handling MSVC-RVO ABIs (ECX + EDX + EAX + ESI + stack float)
+
+`FUN_00085700` (gravity integration) is the poster child for an
+ABI clang can't express directly:
+
+- ECX = config (fastcall arg 1)
+- EDX = velocity pointer (fastcall arg 2)
+- EAX = output struct pointer (MSVC RVO — implicit)
+- ESI = caller-provided entity context (callee-saved, but the
+  vanilla function relies on the caller having set it)
+- `[ESP+4]` = float gravity_dt_product (callee pops via RET 4)
+
+Solution pattern, now shipping in `shims/shared/gravity_integrate.c`:
+
+1. **Register the vanilla with a LIE**.  In `vanilla_symbols.py`,
+   declare the function as plain `fastcall(8)` — just ECX+EDX.
+   Mangled name becomes `@name@8`.  Clang's `CALL @name@8`
+   resolves via the normal REL32 layout path.
+2. **Write a C wrapper that uses inline asm** to set up the
+   extra registers right before the CALL.  Key constraint:
+   every register load + the CALL must live inside ONE atomic
+   `__asm__ volatile` block — clang can't reorder anything
+   inside a single asm block, so EAX survives to the CALL.
+3. **Clobber list declares every touched register** (`"eax",
+   "ecx", "edx", "esi"`) so clang's allocator saves/restores
+   as needed around the block.
+4. **Satisfy `__fltused` locally** via an asm-label override:
+   ``int __fltused __asm__("__fltused") = 0;`` — stops clang
+   emitting an undefined external for the float linker marker.
+
+The wrapper exposes a clean `stdcall(N)` C API to shim authors
+who just call it like any other function.  Tested end-to-end in
+`tests/test_gravity_wrapper.py`.
+
+This pattern generalises to any vanilla function with "weird"
+register setup (thiscall, custom calling conventions, implicit
+register inputs).  When adding a new one, copy
+`shims/shared/gravity_integrate.c` and adjust the register
+constraints.
 
 ## What to add here next
 
@@ -530,16 +562,19 @@ Things we haven't pinned down but should when a shim needs them:
 - [ ] **Camera projection + FOV**.  Likely a `.rdata` float similar
       to gravity.  Quick win if found.
 - [ ] **Player jump impulse**.  Tracked as `C-jump` in SHIMS.md.
-- [ ] **Save-file format**.  Partially in `docs/SAVE_PARSER_PLAN.md`
-      — extend `scripts/extract_save.py` + `scripts/xbr_parser.py`
-      when someone wants persistent shim state.
-- [ ] **`FUN_00085700` (gravity integration)** naked-asm wrapper —
-      see "Vanilla-function exposure" section above.
 - [ ] **`FUN_000d1420` / `FUN_000d1520` (config lookup)** —
-      __thiscall; needs naked-asm wrappers to call from shims.
+      __thiscall; needs naked-asm wrappers to call from shims
+      (same pattern as the gravity wrapper — see "Handling
+      MSVC-RVO ABIs" above).
 
 **Recently pinned** (as of this pass):
 
+- [x] **Save-file format** — Xbox-standard container + 20-byte
+      header decoded; per-level payload decoding deferred.  See
+      `docs/SAVE_FORMAT.md` + `azurik_mod.save_format`.
+- [x] **`FUN_00085700` (gravity integration)** — inline-asm
+      wrapper shipped at `shims/shared/gravity_integrate.c`,
+      exposed via `azurik_gravity_integrate()`.
 - [x] **Controller input struct** — done, see section above.
 - [x] **Drop-table fields in `CritterData`** — `range`, `range_up`,
       `range_down`, `attack_range`, `drop_1..5`, `drop_count_1..5`,

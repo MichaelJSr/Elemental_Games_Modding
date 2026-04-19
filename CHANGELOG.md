@@ -2,6 +2,94 @@
 
 ## Unreleased
 
+### FUN_00085700 gravity-integration wrapper + save-file format scaffold
+
+Two substantial additions in one pass.  Both landed with full test
+coverage + documentation; both exposed through the standard
+authoring surfaces (shim C headers, Python module, CLI).
+
+#### Gravity-integration wrapper (A3-plus)
+
+Vanilla `FUN_00085700` uses an MSVC-style fastcall + RVO ABI
+(`ECX + EDX + EAX-for-output + ESI-for-context + stack float`)
+that no clang calling-convention attribute expresses natively.
+New infrastructure to bridge the gap:
+
+- **Inline-asm wrapper** at `shims/shared/gravity_integrate.c`
+  exposes a clean `stdcall(20)` C API (`azurik_gravity_integrate`)
+  and manually sets up every register inside a single atomic
+  inline-asm block before the CALL — so clang can't reorder
+  register setup past the EAX write.  Satisfies `__fltused`
+  locally via an `__asm__` label so the wrapper has zero
+  external dependencies beyond the vanilla target.
+- **`gravity_integrate_raw` registered** in `vanilla_symbols.py`
+  as `fastcall(8) → 0x00085700` (mangled
+  `@gravity_integrate_raw@8`).  The "fastcall 2-reg" signature
+  is a deliberate lie to clang so the REL32 lands; the EAX/ESI
+  setup happens only in the wrapper's asm.
+- **New header** `shims/include/azurik_gravity.h` with the clean
+  wrapper prototype + a clearly-marked internal declaration of
+  the raw vanilla symbol for drift-guard purposes.
+- **Drift guard generalised**: `tests/test_vanilla_thunks.py`
+  now accepts declarations in `azurik_vanilla.h` OR companion
+  shim headers (listed in `_COMPANION_HEADERS`).
+- **13 new tests** in `test_gravity_wrapper.py` covering the
+  registry entry, wrapper compilation + byte shape + single-REL32
+  invariant, end-to-end layout_coff → REL32 resolves to the
+  correct vanilla VA, and header-doc-warning presence.
+
+#### Save-file format — initial scaffold
+
+New top-level Python module `azurik_mod.save_format` + CLI
+subcommand `azurik-cli save inspect` for introspecting Azurik
+save slots exported from xemu's HDD image.
+
+- **Xbox-standard container files fully decoded**:
+  - `SaveMetaXbx` / `TitleMetaXbx` — UTF-16-LE key/value parser
+    with lossless byte-identical round-trip, field get/set,
+    Unicode support, binary-tail preservation.
+  - `SaveImage.xbx` / `TitleImage.xbx` — opaque bytes (image
+    swizzle decoding deferred).
+- **Azurik `.sav` scaffold**:
+  - `SaveHeader` — 20-byte fixed prologue
+    (`magic / version / payload_len / checksum / reserved`)
+    with round-trip + `magic_as_ascii()` convenience.
+  - `AzurikSaveFile` base + `SignatureSav` / `LevelSav`
+    subclasses for profile-level / per-level saves.
+    Current decoder emits a single opaque `SaveChunk`; the
+    `iter_chunks()` extension point is where future field-level
+    decoders plug in.
+  - Path-based dispatch: `AzurikSaveFile.from_bytes(..., path=...)`
+    returns the right subclass based on filename.
+- **`SaveDirectory`** recognises every file type in a save slot
+  (SaveMeta / TitleMeta / SaveImage / TitleImage / `.sav` files)
+  and keeps unknowns in `extra_files`.  JSON-serialisable
+  `summary()` for tooling.
+- **CLI**: `azurik-cli save inspect <path>` with `--json` flag.
+  Handles both directory and single-file inspection.  Lazy-imports
+  the module so normal patch workflows don't pay its cost.
+- **28 new tests** in `test_save_format.py` pinning parser
+  correctness, round-trips, dispatch rules, JSON summaries,
+  partial-export handling, and CLI smoke tests.
+- **New docs** [`docs/SAVE_FORMAT.md`](docs/SAVE_FORMAT.md):
+  directory layout, qcow2 / xemu extraction workflow, byte-level
+  details for the decoded portions, limitations, and a priority
+  list of decoder targets for future work.
+
+Source-level evidence for the save format: call sites
+`FUN_0005b250` (fopen wrapper), `FUN_0005c4b0` (directory scan),
+`FUN_0005c95c` (`fread(buf, 0x14, 1, fp)` — pinned the header
+size), and the leaked source path `C:\Elemental\src\game\save.cpp`
+at VA 0x19E5C8.
+
+Full impact:
+- 254 tests passing (up from 213; +13 gravity wrapper + 28 save
+  format).
+- 4 new documentation files in docs/ (D1_EXTEND.md already in;
+  SAVE_FORMAT.md, plus the existing D2_NXDK.md and gravity notes).
+- 3 new shim-authoring-surface files (azurik_gravity.h,
+  azurik_kernel_extend.h, gravity_integrate.c).
+
 ### D1-extend — runtime xboxkrnl export resolver + comprehensive coverage pass
 
 Shims can now call **any** xboxkrnl export, not just the 151 Azurik's

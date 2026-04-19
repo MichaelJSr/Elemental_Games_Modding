@@ -183,6 +183,39 @@ register(VanillaSymbol(
     ),
 ))
 
+register(VanillaSymbol(
+    name="gravity_integrate_raw",
+    va=0x00085700,
+    calling_convention="fastcall",
+    arg_bytes=8,
+    doc=(
+        "RAW vanilla gravity-integration routine.  **Do NOT call "
+        "this directly from shim C code** — its real ABI uses an "
+        "MSVC-RVO extension that no clang calling-convention "
+        "attribute can express natively:\n\n"
+        "    ECX     = config struct pointer\n"
+        "    EDX     = velocity / position ptr\n"
+        "    EAX     = result struct pointer (RVO, implicit output)\n"
+        "    ESI     = caller-provided player / entity context\n"
+        "    [stack] = float gravity_dt (callee pops via RET 4)\n\n"
+        "The 'fastcall(8)' signature here is a **deliberate lie** "
+        "to clang so it emits ``call @gravity_integrate_raw@8`` — "
+        "the REL32 resolves to VA 0x00085700 via this registry.  "
+        "The extra EAX / ESI setup happens in the inline-asm "
+        "wrapper at ``shims/shared/gravity_integrate.c``; shim "
+        "authors include ``azurik_gravity.h`` and call "
+        "``azurik_gravity_integrate(...)`` which has a clean "
+        "stdcall(20) ABI.\n\n"
+        "ABI pinned from the caller at VA 0x860C8 (MOV ECX,EBP / "
+        "LEA EDX,[ESP+0x1C] / LEA EAX,[ESP+0xCC] / PUSH <gravity> "
+        "/ CALL), matched against the callee prolog's "
+        "``MOV EDI,[ECX]`` / ``MOV [EAX],EDI`` / ``FLD [ESI+0x28]`` "
+        "accesses.  First RET is ``C2 04`` (pops 4 bytes = the "
+        "stack float), confirming fastcall-with-one-stack-arg "
+        "ABI plus the implicit EAX output."
+    ),
+))
+
 
 # ---------------------------------------------------------------------------
 # Public accessors

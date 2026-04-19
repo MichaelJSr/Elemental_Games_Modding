@@ -53,6 +53,14 @@ from azurik_mod.patching.vanilla_symbols import (  # noqa: E402
 _COMPILE_SH = _REPO_ROOT / "shims/toolchain/compile.sh"
 _SRC = _REPO_ROOT / "shims/fixtures/_vanilla_call_test.c"
 _HEADER = _REPO_ROOT / "shims/include/azurik_vanilla.h"
+# Additional shim-facing headers that MAY declare vanilla externs.
+# Used by the drift guard: a registry entry counts as "declared" if
+# it appears in any of these files.  Add new paths here when a new
+# feature-specific header (like azurik_gravity.h) hosts an extern
+# declaration for a vanilla symbol.
+_COMPANION_HEADERS = [
+    _REPO_ROOT / "shims/include/azurik_gravity.h",
+]
 
 
 def _compile(src: Path) -> Path | None:
@@ -266,6 +274,13 @@ class HeaderRegistryDriftGuard(unittest.TestCase):
         if not _HEADER.exists():
             self.skipTest(f"header missing at {_HEADER}")
         self.header_text = _HEADER.read_text()
+        # Concatenate every companion header that exists so the drift
+        # guard accepts declarations anywhere in the shim-facing
+        # include tree.  Companion headers are listed in
+        # _COMPANION_HEADERS at the top of this file.
+        for companion in _COMPANION_HEADERS:
+            if companion.exists():
+                self.header_text += "\n" + companion.read_text()
 
     def _declared_in_header(self, name: str) -> bool:
         # Match either `int foo(...)` or `type foo(...)` in the header.

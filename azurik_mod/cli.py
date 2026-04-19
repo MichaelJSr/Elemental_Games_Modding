@@ -241,6 +241,38 @@ def main() -> None:
     p_physics.add_argument("--run-speed", type=float, metavar="X",
         help="Player run speed multiplier (default 1.0; range 0.25-3.0).")
 
+    # save (inspect / introspect save directories)
+    p_save = sub.add_parser(
+        "save",
+        help="Inspect Azurik save directories (SaveMeta.xbx + .sav files)",
+        description=(
+            "Read-only introspection of an exported Azurik save\n"
+            "directory (the folder that xemu's HDD-export gives you\n"
+            "for a single save slot).\n"
+            "\n"
+            "Accepts a directory path containing any mix of\n"
+            "SaveMeta.xbx / SaveImage.xbx / TitleMeta.xbx /\n"
+            "TitleImage.xbx / signature.sav / <level>.sav files.\n"
+            "Missing files are skipped cleanly.\n"
+            "\n"
+            "Output is either a human-readable summary (default) or\n"
+            "structured JSON (--json) for downstream tooling.\n"
+            "\n"
+            "For on-disk format details + how to extract saves from\n"
+            "an xemu qcow2 image, see docs/SAVE_FORMAT.md."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_save_sub = p_save.add_subparsers(dest="save_command")
+    p_save_inspect = p_save_sub.add_parser(
+        "inspect",
+        help="Summarise every recognised file in a save directory")
+    p_save_inspect.add_argument(
+        "path", help="Path to an exported save directory or a single .sav file")
+    p_save_inspect.add_argument(
+        "--json", action="store_true",
+        help="Emit machine-readable JSON instead of a human summary")
+
     # verify-patches (post-build sanity check)
     p_verify = sub.add_parser(
         "verify-patches",
@@ -281,8 +313,20 @@ def main() -> None:
         "randomize-full": cmd_randomize_full,
         "apply-physics": cmd_apply_physics,
         "verify-patches": cmd_verify_patches,
+        "save": _dispatch_save,
     }
     dispatch[args.command](args)
+
+
+def _dispatch_save(args) -> None:
+    """Dispatch the ``save`` subcommand to its implementation."""
+    from azurik_mod.save_format.commands import cmd_save_inspect
+    if args.save_command in (None, "inspect"):
+        cmd_save_inspect(args)
+    else:
+        raise SystemExit(
+            f"unknown save subcommand: {args.save_command!r}.  "
+            f"Try `azurik-cli save inspect --help`.")
 
 
 __all__ = ["main"]
