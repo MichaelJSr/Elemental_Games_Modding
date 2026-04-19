@@ -47,6 +47,13 @@ _GAMEDATA = (_REPO_ROOT.parent /
 _A1 = _GAMEDATA / "a1.xbr"
 _W1 = _GAMEDATA / "w1.xbr"
 _TOWN = _GAMEDATA / "town.xbr"
+# hourglass.xbr (37 KB) + fx.xbr (36.5 MB) are NON-LEVEL XBRs that
+# the parser must still handle correctly — extreme-small and
+# extreme-large sanity checks on top of the real-level tests above.
+# See docs/LEARNINGS.md § hourglass.xbr + fx.xbr for the full
+# decoded semantics.
+_HOURGLASS = _GAMEDATA / "hourglass.xbr"
+_FX = _GAMEDATA / "fx.xbr"
 
 _PARSER_SCRIPT = _REPO_ROOT / "scripts" / "xbr_parser.py"
 
@@ -322,7 +329,76 @@ class XbrParserCli(unittest.TestCase):
 
 
 # ===========================================================================
-# 5. Perf guard — the scanner stays fast on real data
+# 5. Non-level XBR handling — hourglass.xbr (UI sprite) + fx.xbr
+# ===========================================================================
+
+
+@unittest.skipUnless(_HOURGLASS.exists() and _FX.exists(),
+    "hourglass.xbr + fx.xbr fixtures needed")
+class NonLevelXbrHandling(unittest.TestCase):
+    """The parser must handle non-level data files too — hourglass
+    is an extreme-small sanity check (37 KB, 20 surf entries only);
+    fx is an extreme-large check (36.5 MB, 3572 entries).  Both
+    decoded in docs/LEARNINGS.md § hourglass.xbr + fx.xbr."""
+
+    def test_hourglass_is_sprite_grid(self):
+        """Expected: 20 surf entries, only two distinct sizes (52 B
+        headers + 1152 B frame payloads).  If this changes, either
+        the vanilla ISO has been modified or the parser regressed."""
+        import xbr_parser as xp
+        data = _HOURGLASS.read_bytes()
+        toc = xp.parse_toc(data)
+        self.assertEqual(len(toc), 20)
+        self.assertTrue(all(e.tag == "surf" for e in toc))
+        sizes = {e.size for e in toc}
+        self.assertEqual(sizes, {52, 1152},
+            msg=f"hourglass surf sizes should be {{52, 1152}}; "
+                f"got {sorted(sizes)}")
+
+    def test_fx_has_113_effect_graphs(self):
+        """fx.xbr has 113 distinct effects, each built from a full
+        (node, ndbg, sprv, gshd) quadruplet.  If those counts ever
+        diverge the file was corrupted or the parser miscounted."""
+        import xbr_parser as xp
+        data = _FX.read_bytes()
+        toc = xp.parse_toc(data)
+        tags: dict[str, int] = {}
+        for e in toc:
+            tags[e.tag] = tags.get(e.tag, 0) + 1
+        # Every effect has exactly one of each metadata tag.
+        self.assertEqual(tags["node"], 113,
+            msg=f"fx.xbr should have 113 node sections (one per "
+                f"distinct effect graph); got {tags['node']}")
+        self.assertEqual(tags["ndbg"], 113)
+        self.assertEqual(tags["sprv"], 113)
+        self.assertEqual(tags["gshd"], 113)
+
+    def test_fx_contains_named_timers(self):
+        """The XBE references specific fx_*_timer names — verify at
+        least one shows up in the actual fx.xbr node strings."""
+        import xbr_parser as xp
+        data = _FX.read_bytes()
+        toc = xp.parse_toc(data)
+        # Scan the first few node entries + look for a *_timer name.
+        found_any = False
+        for e in [x for x in toc if x.tag == "node"][:20]:
+            hits = xp.find_strings_in_region(
+                data, e.file_offset, e.size, min_len=8)
+            for _off, s in hits:
+                if s.endswith("_timer") or s.endswith("Timer"):
+                    found_any = True
+                    break
+            if found_any:
+                break
+        self.assertTrue(
+            found_any,
+            msg="fx.xbr node sections should carry at least one "
+                "*_timer / *Timer string — Azurik's effect system "
+                "uses named timer nodes per-effect")
+
+
+# ===========================================================================
+# 6. Perf guard — the scanner stays fast on real data
 # ===========================================================================
 
 

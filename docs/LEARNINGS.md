@@ -555,6 +555,85 @@ register inputs).  When adding a new one, copy
 `shims/shared/gravity_integrate.c` and adjust the register
 constraints.
 
+## hourglass.xbr + fx.xbr — data-file scope + XBE hooks
+
+Cross-referenced findings from opening the two data files in
+Ghidra alongside ``default.xbe``.  Both are **DATA-only**
+(Ghidra won't find functions in them directly), but each has
+specific code paths in the XBE that reference their contents.
+
+### hourglass.xbr — UI loading spinner, NOT a timing resource
+
+Despite the suggestive name, ``hourglass.xbr`` is just **sprite
+geometry for the UI hourglass icon** that appears during loading
+screens.  37 KB total:
+
+- 20 ``surf`` entries, 1,152 bytes each.  Each is one frame of
+  the spinning hourglass animation.
+- No timing / scheduler data.  The 60 FPS patch does not interact
+  with this file.
+
+Source-path leak at VA ``0x00198E93`` confirms the module
+identity: ``C:\Elemental\src\mud\hourglass.cpp``.  The loader
+path pushes ``"interface/hourglass/..."`` at VA ``0x000D0F08``
+(inside ``FUN_000D0EE0``), which is the only in-XBE site that
+references the data file.
+
+**Takeaway**: nothing actionable for modding unless someone
+wants to replace the loading spinner graphic.  No action taken.
+
+### fx.xbr — Maya-exported particle-system effect library
+
+36.5 MB visual-effects library.  3,572 TOC entries with 113
+distinct effect graphs (each has matching ``node``, ``ndbg``,
+``sprv``, ``gshd`` sections).  Built from Maya source files
+visible in the blob as paths like
+``c:\Elemental\gamedata\fx\damage\fx_acid_2.ma``.
+
+Effect graph shape (from the string-table dump):
+
+- **Named timers**: ``AcidHit_timer``, ``EarthHit_timer``,
+  ``fx_magic_timer`` — per-effect countdown / max-value
+  accumulators.
+- **Particle-system nodes**: Maya standard names
+  (``pEmitterTop``, ``pRendererShape``, ``pSystem``, ``pSink``,
+  ``pAccelerator``) preserved in the runtime graph.
+- **Lifecycle**: ``Unload_effectControl`` nodes for cleanup,
+  ``effectOrigin`` / ``effectControl`` for graph roots.
+
+Source-path leak at VA ``0x0019DE34`` confirms the module
+identity: ``C:\Elemental\src\mud\effectGraph.cpp``.
+
+**XBE hooks** into the effect system (found by grepping .text
+for pushed string-VAs):
+
+- **``FUN_00066830``** — "find effect node by name".  Takes a
+  ``this`` pointer in EAX (!) and a name on the stack; returns
+  the matching node or NULL.  Called from 3 sites referencing
+  ``fx_magic_timer`` (VA ``0x19C1AC``).  Unusual ABI (EAX-this
+  instead of ECX-this) — would need a gravity-style inline-asm
+  wrapper to expose via ``vanilla_symbols.py``.  Not currently
+  exposed — no shim has asked for effect playback yet.
+- **``FUN_00083000``** — "update effect timer max" method.
+  Reads the magic-timer node via ``FUN_00066830``, compares a
+  float argument against the stored max, updates if greater +
+  sets a dirty flag.  Called from a dispatch table (VTABLE-
+  style) at VA ``0x19C174``.
+
+**For 60 FPS investigations**: no frame-rate-dependent pattern
+found in the callers examined.  The effect timers receive
+``dt``-scaled floats from their callers (not raw frame counts),
+so the 60 FPS patch's simulation cap should not break effect
+timing.  If future testing reveals visual-effect speed drift at
+60 FPS, re-examine the effect-update dispatcher at
+``0x830E0..0x832A1`` for the specific ``dt`` multiplier.
+
+**Takeaway**: effect-by-name lookup is a potential future
+vanilla-symbol addition (wraps around the Maya-name graph for
+shim authors who want to trigger specific effects).  Deferred
+until a concrete shim needs it; the inline-asm wrapper cost
+(à la gravity) isn't worth paying speculatively.
+
 ## What to add here next
 
 Things we haven't pinned down but should when a shim needs them:
