@@ -23,3 +23,8 @@ iso/*.iso
 # xdvdfs cache (auto-downloaded on first use — user-specific)
 tools/xdvdfs
 tools/xdvdfs.exe
+
+# Extracted save data (user-specific; may contain personal saves)
+scripts/save_data/
+save_data/
+*.qcow2

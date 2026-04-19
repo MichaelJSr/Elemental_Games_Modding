@@ -957,7 +957,26 @@ def cmd_save_edit(args) -> None:
         plan_path=Path(args.plan) if args.plan else None)
     editor = SaveEditor(Path(args.input))
     report = editor.apply(plan)
-    report = editor.write_to(Path(args.output), report=report)
+
+    # Optional re-signing path.  Expect a 32-char hex key (16 B).
+    sig_key: bytes | None = None
+    if getattr(args, "xbox_signature_key", None):
+        try:
+            sig_key = bytes.fromhex(args.xbox_signature_key)
+        except ValueError as exc:
+            print(f"save edit: bad --xbox-signature-key "
+                  f"{args.xbox_signature_key!r}: {exc}",
+                  file=sys.stderr)
+            sys.exit(2)
+        if len(sig_key) != 16:
+            print(f"save edit: --xbox-signature-key must be "
+                  f"16 bytes (32 hex chars); got {len(sig_key)} B",
+                  file=sys.stderr)
+            sys.exit(2)
+
+    report = editor.write_to(
+        Path(args.output), report=report,
+        xbox_signature_key=sig_key)
     if args.json:
         _emit({
             "applied": [

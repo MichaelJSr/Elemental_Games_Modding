@@ -267,14 +267,78 @@ $ azurik-mod save inspect loc.sav --json
 }
 ```
 
-## 7. Limitations + future work
+## 7. Signature algorithm
 
-- **Hash domain is not yet decoded.**  Rewriting `.sav` files
-  requires recomputing `signature.sav`, but we don't know the
-  exact input fed to SHA-1.  Investigation path: find the
-  signature-verification site in Ghidra (should be called from
-  the save-load path alongside the `fopen("signature.sav")`),
-  trace what files it hashes in what order.
+**Algorithm traced (April 2026).**  Ghidra decomp of
+``FUN_0005c4b0`` + its surrounding caller at VA ``0x0005c920``
+shows the sign / verify path uses Xbox's stock
+``XCalculateSignatureBegin / ...Update / ...End`` trio with
+``flags=0`` (no per-console HDKey outer layer), which reduces
+to **HMAC-SHA1(XboxSignatureKey, tree_bytes)**.
+
+### Tree-walk order (from the decomp)
+
+```
+hmac = HMAC-SHA1.Init(XboxSignatureKey)
+
+def walk(dir):
+    files = [f for f in sorted(dir) if f.name.lower() != "signature.sav"
+                                   and  f.name.lower().endswith(".sav")]
+    subdirs = [d for d in sorted(dir) if d.is_dir()
+                                     and d.name not in (".", "..")]
+
+    for f in files:            # sorted alphabetically
+        hmac.update(f.name.encode("ascii") + b"\0")
+        with open(f, "rb") as fh:
+            while chunk := fh.read(0x4000):
+                hmac.update(chunk)
+
+    for sd in subdirs:         # sorted alphabetically
+        hmac.update(sd.name.encode("ascii") + b"\0")
+        walk(sd)
+
+signature_bytes = hmac.digest()      # 20 bytes
+Path("signature.sav").write_bytes(signature_bytes)
+```
+
+The entry point at ``0x0005c920`` confirms ``flags=0`` via the
+``PUSH 0x0`` two instructions before ``CALL XCalculateSignatureBegin``
+(see `docs/ghidra_snapshot.json` → ``calculate_save_signature``).
+
+### Why we don't emit valid signatures yet
+
+The open unknown is **what `XboxSignatureKey` actually is**.
+On retail hardware it's a runtime value the kernel derives from
+a combination of the XBE certificate (bzSignatureKey @
+cert+0x110) and the EEPROM's HDKey (per console).  The naive
+candidates we tried against one real save (hex
+``5be4d9fc94655232eebde358556bdaeede2aa043``) — the XBE cert
+bytes and the cert LAN key, with every reasonable walk-order
+permutation — all produced wrong signatures.
+
+Two pragmatic unblockers:
+
+1. **Round-trip through the game** — export the slot, edit text
+   saves (see § 4a), re-import, boot the game once.  The game
+   re-signs on first save operation; subsequent loads succeed.
+   This works today with no additional code.
+2. **Ship a `qol_skip_save_signature` shim patch** — NOP the
+   verify callsite so edited saves load regardless of signature
+   validity.  Spec'd in `docs/TOOLING_ROADMAP.md`; not yet
+   implemented — the verify site wasn't exposed in the xrefs
+   scan (the whole `signature.sav` read path appears to be
+   called through a vtable / method ptr).  Tracked as a
+   follow-up; requires runtime tracing in xemu to locate.
+
+### Python helper
+
+The traced walker lives in
+:func:`azurik_mod.save_format.signature.compute_signature_walk`
+so future work can iterate on the key-derivation side without
+re-solving the tree-walk order.  ``SaveEditor`` exposes an
+``--xbox-signature-key`` override so power-users who've
+extracted their console's key can produce a valid signature
+in-place.
 - **`inv.sav` full record layout.**  The implausibly-large
   `record_count` field suggests the second u32 isn't a count.
   Candidates: item-bitmask, seed, or flags.  Dump a save with

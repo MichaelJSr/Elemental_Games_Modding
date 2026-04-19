@@ -42,6 +42,10 @@ from pathlib import Path
 from typing import Iterable
 
 from azurik_mod.save_format.azurik import AzurikSave, TextSave
+from azurik_mod.save_format.signature import (
+    SIGNATURE_FILENAME,
+    compute_signature,
+)
 
 __all__ = [
     "EditSpec",
@@ -207,12 +211,21 @@ class SaveEditor:
         return report
 
     def write_to(self, out_dir: Path,
-                 report: SaveEditReport | None = None
+                 report: SaveEditReport | None = None,
+                 *,
+                 xbox_signature_key: bytes | None = None,
                  ) -> SaveEditReport:
         """Copy the save slot to ``out_dir`` and serialise any
         edited saves.  Creates ``out_dir`` if missing; refuses
         if it already exists and isn't empty, to protect users
         from clobbering something accidentally.
+
+        If ``xbox_signature_key`` is provided we re-compute
+        ``signature.sav`` using the save-tree HMAC-SHA1 walk
+        reversed from the game (see
+        :mod:`azurik_mod.save_format.signature`).  Without a
+        key we leave the stale signature in place and flag
+        ``report.signature_stale`` so the CLI warns the user.
         """
         if not hasattr(self, "_saves"):
             self.load()
@@ -231,6 +244,12 @@ class SaveEditor:
             dest.write_bytes(sav.text.to_bytes())
         report = report or SaveEditReport()
         report.out_path = out
+
+        if xbox_signature_key is not None and report.signature_stale:
+            sig = compute_signature(
+                out, xbox_signature_key=xbox_signature_key)
+            (out / SIGNATURE_FILENAME).write_bytes(sig)
+            report.signature_stale = False
         return report
 
 

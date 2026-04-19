@@ -1013,6 +1013,14 @@ def main() -> None:
         help="<file>:<line_index>=<value> (repeatable)")
     p_save_edit.add_argument("--plan", default=None,
         help="JSON file with an {\"edits\":[...]} block")
+    p_save_edit.add_argument("--xbox-signature-key", default=None,
+        metavar="HEX32",
+        help="Optional 16-byte (32 hex chars) XboxSignatureKey. "
+             "When provided, signature.sav is re-computed via "
+             "HMAC-SHA1 over the save tree.  Without it, the "
+             "edited save has a stale signature — see "
+             "docs/SAVE_FORMAT.md § 7 for the round-trip "
+             "workflow.")
     p_save_edit.add_argument("--json", action="store_true")
 
     # #18 xbr edit (extends existing xbr subcommand)
