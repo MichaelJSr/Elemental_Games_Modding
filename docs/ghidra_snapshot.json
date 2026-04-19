@@ -115,6 +115,10 @@
       "name": "XCalculateSignatureBegin"
     },
     {
+      "address": "0x000E2C21",
+      "name": "xcalculate_signature_end"
+    },
+    {
       "address": "0x000E2DA7",
       "name": "GetLastError"
     },
@@ -9858,6 +9862,12 @@
       "address": "000e2bc9",
       "name": "XCalculateSignatureBegin",
       "namespace": "XAPILIB",
+      "type": "Function"
+    },
+    {
+      "address": "000e2c21",
+      "name": "xcalculate_signature_end",
+      "namespace": "Global",
       "type": "Function"
     },
     {
