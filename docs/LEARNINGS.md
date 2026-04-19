@@ -634,6 +634,128 @@ shim authors who want to trigger specific effects).  Deferred
 until a concrete shim needs it; the inline-asm wrapper cost
 (à la gravity) isn't worth paying speculatively.
 
+## prefetch-lists.txt — the level manifest goldmine
+
+Azurik's ISO ships with a plain-text **level manifest** at
+``prefetch-lists.txt`` (ISO root, not inside ``gamedata/``).  For a
+long time the repo hard-coded its own level tables in
+``azurik_mod/randomizer/shufflers.py``; we now read the canonical
+manifest via ``azurik_mod.assets.prefetch``.
+
+### File format
+
+Stanza-based INI:
+
+    tag=always
+    file=index\\index.xbr
+    file=hourglass.xbr
+    file=%LANGUAGE%.xbr
+    file=interface.xbr
+    file=config.xbr
+    file=fx.xbr
+    file=characters.xbr
+
+    tag=a1
+    file=A1.xbr
+    neighbor=a6
+    neighbor=e6
+
+    tag=a6-extra
+    file=diskreplace_air.xbr
+    file=diskreplchars.xbr
+
+Four stanza shapes:
+
+- ``tag=always`` — **7 globals** the streaming loader keeps
+  resident across all levels.  ``%LANGUAGE%`` is substituted at
+  runtime to ``english``/``french``/… (see
+  ``PrefetchManifest.resolve_language``).
+- ``tag=default`` — build-system alias for ``training_room``.
+  Not a playable level in its own right; flagged by
+  ``PrefetchTag.is_alias``.
+- ``tag=<level>`` — **24 playable levels** (a1, a3, a5, a6,
+  airship, airship_trans, d1, d2, e2, e5, e6, e7, f1, f2, f3,
+  f4, f6, life, town, training_room, w1-w4).
+- ``tag=<level>-extra`` — **5 extras packs** (``a6-extra``,
+  ``e5-extra``, ``f6-extra``, ``life-extra``, ``w3-extra``)
+  containing the per-element ``diskreplace_*.xbr`` bundles.
+
+### Key insight: the graph is DIRECTED, not symmetric
+
+The ``neighbor=`` edges are **streaming-loader prefetch hints**,
+not portal declarations.  Out of ~70 edges in the vanilla
+manifest, at least 15 are asymmetric:
+
+    a6 → town               # town → life, e2, f1, d1, w1 only
+    w1 → airship_trans      # airship_trans has ZERO neighbors
+    training_room → w1      # w1 doesn't list training_room back
+
+``airship_trans`` is the extreme case — every airport-adjacent
+zone prefetches it, it prefetches nothing.
+
+This matters because **the randomizer can't use this graph as a
+reachability solver input**.  For that we still scrape the
+portal strings out of the level XBRs themselves.  The manifest
+is useful for:
+
+- Authoritative level-set enumeration (24 tags)
+- Classification: is this XBR a level, a global, or an alias?
+- Integrity check: does every file mentioned here exist on disk?
+- Orphan detection: which XBRs on disk aren't in any stanza?
+  (Answer: ``selector.xbr`` + ``loc.xbr`` — dev/UI artefacts.)
+
+### Known drift from the randomizer's hardcoded table
+
+``LEVEL_PATHS`` in ``shufflers.py`` ships **22 levels**, missing:
+
+- ``training_room`` — no ``levels/.../training_room`` save-path
+  prefix exists (it's bootstrapped through the ``default`` alias).
+- ``airship_trans`` — every entry is cutscene-driven; no portal
+  strings to rewrite.
+
+Cut content surfaces too: ``f1 → f7`` references a cut level
+that has no ``tag=f7`` stanza.  The randomizer already special-
+cases this via ``EXCLUDE_TRANSITIONS``.
+
+The ``tests/test_assets_manifest.py::PrefetchVsHardcodedDelta``
+test flips red if any other drift appears.
+
+## filelist.txt — the integrity manifest
+
+Sibling file at the ISO root.  DOS-ish format:
+
+    \\
+    f <md5> <bytes> a1.xbr
+    f <md5> <bytes> a3.xbr
+    ...
+    d index
+
+    \\index\\
+    f <md5> <bytes> index.xbr
+
+``azurik_mod.assets.filelist`` parses it and exposes
+``FilelistManifest.verify(iso_root, check_md5=True)`` for
+byte-level integrity validation.  Full MD5 scan of the
+vanilla 951 MB dump runs in ~1.5 s on an M1 SSD.
+
+Exposed end-to-end through:
+
+    azurik-mod iso-verify <unpacked-iso-dir> [--no-md5] [--graph]
+
+Exit code is non-zero on any integrity mismatch — safe to wire
+into CI/pre-build hooks.
+
+### Path-scoping gotcha
+
+``filelist.txt`` declares paths relative to the **``gamedata/``
+subdirectory** (its top-level scope line is just ``\\``).  But
+the file itself lives at the ISO root, one level up from
+``gamedata/``.  ``FilelistManifest._resolve_root`` auto-detects
+this mismatch by probing the first three entries against both
+candidate roots and using whichever matches more files.  If
+Microsoft's ISO layout ever changes this could need extending,
+but the heuristic has zero false positives today.
+
 ## What to add here next
 
 Things we haven't pinned down but should when a shim needs them:

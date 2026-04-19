@@ -347,6 +347,34 @@ def main() -> None:
     p_verify.add_argument("--strict", action="store_true",
         help="Treat unexpected whitelist-diff changes as a failure (non-zero exit)")
 
+    # iso-verify (manifest integrity + level graph report)
+    p_iso = sub.add_parser(
+        "iso-verify",
+        help=("Validate an unpacked ISO against the game's own "
+              "prefetch-lists.txt + filelist.txt manifests"),
+        description=(
+            "Azurik's ISO ships with two plain-text index files:\n"
+            "  prefetch-lists.txt  — the streaming loader's level manifest\n"
+            "  filelist.txt        — md5 + size for every file\n"
+            "This command reads both and reports:\n"
+            "  * any size or MD5 mismatches (by default — skip with --no-md5)\n"
+            "  * the level adjacency graph (handy for randomizer sanity)\n"
+            "  * files on disk that aren't in either manifest\n"
+            "\n"
+            "Exit code is non-zero when integrity mismatches are found."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_iso.add_argument("iso_root",
+        help="Path to an UNPACKED ISO directory (must contain "
+             "prefetch-lists.txt, filelist.txt and gamedata/)")
+    p_iso.add_argument("--no-md5", action="store_true",
+        help="Skip MD5 verification (size-only, ~50x faster on SSD)")
+    p_iso.add_argument("--graph", action="store_true",
+        help="Print the level adjacency graph after the integrity report")
+    p_iso.add_argument("--limit", type=int, default=None,
+        help="Stop after N integrity issues (default: report all)")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -364,8 +392,14 @@ def main() -> None:
         "apply-physics": cmd_apply_physics,
         "verify-patches": cmd_verify_patches,
         "save": _dispatch_save,
+        "iso-verify": _dispatch_iso_verify,
     }
     dispatch[args.command](args)
+
+
+def _dispatch_iso_verify(args) -> None:
+    from azurik_mod.assets.commands import cmd_iso_verify
+    cmd_iso_verify(args)
 
 
 def _dispatch_save(args) -> None:

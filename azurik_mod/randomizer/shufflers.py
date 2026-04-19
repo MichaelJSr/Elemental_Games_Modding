@@ -477,6 +477,27 @@ SCALE_OFFSETS = [-56, -36, -20]
 # Level connection randomization
 # ---------------------------------------------------------------------------
 
+# Ground truth for randomizable levels.  The values here are the
+# ``levels/<element>/<short>`` string prefixes the game uses inside
+# every level XBR to declare ``levelSwitch`` destinations.  The
+# randomizer rewrites them in place, so the new name MUST fit in
+# the same number of bytes — the comment on each line records that
+# width as a hard constraint.
+#
+# CANONICAL CROSS-REFERENCE: the full list of levels known to the
+# game's streaming loader lives in ``prefetch-lists.txt`` and is
+# parsed by :mod:`azurik_mod.assets.prefetch`.  The delta between
+# this dict and that manifest is intentional:
+#
+# - ``training_room`` is omitted here because it has no save-path
+#   prefix (it's a bootstrapped demo zone loaded via the
+#   ``default`` alias).
+# - ``airship_trans`` is omitted because every entry to it is a
+#   cutscene — there are no portal paths of the shape
+#   ``levels/.../airship_trans`` for the randomizer to rewrite.
+#
+# Any other divergence is drift and is caught by
+# ``tests/test_assets_manifest.py::PrefetchVsHardcodedDelta``.
 LEVEL_PATHS = {
     "town": "levels/town",          # 11 chars
     "life": "levels/life",          # 11 chars
