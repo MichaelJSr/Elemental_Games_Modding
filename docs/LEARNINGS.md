@@ -897,6 +897,114 @@ in-place edits to records the engine already indexes.  The only
 time we'd need the index is to add *new* entity types, which
 isn't on any current roadmap.
 
+### Full record layout (April 2026 pass)
+
+After the initial survey, a second RE pass decoded the actual
+binary format:
+
+**File layout:**
+
+```
+0x0000..0x0008  xobx magic + version
+0x0040..0x0050  TOC (1 entry): indx tag, size 0x2713F
+0x1000..0x1010  indx header (16 bytes)
+0x1010..0x10000 record table (3071 entries × 20 bytes)
+0x10000..EOF    string pool
+```
+
+**indx header (16 bytes at file offset 0x1000):**
+
+| offset | field         | vanilla value | notes                         |
+|--------|---------------|---------------|-------------------------------|
+| +0x00  | count         | 3072          | declared records; 3071 real + 1 sentinel |
+| +0x04  | version       | 4             | format version                |
+| +0x08  | header_hint   | 24            | role unclear (NOT actual header size = 16) |
+| +0x0C  | pool_hint     | 0xEFFC        | role unclear (probably pool size or offset)  |
+
+**Record (20 bytes each):**
+
+| offset | field        | type | notes                            |
+|--------|--------------|------|----------------------------------|
+| +0     | length       | u32  | string length for off1's string  |
+| +4     | off1         | u32  | pool offset — appears to reference a FILE name (e.g. ``characters.xbr``) |
+| +8     | fourcc       | char[4] | asset type: ``body``, ``banm``, ``node``, ``surf``, ``wave``, ``levl``, ``tabl``, ``font`` |
+| +12    | disc         | u8   | subtype discriminator (0x10..0xFF) |
+| +13    | pad          | u8[3] | zero padding                    |
+| +16    | off2         | u32  | pool offset — appears to reference an ASSET KEY within the file at off1 |
+
+**Tag distribution across 3071 records:**
+
+- ``surf``: 1099 (surface / material references)
+- ``wave``: 816 (audio blobs)
+- ``banm``: 712 (bone animations)
+- ``node``: 230 (scene-graph nodes)
+- ``body``: 160 (character body meshes)
+- ``levl``: 32 (level descriptors)
+- ``tabl``: 18 (config tables)
+- ``font``: 4 (font assets)
+
+**String pool:**
+
+Starts at file offset 0x10000 with:
+
+- 4-byte magic dword: ``0x0001812D`` (role unclear)
+- 4-byte tag: ``levl``
+- Concatenated NUL-terminated asset paths (``characters.xbr``,
+  ``characters/air_elemental/attack_1``, …)
+
+### What remains uncharted
+
+- Exact pool base for ``off1`` vs ``off2`` (they differ and the
+  strings don't land cleanly at ``pool_start + offN`` — each
+  record seems to carry some unknown prefix offset).
+- Semantics of the two trailing header fields.
+- Why ``count`` is 3072 when only 3071 entries are valid
+  records (the 3072nd overlaps the pool magic).
+
+Both the parser (:mod:`azurik_mod.assets.index_xbr`) and the
+tests (``tests/test_index_xbr.py``) pin the decoded portions
+and expose the raw fields so a follow-up RE session can
+continue from here.
+
+## Shim-system sanity check — April 2026
+
+Cross-referenced the recent discoveries (hourglass + fx +
+selector + index + prefetch audits) against the shipped shim
+headers and ``vanilla_symbols.py`` registry.  New additions:
+
+**``azurik.h`` VA anchors (4 added, now 20 total):**
+
+- ``AZURIK_DEV_MENU_FLAG_VA`` (0x001BCDD8) — BSS flag that the
+  selector.xbr loader reads.  Write non-``-1`` to force-load
+  the dev menu.
+- ``AZURIK_STR_LEVELS_SELECTOR_VA`` (0x001A1E3C) — string
+  ``"levels/selector"``.
+- ``AZURIK_STR_LEVELS_TRAINING_VA`` (0x001A1E4C) — string
+  ``"levels/training_room"``.
+- ``AZURIK_STR_INDEX_XBR_PATH_VA`` (0x0019ADB0) — string
+  ``"index\\index.xbr"``.
+
+**``azurik_vanilla.h`` / ``vanilla_symbols.py`` (2 added, now 9 total):**
+
+- ``dev_menu_flag_check`` @ 0x00052F50 — the dispatcher that
+  reads ``AZURIK_DEV_MENU_FLAG_VA`` and picks which level to
+  load.  Purely documentary — a ``qol_enable_dev_menu`` shim
+  won't call it, but referencing the function by name makes
+  the one-line DIR32-store shim self-explanatory.
+- ``load_asset_by_fourcc`` @ 0x000A67A0 — the index-table
+  dispatcher.  Declared with a deliberately-wrong
+  ``stdcall(8)`` signature so clang's mangling resolves to
+  the right VA; a wrapper (gravity-style inline asm) will
+  be needed before a real shim can call it.
+
+**Coverage growth:** 76 → 82 unique Python-side VAs (16 → 20
+anchors, 7 → 9 vanilla symbols, 53 patch-site VAs unchanged).
+
+All four new anchors + both new vanilla entries are drift-
+guarded by tests: ``tests/test_va_audit.py`` pins the bytes,
+``tests/test_vanilla_thunks.py`` pins the header<->registry
+equivalence.
+
 ## What to add here next
 
 Things we haven't pinned down but should when a shim needs them:

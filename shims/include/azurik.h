@@ -562,6 +562,38 @@ typedef enum BootState {
 
 
 /* ==========================================================================
+ * Developer level-select hub gate (BSS)
+ * ==========================================================================
+ * ``selector.xbr`` is a developer cheat-menu level that portals to
+ * every live level + direct cutscene playback.  The loader at
+ * ``FUN_00052F50`` checks this BSS flag during boot:
+ *
+ *     mov  esi, [AZURIK_DEV_MENU_FLAG_VA]  ; i32 — 0xFFFFFFFF = disabled
+ *     cmp  esi, -1
+ *     jnz  dev_menu_enabled                ; non-``-1`` ⇒ selector loads
+ *     mov  esi, 0x3                        ; default code path
+ *     mov  ebp, 0x001A1E3C                 ; "levels/selector" string
+ *
+ * A single DIR32 store of any non-``-1`` value into this flag during
+ * boot force-enables the cheat menu — no trampoline needed.  See
+ * docs/LEARNINGS.md § selector.xbr + the 20-line shim template at
+ * docs/SHIMS.md § qol_enable_dev_menu (deferred).
+ */
+#define AZURIK_DEV_MENU_FLAG_VA      0x001BCDD8u
+
+
+/* ==========================================================================
+ * Known level / asset string anchors
+ * ==========================================================================
+ * Useful for shims that want to PUSH a string VA into code (e.g.
+ * trigger a level load from a debug hotkey) without pinning the
+ * string bytes themselves. */
+#define AZURIK_STR_LEVELS_SELECTOR_VA 0x001A1E3Cu  /* "levels/selector"     */
+#define AZURIK_STR_LEVELS_TRAINING_VA 0x001A1E4Cu  /* "levels/training_room"*/
+#define AZURIK_STR_INDEX_XBR_PATH_VA  0x0019ADB0u  /* "index\\index.xbr"    */
+
+
+/* ==========================================================================
  * Conveniences
  * ========================================================================== */
 

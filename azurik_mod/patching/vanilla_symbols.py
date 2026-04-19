@@ -241,6 +241,63 @@ register(VanillaSymbol(
 ))
 
 register(VanillaSymbol(
+    name="load_asset_by_fourcc",
+    va=0x000A67A0,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc=(
+        "Look up an asset in the global ``index.xbr`` table.  "
+        "__stdcall(8): ``(int fourcc, int flags)`` on the stack, "
+        "plus the asset index passed in EAX as an implicit "
+        "register argument.  Returns the asset's byte offset "
+        "(relative to its containing XBR file) in EAX, or 0 on "
+        "miss.\n\n"
+        "ABI partially inferred from Ghidra decomp "
+        "(FUN_000A67A0): reads asset record via "
+        "``piVar3[3] + (in_EAX - piVar3[2]) * 4``, checks "
+        "``piVar1[2] == param_1`` (fourcc match).  The EAX-as-"
+        "asset-index convention is Watcom-ish and NOT expressible "
+        "via a native clang attribute — shim authors should prefer "
+        "a call-through wrapper (template deferred until a real "
+        "shim needs this).\n\n"
+        "Typical fourcc values (little-endian packing):\n"
+        "    0x78646E69  'xdni' — indx section (the index table)\n"
+        "    0x79646F62  'body' — character body meshes\n"
+        "    0x6D6E6162  'banm' — bone animations\n"
+        "    0x65646F6E  'node' — scene-graph nodes\n"
+        "    0x66727573  'surf' — surface / material data\n"
+        "    0x65766177  'wave' — audio blobs\n"
+        "    0x6C76656C  'levl' — level descriptors\n\n"
+        "Discovered during index.xbr record-layout RE — see "
+        "docs/LEARNINGS.md § index.xbr for the full format."
+    ),
+))
+
+register(VanillaSymbol(
+    name="dev_menu_flag_check",
+    va=0x00052F50,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc=(
+        "Boot-time dispatcher that picks which level to load.  "
+        "Reads the BSS flag at ``AZURIK_DEV_MENU_FLAG_VA`` "
+        "(0x001BCDD8): when the flag is ``-1`` (default), the "
+        "function selects the normal opening level.  When the "
+        "flag holds any other value, it sets EBP to the "
+        "``levels/selector`` string VA (0x001A1E3C) so the "
+        "developer cheat hub loads instead.\n\n"
+        "Documented as a vanilla symbol so a future "
+        "``qol_enable_dev_menu`` shim can reference it by name "
+        "rather than by raw VA.  The shim itself only needs a "
+        "single DIR32 write to ``AZURIK_DEV_MENU_FLAG_VA`` — no "
+        "trampoline required — but having the dispatcher named "
+        "makes the one-line write self-documenting.\n\n"
+        "See docs/LEARNINGS.md § selector.xbr for the full gate "
+        "disassembly."
+    ),
+))
+
+register(VanillaSymbol(
     name="gravity_integrate_raw",
     va=0x00085700,
     calling_convention="fastcall",

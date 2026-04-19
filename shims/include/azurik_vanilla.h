@@ -104,6 +104,45 @@ unsigned char boot_state_tick(float dt);
 __attribute__((fastcall))
 int *entity_lookup(const char *name, int *fallback);
 
+
+/* ------------------------------------------------------------------
+ * index.xbr / dev-menu — NEW (April 2026 RE pass)
+ * ------------------------------------------------------------------ */
+
+/* Boot dispatcher that picks which level to load.  Reads the BSS
+ * flag at ``AZURIK_DEV_MENU_FLAG_VA`` (0x001BCDD8) and loads the
+ * ``levels/selector`` developer hub when the flag is anything
+ * other than ``-1`` (the vanilla default).
+ *
+ * Exposed so a future ``qol_enable_dev_menu`` shim can reference
+ * the dispatcher by name rather than by raw VA.  The shim itself
+ * only needs a single DIR32 store into the flag; this extern is
+ * purely documentation.  See docs/LEARNINGS.md § selector.xbr.
+ *
+ * Vanilla VA: 0x00052F50  (mangled: _dev_menu_flag_check@8) */
+__attribute__((stdcall))
+int dev_menu_flag_check(int context, int init_flag);
+
+/* Look up an asset in the global index.xbr table by fourcc.
+ *
+ * **Do NOT call directly from shim C code** — this function's
+ * real ABI uses a Watcom-ish convention with the asset INDEX
+ * passed in EAX as an implicit register argument alongside the
+ * stack args.  Clang can't express that natively.
+ *
+ * The ``stdcall(8)`` signature below is a deliberate lie to the
+ * mangler so the REL32 resolves to VA 0x000A67A0; a call-through
+ * wrapper (like ``shims/shared/gravity_integrate.c``) will be
+ * needed when a real shim uses this.
+ *
+ * See ``load_asset_by_fourcc`` in vanilla_symbols.py for the
+ * full ABI note + fourcc constant table.
+ *
+ * Vanilla VA: 0x000A67A0  (mangled: _load_asset_by_fourcc@8) */
+__attribute__((stdcall))
+int load_asset_by_fourcc(int fourcc, int flags);
+
+
 #ifdef __cplusplus
 }
 #endif

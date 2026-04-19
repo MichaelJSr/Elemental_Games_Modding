@@ -152,6 +152,27 @@ ANCHOR_EXPECTATIONS: dict[str, tuple[int, str, object, str]] = {
     "AZURIK_WALKING_STATE_FLAG_VA": (
         0x0037ADEC, ".data", _BSS,
         "BSS: player walking-state transition flag"),
+    # --- Added during the April 2026 index.xbr + selector.xbr pass ---
+    "AZURIK_DEV_MENU_FLAG_VA": (
+        0x001BCDD8, ".data", _BSS,
+        "BSS: developer-menu gate flag (write non-0xFFFFFFFF "
+        "to force-load selector.xbr cheat hub)"),
+    "AZURIK_STR_LEVELS_SELECTOR_VA": (
+        0x001A1E3C, ".rdata",
+        lambda b: b.startswith(b"levels/selector\x00"),
+        "ASCII 'levels/selector\\0' portal path"),
+    "AZURIK_STR_LEVELS_TRAINING_VA": (
+        # Test reads only the first 16 bytes at a VA; the full
+        # string is 21 bytes ("levels/training_room\0") so we
+        # check a 16-byte prefix instead.
+        0x001A1E4C, ".rdata",
+        lambda b: b.startswith(b"levels/training_"),
+        "ASCII 'levels/training_room\\0' portal path "
+        "(prefix-checked due to 16-byte read window)"),
+    "AZURIK_STR_INDEX_XBR_PATH_VA": (
+        0x0019ADB0, ".rdata",
+        lambda b: b.startswith(b"index\\index.xbr\x00"),
+        "ASCII 'index\\\\index.xbr\\0' loader path"),
 }
 
 
