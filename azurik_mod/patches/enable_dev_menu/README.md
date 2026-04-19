@@ -1,11 +1,13 @@
 # enable_dev_menu
 
-Unlocks Azurik's built-in **in-game developer cheat UI** —
-magic-level editing, level picker, game-state tools, etc.
+Forces Azurik's built-in developer **level-select hub**
+(`selector.xbr`) to load whenever the game tries to load a
+level.
 
-> **Category**: experimental.  The cheat UI bypasses runtime stat
-> checks, so save files made after using it may behave oddly if
-> later loaded on an un-patched ISO.  Keep a backup.
+> **Category**: experimental.  This overrides **every**
+> level-load path — including "Load Game" and cutscene-triggered
+> level transitions — so you'll always land in selector.  Keep a
+> backup of your save directory.
 
 ## How to activate it
 
@@ -26,8 +28,7 @@ azurik-mod patch \
     -o 'Azurik_devmenu.iso'
 ```
 
-Pair with `qol_skip_logo` if you want to skip the Adrenium intro
-each run:
+Pair with `qol_skip_logo` to skip the Adrenium intro:
 
 ```bash
 azurik-mod patch \
@@ -36,60 +37,84 @@ azurik-mod patch \
     -o 'Azurik_dev.iso'
 ```
 
-## Using the cheat UI in-game
+## What you'll see
 
-After the patch lands, the cheat buttons are live from the first
-frame — no special boot combo.
+After booting, pick **New Game** (or any other entry that
+triggers level loading).  The game loads `levels/selector`
+instead of the expected level — a small room containing:
 
-**In-game**, **hold LEFT TRIGGER** and press one of the face
-buttons (A / B / X / Y) to trigger a developer action.  The four
-slots are registered by `FUN_000721b0` in the shipping XBE and
-typically cover:
+- 22 level portals — one per live level (`a1`..`w4`, `town`,
+  `life`, `training_room`, etc.)
+- 10 cutscene portals — Prophecy, Training 1+2, Possessed,
+  DisksDestroyed, Catalisks, Airship2, Death 1, DeathMeeting 2,
+  DisksRestoredAll, NewDeath.
+- A self-portal back to the selector itself.
 
-- Game state menu (save / restore / dump)
-- Magic level editor (Fire / Water / Air / Earth / Chromatic)
-- Level picker with `startspot` selection
-- Snapshot or floating-camera toggle (build-dependent)
+Touch a plaque, load the target, play around, return via the
+self-portal, repeat.
 
-If a cheat enters a modal menu (magic-level editor, level picker),
-the D-Pad / analog stick navigates it and A / B confirm or cancel.
+## How it works
 
-## What it actually patches
+`dev_menu_flag_check` (`FUN_00052F50`) ends with a three-stage
+level-name validator.  Each stage calls `FUN_00054520` (a read-
+only "does this level asset exist?" probe) against a different
+candidate string:
 
-Azurik's `cheats.cpp` registers three boolean cvars, all defaulting
-to `false`:
+| Stage | Candidate               | Behaviour                |
+|-------|-------------------------|--------------------------|
+| 1     | caller's `param_2`      | usually a live level     |
+| 2     | `pcVar10` (local var)   | set by a prior vtable check |
+| 3     | `"levels/selector"`     | **unconditional**        |
 
-| CVar                    | Storage VA | Getter VA |
-|-------------------------|-----------:|----------:|
-| `enable cheat buttons`  | `0x0037AF20` | `0x000FFFC0` |
-| `enable debug camera`   | `0x0037B148` | `0x000FFFD0` |
-| `enable snapshot`       | `0x0037AFA0` | `0x000FFFE0` |
+Whichever stage returns non-zero wins — its string gets pushed
+as `param_2` to `FUN_00053750` (the universal level loader).
+Stage 3 uses `"levels/selector"` from `.rdata` at
+`VA 0x001A1E3C` and stage 3 always succeeds because selector.xbr
+exists in every vanilla ISO.
 
-The storage lives in BSS (zero-initialised at load), so there are
-no stored bytes in the XBE to flip.  Instead, we patch the
-**getter function** at `0x000FFFC0` to unconditionally return
-`1`:
+We patch stages 1 and 2 to always fail:
 
-Vanilla getter (16 bytes, 11 code + 5 NOP padding):
-
-```
-68 20 AF 37 00   PUSH  0x0037AF20        ; &enable_cheat_buttons
-E8 86 E1 FC FF   CALL  cvar_read
-C3               RET
-90 90 90 90 90   NOP padding
-```
-
-Patched getter:
+Vanilla bytes (both stages):
 
 ```
-B8 01 00 00 00   MOV   EAX, 1
-C3               RET
-86 E1 FC FF C3   (unreachable tail — unchanged)
-90 90 90 90 90   NOP padding (unchanged)
+E8 97 11 00 00   CALL FUN_00054520   ; stage 1 @ VA 0x53384
+E8 58 11 00 00   CALL FUN_00054520   ; stage 2 @ VA 0x533C3
 ```
 
-Diff: exactly **6 bytes** in `.text` at file offset
-`va_to_file(0x000FFFC0)`.  No trampoline, no shim.
+Patched bytes:
+
+```
+31 C0 90 90 90   XOR EAX, EAX ; NOP x3   ; forces AL = 0
+```
+
+With `AL = 0` at each `TEST AL, AL` that follows the CALL, the
+`JZ` fires and flow cascades through stages 2 → 3.  Stage 3
+succeeds, and `FUN_00053750` is called with
+`"levels/selector"` as the level name.
+
+## Why the previous patch (JZ NOPs) didn't work
+
+Before April 2026 this feature patched two `JZ` instructions
+inside the `else` branch of `dev_menu_flag_check`'s outer
+vtable gate — specifically the code that sets `pcVar10`
+based on a second vtable call.  The old patch forced
+`pcVar10 = "levels/selector"`.
+
+But `pcVar10` only matters in stage 2 of the validator chain,
+which fires only when stage 1 fails.  **In real gameplay,
+stage 1 almost always succeeds** because the caller
+(`FUN_00052910`, `FUN_00055AB0`, or `FUN_00056620`) passes a
+known-valid level string.  The JZ NOPs took effect, but their
+effect was invisible.
+
+Worse, the outer JZ NOP diverted flow past important save-
+bootstrap work that fires when the vtable gate returns 0 —
+potentially leaving the game in a half-initialised state on
+new-save flows.
+
+The current patch lands exactly where the observable
+behaviour is controlled: at the level-name decision point
+itself, not at a precursor branch.
 
 ## Verifying the patch applied
 
@@ -98,44 +123,33 @@ azurik-mod verify-patches \
     --xbe patched.xbe --original vanilla.xbe --strict
 ```
 
-Expected diff: exactly **6 bytes** differ, all at file offset
-`va_to_file(0x000FFFC0)..+5`.
+Expected diff: exactly **10 bytes** differ — 5 bytes at file
+offset `va_to_file(0x00053384)..+4` and 5 bytes at file offset
+`va_to_file(0x000533C3)..+4`.  Both runs are `31 C0 90 90 90`.
 
 ## Known caveats
 
-- **`enable debug camera` + `enable snapshot` are still off.**
-  Their getters live at VA `0x000FFFD0` and `0x000FFFE0` with the
-  same 6-byte layout — duplicating this patch there would unlock
-  them too, but we don't ship that by default because the snapshot
-  hook has been reported to crash in some emulator configurations.
-- **Save files may behave oddly** if stat-edited saves are loaded
-  on an un-patched ISO (the vanilla "New Game" ceremony sets up
-  some per-character init state that the cheat UI doesn't touch).
-- **Intended for developers / speedrunners / level tours** —
-  hence the `experimental` category.
-
-## History
-
-Before April 2026, this feature patched two `JZ` instructions in
-`FUN_00052F50` to force `levels/selector` (a developer level-select
-hub) to load at game start.  That's a SEPARATE feature — it
-swapped "New Game" for "Load Selector Level" but didn't enable
-any in-game cheats.  The user report *"doesn't do anything"* was
-correct: the selector level loads, but only on the New Game flow
-and only if you actually start a new game, so casual testing
-(boot + explore the main menu) never saw the change.
-
-The current patch targets the cvar getter instead — the cheat
-buttons light up immediately, which is what users expect from a
-patch named "enable dev menu".  The previous JZ-NOP approach
-could be revived as a separate `qol_force_selector_menu` feature
-if it ever becomes useful again (documented in
-`docs/LEARNINGS.md` § selector.xbr).
+- **`levels/earth/e4` plaque soft-locks.**  Selector references
+  a cut level that isn't on the ISO (see `KNOWN_CUT_LEVELS` in
+  `azurik_mod.assets`).  Touch it and the game hangs waiting
+  for a level XBR that never loads.
+- **Overrides "Load Game" too.**  Because every call into
+  `FUN_00053750` via this function ends up at selector, you
+  can't load a save into its original level with this patch
+  active — you'll always land in the selector room.  Rebuild
+  without the patch to restore normal load behaviour.
+- **May corrupt save files.**  The vanilla "New Game"
+  ceremony sets up per-character init state that the selector
+  level doesn't touch.  Saves made in a dev-menu build may
+  behave oddly if loaded with this patch OFF.  Keep a backup.
+- **Intended for level tours / speedrun practice** — not
+  regular playthroughs.
 
 ## Further reading
 
-- **docs/LEARNINGS.md § "Native cheat UI"** — full decode of the
-  `cheats.cpp` registration + button-dispatch chain.
-- **docs/LEARNINGS.md § selector.xbr** — the alternate dev menu
-  this patch used to target.
+- **LEARNINGS.md § selector.xbr** — full decode of
+  `selector.xbr`'s structure + the portal-plaque wiring.
+- **LEARNINGS.md § "enable_dev_menu — three-stage validator
+  chain"** — the post-mortem of why the old JZ NOP patch
+  didn't work and how the new XOR-EAX approach forces stage 3.
 - **PATCHES.md** — catalog entry with the byte-level pin.

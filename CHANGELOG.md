@@ -55,42 +55,73 @@ exposed as `--player-swim-scale` (CLI full) / `--swim-speed`
 test classes exercise the full walk×roll×swim slider surface +
 back-compat kwargs + `_WALK_SCALE_MIN` divide-by-zero defense.
 
-### enable_dev_menu — actually enable the native cheat UI
+### enable_dev_menu — actually force selector.xbr this time
 
-The previous `qol_enable_dev_menu` patched two `JZ` instructions
-in `FUN_00052F50` to force `levels/selector` (a dev level-select
-hub LEVEL, not a UI overlay) to load at game start.  That did
-nothing for users who didn't start a new game and never enabled
-the real cheat UI that `\Elemental\src\game\cheats.cpp` ships.
+The pre-April-2026 version NOPed two `JZ` instructions at
+VAs `0x52F7E` + `0x52F95` in a precursor vtable branch.  That
+made `pcVar10 = "levels/selector"` in the middle of
+`dev_menu_flag_check`, but `pcVar10` is only used by **stage 2
+of a three-stage level-name validator chain** at the end of
+the function.  Stage 1 (which runs before stage 2) validates
+the caller's `param_2` — and in real gameplay it almost
+always succeeds because callers pass a known-valid level
+string.  Result: the NOPs applied cleanly but had no visible
+effect.
 
-**New target**: the `"enable cheat buttons"` cvar getter at
-`VA 0x000FFFC0`.  Replace the first 6 bytes (`PUSH 0x37AF20 ;
-CALL cvar_read`) with `MOV EAX, 1 ; RET` so every caller sees
-"cheats enabled" without touching the BSS storage.  Total diff:
-6 bytes.  No trampoline, no shim.
+The brief April v2 pivot to the "enable cheat buttons" cvar
+getter enabled a *different* feature (in-game cheat UI overlay)
+and has now been reverted.
 
-**Activation** (no boot-time combo needed): hold **LEFT
-TRIGGER** in-game and press **A / B / X / Y** to open the four
-registered cheat slots — magic-level editor, game-state menu,
-level picker, and snapshot/foc-cam toggle.
+**v3 lands at the actual decision point.**  Stage 3 of the
+validator chain already hard-codes `PUSH "levels/selector"`
+before the final `CALL FUN_00053750` — we just need stages 1
+and 2 to fail so flow falls into stage 3.  Two 5-byte
+patches, both `CALL FUN_00054520` → `XOR EAX, EAX ; NOP×3`:
+
+```
+VA 0x00053384:  E8 97 11 00 00  ->  31 C0 90 90 90
+VA 0x000533C3:  E8 58 11 00 00  ->  31 C0 90 90 90
+```
+
+After each XOR, `AL = 0` → following `TEST AL, AL` sets
+`ZF = 1` → `JZ` fires → flow skips to the next stage.
+Stage 3 succeeds naturally (selector.xbr exists in every
+vanilla ISO).  Every `FUN_00053750` call from
+`dev_menu_flag_check` now loads `levels/selector`.
+
+**Side effect**: this overrides *every* level load through
+`dev_menu_flag_check`, including "Load Game" and cutscene
+transitions.  Users land in selector regardless of which
+level they tried to load.  That's acceptable for the
+experimental category; users who want a narrower override
+can author a more targeted plugin.
+
+**Activation**: build with `enable_dev_menu`, boot, pick
+`New Game` (or any level-loading entry).  The game drops you
+into the selector room with portal plaques to every live
+level and cutscene.
 
 **Docs updated**:
 
 - `azurik_mod/patches/enable_dev_menu/__init__.py` docstring +
-  `README.md` fully rewritten to reflect the new target.
-- `docs/LEARNINGS.md` § "Native cheat UI" added — full decode
-  of the cvar layout, getter-stub pattern, and activation combo,
-  plus a history note explaining why the previous selector.xbr
-  JZ NOPs didn't deliver what users expected.
-- `docs/LEARNINGS.md` § "Controller-table offsets (Azurik
-  convention)" — pinned the XInput → `DAT_0037be98` slot mapping
-  once and for all so future cheat/movement patches don't have
-  to re-derive it.
+  `README.md` fully rewritten with the v3 design, including a
+  post-mortem of why v1 didn't work.
+- `docs/LEARNINGS.md` § "enable_dev_menu — three-stage
+  validator chain" added — full decode of the validator
+  cascade + the XOR-EAX short-circuit approach + generalised
+  lessons about branch-patching where the *observable*
+  decision is made rather than at a precursor.
+- `docs/LEARNINGS.md` § "Native cheat UI — cheats.cpp" kept
+  from v2 as a separate discovery record (the cvar-getter
+  approach is a viable separate feature for anyone who wants
+  the in-game cheat overlay instead of selector).
 
-**Tests**: 6 new tests in `EnableDevMenuFeature` pin the new
-target VA, the getter prefix bytes, the replacement bytes, the
-6-byte diff window, idempotency, and the semantic "getter
-returns 1 after patch" check.
+**Tests**: 8 tests in `EnableDevMenuFeature` pin the two site
+VAs, verify vanilla is a CALL to `FUN_00054520`, check the
+XOR+NOP replacement, guard against third-validator drift
+(confirms `PUSH "levels/selector"` is still wired at
+VA 0x53400), assert the 10-byte diff window, confirm
+idempotency, and verify the patched bytes decode to XOR+NOPs.
 
 ### player_physics — walk/run sliders now independent multipliers
 

@@ -1069,6 +1069,101 @@ Two cut levels are now documented as ``KNOWN_CUT_LEVELS``:
 Both are useful flags for a future "randomizer finds all known
 dead portals" audit pass.
 
+## enable_dev_menu — three-stage validator chain (April 2026)
+
+### Why the old JZ NOPs didn't force selector.xbr
+
+The `dev_menu_flag_check` function (`FUN_00052F50`) ends with a
+**three-stage level-name validator chain**.  Each stage calls
+`FUN_00054520` (a read-only "does this level asset exist?" probe)
+against a different candidate string:
+
+```c
+uVar6 = FUN_00054520();           // stage 1: caller's param_2
+if ((char)uVar6 == '\0') {
+    uVar6 = FUN_00054520();       // stage 2: pcVar10 (dev branch)
+    if ((char)uVar6 == '\0') {
+        uVar6 = FUN_00054520();   // stage 3: "levels/selector" (hardcoded)
+        if ((char)uVar6 == '\0') {
+            FUN_000a9100("can't find a level to go to.");
+        }
+        param_2 = "levels/selector";
+    } else {
+        param_2 = pcVar10;
+    }
+}
+FUN_00053750(param_1, param_2, param_3, '\0');
+```
+
+The pre-April-2026 `enable_dev_menu` patch NOPed two `JZ`
+instructions (VAs `0x52F7E` and `0x52F95`) in a precursor
+vtable branch that sets `pcVar10 = "levels/selector"` vs
+`"levels/training_room"`.  That made stage 2 load selector —
+but stage 2 only fires when stage 1 fails, and stage 1 almost
+always succeeds because real callers (`FUN_00052910`,
+`FUN_00055AB0`, `FUN_00056620`) pass a known-valid level
+string.  **The NOPs took effect, but their effect was
+invisible** because stage 1 consistently won.
+
+### The new patch: force stages 1 and 2 to fail
+
+Stage 3 already hard-codes `PUSH "levels/selector"` before the
+final `CALL FUN_00053750` at VA `0x00053406`:
+
+```asm
+0x533E3  B8 3C 1E 1A 00           MOV  EAX, 0x001A1E3C    ; "levels/selector"
+0x533E8  E8 33 11 00 00           CALL FUN_00054520        ; stage 3 validation
+0x533ED  84 C0                    TEST AL, AL
+0x533EF  0F 84 8E 01 00 00        JZ   error_handler
+0x533F5  8B 8C 24 4C 01 00 00     MOV  ECX, [ESP+0x14C]
+0x533FC  6A 00                    PUSH 0
+0x533FE  6A 00                    PUSH 0
+0x53400  68 3C 1E 1A 00           PUSH "levels/selector"
+0x53405  51                       PUSH ECX
+0x53406  E8 45 03 00 00           CALL FUN_00053750
+```
+
+To force stage 3 to win, we just need stages 1 and 2 to fail.
+Replace their `CALL FUN_00054520` instructions with `XOR EAX,
+EAX ; NOP ; NOP ; NOP`:
+
+```asm
+VA 0x53384:  E8 97 11 00 00  ->  31 C0 90 90 90   ; stage 1 fail
+VA 0x533C3:  E8 58 11 00 00  ->  31 C0 90 90 90   ; stage 2 fail
+```
+
+`AL = 0` after each replacement, the following `TEST AL, AL`
+sets `ZF = 1`, the `JZ` fires, flow cascades through to stage
+3.  Selector.xbr exists in every vanilla ISO so stage 3's
+validation always succeeds, and the final `CALL FUN_00053750`
+loads `"levels/selector"`.
+
+### Lessons
+
+✅ **Branch patching matters where the *observable* decision is
+made**, not where a precursor sets up candidate values.  The
+v1 patch sat one branch too early in the decision chain.
+
+✅ **Three-stage fallback patterns** are a gift when you want to
+force a specific outcome — just make the earlier stages
+artificially fail and let the last stage (usually a hardcoded
+safe default) win.
+
+✅ **Preserving stack balance** is trivial with `XOR reg,reg +
+NOPs` because the replacement is exactly the same size as the
+original `CALL rel32` (5 bytes) and doesn't push / pop
+anything.  No epilogue changes needed.
+
+✅ **Read-only probes are safe to skip.**  `FUN_00054520` only
+checks asset existence; short-circuiting its calls has no
+side effects on game state.
+
+⚠️ **Side effect**: this patch overrides every level load in
+the game, including "Load Game".  Users who want selector only
+on New Game would need a more targeted patch (e.g., gate the
+XOR on a save-bootstrap flag).  The broader override is fine
+for the "experimental" category.
+
 ## Native cheat UI — cheats.cpp (April 2026)
 
 Separate from selector.xbr, Azurik has an **in-game cheat UI**

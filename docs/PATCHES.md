@@ -53,7 +53,7 @@ register_category(Category(
 | `rand_gems`          | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_barriers`      | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_connections`   | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
-| `enable_dev_menu`    | 1     | no         | `experimental` | cheat, dev    | [azurik_mod/patches/enable_dev_menu/](../azurik_mod/patches/enable_dev_menu/) |
+| `enable_dev_menu`    | 2     | no         | `experimental` | cheat, dev    | [azurik_mod/patches/enable_dev_menu/](../azurik_mod/patches/enable_dev_menu/) |
 
 ---
 

@@ -1,120 +1,130 @@
-"""enable_dev_menu — unlock Azurik's native in-game cheat UI.
+"""enable_dev_menu — force ``levels/selector`` to load at game start.
 
-## What this patch enables
+## What it does
 
-Azurik has a built-in developer cheat UI (referenced in the shipping
-XBE as strings from ``\\Elemental\\src\\game\\cheats.cpp``):
+``selector.xbr`` is a manifest-orphan developer level that ships in
+the retail ISO: a small room with portal plaques to every live
+level + one-click triggers for every cutscene.  Vanilla code
+paths DO reach it under specific dev-flag combinations, but the
+shipping game strips those flags and ``selector`` only ever
+loads via a triple-fallback chain inside ``dev_menu_flag_check``
+(``FUN_00052F50``).  This patch forces the third fallback —
+which is hard-coded to ``"levels/selector"`` — to always win.
 
-- ``"Game state..."`` submenu
-- ``"magic level: %d"`` live editor for each element (Fire / Water /
-  Air / Earth / Chromatic)
-- ``"Change level..."`` + ``"startspot"`` level picker
-- ``"foc cam"`` / ``"cheatsave"`` / ``"srcSpecies"`` hooks
-- three developer toggles: ``"enable snapshot"``,
-  ``"enable debug camera"``, and ``"enable cheat buttons"``
+## Why the old JZ NOPs failed
 
-``"enable cheat buttons"`` is the MASTER gate.  When it's off
-(vanilla), the cheat UI exists in the binary but never triggers —
-the button combos and menu entries are silently ignored.  When it's
-on, holding **LEFT TRIGGER** and pressing face buttons brings up the
-cheat menu (see "Activation" below).
+``dev_menu_flag_check`` ends with a three-stage level-name
+validator:
 
-## How the gate works
+.. code-block:: c
 
-The bool is stored at ``VA 0x0037AF20`` (BSS — zero-initialised at
-load time, so it's ``false`` by default).  Every code site that
-needs its value goes through a tiny wrapper function at
-``VA 0x000FFFC0``:
+    uVar6 = FUN_00054520();            // (1) validate caller's param_2
+    if ((char)uVar6 == '\\0') {
+        uVar6 = FUN_00054520();        // (2) validate pcVar10 string
+        if ((char)uVar6 == '\\0') {
+            uVar6 = FUN_00054520();    // (3) validate "levels/selector"
+            if ((char)uVar6 == '\\0') {
+                FUN_000a9100("can't find a level to go to.");
+            }
+            param_2 = "levels/selector";
+        } else {
+            param_2 = pcVar10;
+        }
+    }
+    FUN_00053750(param_1, param_2, param_3, '\\0');
 
-.. code-block:: text
+The pre-April-2026 patch NOPed two ``JZ`` instructions in the
+branch that sets ``pcVar10 = "levels/selector"`` (VA 0x52F7E +
+VA 0x52F95).  But those NOPs only mattered for validator (2);
+validator (1) almost always succeeds because real callers
+(``FUN_00052910``, ``FUN_00055AB0``, ``FUN_00056620``) pass a
+known-valid level string.  When (1) succeeds, the caller's
+``param_2`` is used and our pcVar10 fix is ignored — which
+is exactly why users reported the patch as *"does nothing"*.
 
-    FUN_000fffc0:
-        68 20 AF 37 00   PUSH  0x0037AF20      ; &enable_cheat_buttons
-        E8 86 E1 FC FF   CALL  cvar_read       ; -> EAX
-        C3               RET
-        90 90 90 90 90   NOP padding
+Worse, the outer JZ NOP skipped important save-bootstrap work
+when the vtable gate would have opened the new-save path,
+potentially leaving the game in a half-initialised state.
 
-The function returns whatever the CVar system reads for the
-``"enable cheat buttons"`` cvar.  Because the storage is in BSS,
-we can't flip the default by patching ``.data`` — there are no
-stored bytes to flip.  Instead we short-circuit the GETTER:
+## What the new patch does
 
-.. code-block:: text
+Short-circuit validators (1) and (2) to always return ``0``:
 
-    Patched FUN_000fffc0:
-        B8 01 00 00 00   MOV EAX, 1
-        C3               RET
-        (86 E1 FC FF C3) unreachable tail (unchanged)
-        90 90 90 90 90   NOP padding (unchanged)
+- VA ``0x00053384``: ``E8 97 11 00 00`` (CALL ``FUN_00054520``)
+  → ``31 C0 90 90 90`` (``XOR EAX, EAX ; NOP ; NOP ; NOP``)
+- VA ``0x000533C3``: ``E8 58 11 00 00`` (CALL ``FUN_00054520``)
+  → ``31 C0 90 90 90``
 
-Every caller now reads ``1`` without ever touching the real cvar.
-Total diff: 6 bytes.  Clean byte patch, no shim, no trampoline.
+Flow now cascades:
 
-## Activation (after building a patched ISO)
+1. First validator → ``AL = 0`` → ``JZ`` fires → second try.
+2. Second validator → ``AL = 0`` → ``JZ`` fires → third try.
+3. Third validator runs normally with EAX = ``"levels/selector"``
+   (already hard-coded in the original assembly at ``VA
+   0x533E3``).  ``selector.xbr`` exists in every vanilla ISO, so
+   this call returns non-zero.
+4. Flow unconditionally reaches the ``PUSH "levels/selector";
+   PUSH ECX; CALL FUN_00053750`` at ``VA 0x00053406``.
 
-1. Build with ``enable_dev_menu`` ticked:
+**Key insight**: the third fallback already pushes
+``"levels/selector"`` as ``param_2``.  We don't have to modify
+any strings or redirect any pointers — we just have to force
+the code past the first two bailouts.
 
-   .. code-block:: bash
+Total diff: 10 bytes, all in ``.text``.  No trampoline, no
+shim, no stack tampering.
 
-      azurik-mod patch --iso Azurik.iso --mod \\
-        '{"enable_dev_menu": true}' -o Azurik_devmenu.iso
+## Side-effect profile
 
-   Or from the GUI: **Patches → Experimental → tick
-   ``enable_dev_menu`` → Build & Logs → Start build**.
+- ``FUN_00054520`` is a read-only level-asset probe (calls
+  ``FUN_000A5C10("level_name")`` which checks whether the
+  asset exists).  Skipping the first two calls has no game-
+  state side effects.
+- Stack balance is preserved: both NOPs are 5-byte code-for-
+  code replacements; EAX is scratched but the surrounding
+  register save/restore (EBP / ESI / EDI / EBX pushed at
+  function entry, popped at epilogue) is untouched.
+- The outer vtable gate at VA 0x52F7E / inner at 0x52F95 run
+  normally — save-bootstrap logic executes as vanilla when
+  the vtable call returns 0 (i.e., for new-save flows).  We
+  only force the final level-name to be ``levels/selector``;
+  whatever setup ran before gets applied to the selector
+  level, not a user-chosen level.
 
-2. Boot the patched ISO in xemu.  No special boot-time combo — the
-   cheat buttons are live from the first frame.
+## Activation
 
-3. **In-game, hold LEFT TRIGGER** and press one of the face
-   buttons (A / B / X / Y) to trigger the cheat dispatcher
-   (``FUN_00083d80`` -> ``FUN_00083410(0..3)``).  The four slots
-   map to the four developer actions registered in
-   ``FUN_000721b0``'s command table — typically "Game state",
-   "magic level", "Change level", and either snapshot or foc-cam
-   depending on the build.
-
-4. If a cheat enters a modal menu (magic level editor, level
-   picker), the DPad / analog stick navigates it and A / B confirm
-   or cancel.
+1. Build the patched ISO with ``enable_dev_menu`` ticked.
+2. Boot it in xemu.  You'll see the main menu as usual.
+3. Click ``New Game`` (or whichever entry triggers level
+   loading).  The game loads ``levels/selector`` instead of
+   the expected level — a small room with portal plaques.
+4. Each plaque teleports to a live level or triggers a
+   cutscene directly.  Pair with ``qol_skip_logo`` to skip
+   the Adrenium intro on every boot.
 
 ## Caveats
 
-- **The two companion cheat cvars are still off.**  ``"enable
-  debug camera"`` lives at ``VA 0x0037B148`` and ``"enable
-  snapshot"`` at ``VA 0x0037AFA0``; if you want them too, either
-  build similar byte patches on their getters
-  (``FUN_000FFFD0`` and ``FUN_000FFFE0``) or write a C shim that
-  pokes all three BSS bytes to 1 at startup.
-- **Save files may behave oddly.**  The cheat UI edits player
-  stats and bypasses the vanilla "New Game" init ceremony —
-  saving a game with cheat-modified stats and then loading it on
-  an un-patched ISO isn't something the shipping game tests for.
-  Keep a backup of your save directory.
-- **Category is ``experimental``** — ship quality isn't promised;
-  this is a developer tool the team happened to leave compiled
-  into the binary.
+- **Overrides EVERY level-load call**, not just New Game.
+  If you try to load a save from the main menu, you'll still
+  land in selector — save states may appear with the player
+  at the wrong position.
+- **``levels/earth/e4`` plaque is a dead portal** (cut level,
+  not shipped in ``KNOWN_CUT_LEVELS``).  Touching it
+  soft-locks on a missing-asset wait.
+- **Experimental category** — intended for level tours /
+  speedrun practice, not regular play.  Back up your save
+  directory before building.
 
-## Why the previous patch (selector.xbr) was wrong
-
-Before April 2026 this feature patched two ``JZ`` instructions in
-``FUN_00052F50`` to force ``levels/selector`` (a dev level-select
-hub level) to load at game start.  That's a SEPARATE feature from
-the in-game cheat UI and didn't give us magic-level editing or any
-runtime cheats — it just swapped "New Game" for "Load Selector
-Level".  The user report "doesn't do anything" was correct: the
-selector loads, but only on the New Game flow, so casual testing
-(boot + explore) never saw the change.  The new patch lands where
-the user expects.
-
-## Verifying the patch applied
+## Verifying
 
 .. code-block:: bash
 
-    azurik-mod verify-patches --xbe patched.xbe --original vanilla.xbe --strict
+    azurik-mod verify-patches --xbe patched.xbe \\
+        --original vanilla.xbe --strict
 
-Expected diff: exactly **6 bytes** differ, all at file offsets
-``va_to_file(0x000FFFC0)..va_to_file(0x000FFFC5)``.  Any other
-diff means something else ran.
+Expected diff: exactly **10 bytes** at file offsets
+``va_to_file(0x00053384)..+4`` and ``va_to_file(0x000533C3)..+4``
+(5 contiguous bytes each, both replaced with ``31 C0 90 90 90``).
 """
 
 from __future__ import annotations
@@ -124,51 +134,50 @@ from azurik_mod.patching.spec import PatchSpec
 
 
 # ---------------------------------------------------------------------------
-# Byte patch: short-circuit the "enable cheat buttons" cvar getter
-# so it unconditionally returns 1.
+# Force dev_menu_flag_check's third-try fallback to always win
 # ---------------------------------------------------------------------------
 #
-# The getter stub lives at VA 0x000FFFC0 and is 11 bytes long
-# (plus 5 bytes of NOP padding to align the next function):
+# Replace the first two CALLs to FUN_00054520 (the level-asset
+# validator) with ``XOR EAX, EAX`` so AL=0 at each TEST/JZ.  The
+# following JZs then fire unconditionally, cascading flow into the
+# third-try branch which hard-codes ``PUSH "levels/selector"``
+# before the final CALL FUN_00053750.
 #
-#   68 20 AF 37 00  PUSH  0x0037AF20   ; &enable_cheat_buttons
-#   E8 86 E1 FC FF  CALL  cvar_read
-#   C3              RET
-#   90 x 5          NOP padding
-#
-# We replace the first 6 bytes with `MOV EAX, 1; RET`, leaving the
-# last 5 bytes of code (CALL tail + RET) as effectively unused
-# padding that the RET above never reaches.
-#
-# Replacement:
-#   B8 01 00 00 00  MOV EAX, 1
-#   C3              RET
-#
-# 6 bytes, entirely in .text.  Keeps the same function size so no
-# call-site offsets shift.
+# Both replacements are 5-byte code-for-code rewrites (3 bytes of
+# XOR + 3 NOPs, padded to the original 5-byte CALL width).  No
+# stack impact, no function-signature changes, no trampolines.
 
-CHEAT_GETTER_SPEC = PatchSpec(
-    label="enable_cheat_buttons getter (short-circuit to true)",
-    va=0x000FFFC0,
-    original=bytes.fromhex("6820af3700e8"),   # PUSH 0x37AF20 ; CALL (first byte)
-    patch=bytes.fromhex("b801000000c3"),      # MOV EAX, 1 ; RET
+
+FIRST_VALIDATOR_SPEC = PatchSpec(
+    label="Force first level-name validator to fail "
+          "(caller's param_2 is bypassed)",
+    va=0x00053384,
+    original=bytes.fromhex("e897110000"),   # CALL FUN_00054520
+    patch=bytes.fromhex("31c0909090"),      # XOR EAX, EAX ; NOP*3
     is_data=False,
     safety_critical=False,
 )
-# Replacement layout: 6 bytes total.  After the RET at offset 5, the
-# original CALL's trailing 4 bytes (`86 E1 FC FF`) and the original
-# RET byte (`C3`) become unreachable tail — they're never executed,
-# and the stub's only external xref is to 0xFFFC0 (function start),
-# so no other code jumps mid-function.  Bytes 6..15 are left alone
-# (original CALL tail + original RET + 5 NOPs of alignment padding).
+
+SECOND_VALIDATOR_SPEC = PatchSpec(
+    label="Force second level-name validator to fail "
+          "(pcVar10 branch is bypassed)",
+    va=0x000533C3,
+    original=bytes.fromhex("e858110000"),   # CALL FUN_00054520
+    patch=bytes.fromhex("31c0909090"),      # XOR EAX, EAX ; NOP*3
+    is_data=False,
+    safety_critical=False,
+)
 
 
-DEV_MENU_SITES: list[PatchSpec] = [CHEAT_GETTER_SPEC]
+DEV_MENU_SITES: list[PatchSpec] = [
+    FIRST_VALIDATOR_SPEC,
+    SECOND_VALIDATOR_SPEC,
+]
 
 
 def apply_enable_dev_menu_patch(xbe_data: bytearray) -> None:
-    """Unlock the in-game cheat UI by forcing the
-    ``"enable cheat buttons"`` cvar getter to always return 1.
+    """Force ``dev_menu_flag_check`` to route to its third-try
+    fallback, which loads ``levels/selector``.
 
     Idempotent — re-applying to an already-patched XBE is a no-op
     thanks to the ``original``-bytes check in ``apply_patch_spec``.
@@ -181,11 +190,11 @@ def apply_enable_dev_menu_patch(xbe_data: bytearray) -> None:
 FEATURE = register_feature(Feature(
     name="enable_dev_menu",
     description=(
-        "Unlocks Azurik's built-in cheat UI (magic-level editor, "
-        "level picker, game-state tools).  Hold LEFT TRIGGER + "
-        "press A/B/X/Y in-game to open the menu.  "
-        "Experimental: bypasses runtime stat checks, may leave "
-        "save files in odd states."
+        "Forces the developer level-select hub (levels/selector) "
+        "to load when the game tries to load ANY level.  The "
+        "selector room has portal plaques to every live level "
+        "and cutscene.  Experimental: overrides all normal "
+        "level-load paths, including save loading."
     ),
     sites=DEV_MENU_SITES,
     apply=apply_enable_dev_menu_patch,
@@ -197,7 +206,8 @@ FEATURE = register_feature(Feature(
 
 
 __all__ = [
-    "CHEAT_GETTER_SPEC",
     "DEV_MENU_SITES",
+    "FIRST_VALIDATOR_SPEC",
+    "SECOND_VALIDATOR_SPEC",
     "apply_enable_dev_menu_patch",
 ]

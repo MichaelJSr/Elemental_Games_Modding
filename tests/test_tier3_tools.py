@@ -54,13 +54,24 @@ _VANILLA_MOVIES = (_REPO.parent /
 @unittest.skipUnless(_VANILLA_XBE.exists(),
                      "vanilla default.xbe required")
 class EnableDevMenuFeature(unittest.TestCase):
-    """April 2026 rewrite: the feature now short-circuits the
-    ``"enable cheat buttons"`` cvar getter at VA 0x000FFFC0 so the
-    native in-game cheat UI (magic-level editor, level picker)
-    lights up.  The previous selector.xbr JZ NOPs didn't actually
-    enable any in-game cheats — they just swapped New-Game for
-    Load-Selector, which is why users reported the patch as
-    ineffective."""
+    """April 2026 rewrite (v3): the feature now forces
+    ``dev_menu_flag_check``'s third-try fallback to always win.
+    The third try is already hard-coded to
+    ``PUSH "levels/selector"`` before ``CALL FUN_00053750`` at
+    VA 0x00053406 — we just have to force the first two level-
+    name validators (CALLs to FUN_00054520 at VA 0x00053384 and
+    0x000533C3) to return 0 so their ``JZ`` instructions fire
+    and flow cascades to the selector-forcing branch.
+
+    The v1 patch (NOPing two JZs in the outer vtable gate) only
+    controlled the second validator stage, which in real
+    gameplay almost never fires because the caller passes a
+    known-valid level.  That's why users reported v1 as
+    ineffective.  v2 briefly pivoted to patching the "enable
+    cheat buttons" cvar getter — but that enabled a different
+    feature (in-game cheat UI), not the selector.xbr level the
+    user wanted.  v3 lands exactly at the level-name decision
+    point."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -72,47 +83,90 @@ class EnableDevMenuFeature(unittest.TestCase):
     def test_category_is_experimental(self):
         self.assertEqual(self.pack.category, "experimental")
 
-    def test_exactly_one_patch_site(self):
-        """One 6-byte patch at the cvar getter.  Anything more
-        suggests stale selector-JZ sites have crept back in."""
-        self.assertEqual(len(self.pack.sites), 1)
+    def test_two_patch_sites(self):
+        """Two 5-byte patches — one per validator stage we need
+        to short-circuit."""
+        self.assertEqual(len(self.pack.sites), 2)
 
-    def test_getter_bytes_at_vanilla_va(self):
-        """Vanilla getter must be `PUSH 0x37AF20 ; CALL cvar_read`
-        (6-byte prefix 68 20 AF 37 00 E8) at VA 0x000FFFC0.  Drift
-        catches re-dumped XBEs or compiler-layout shifts."""
+    def test_validator_sites_target_correct_vas(self):
+        """Sites must land at VA 0x53384 (first validator) and
+        0x533C3 (second validator) — both CALLs to FUN_00054520
+        (the level-asset probe) inside dev_menu_flag_check."""
+        vas = sorted(s.va for s in self.pack.sites)
+        self.assertEqual(vas, [0x00053384, 0x000533C3],
+            msg="validator-site VAs drifted from expectation; "
+                "check dev_menu_flag_check hasn't been re-laid-out")
+
+    def test_vanilla_bytes_are_call_to_fun_00054520(self):
+        """Vanilla bytes at each validator site must be an
+        ``E8 rel32`` CALL whose target is FUN_00054520
+        (VA 0x00054520).  If anything else is there, the
+        surrounding validator chain has drifted and this patch
+        will corrupt it."""
+        import struct
         from azurik_mod.patching.xbe import va_to_file
-        site = self.pack.sites[0]
-        self.assertEqual(site.va, 0x000FFFC0,
-            msg="feature must target the cvar getter, not the "
-                "old selector.xbr JZ NOPs")
-        off = va_to_file(site.va)
-        self.assertEqual(
-            self.xbe[off:off + 6],
-            bytes.fromhex("6820af3700e8"),
-            msg="getter prefix drifted from vanilla — the cheat "
-                "UI cvar layout may have changed")
+        for site in self.pack.sites:
+            off = va_to_file(site.va)
+            vanilla = self.xbe[off:off + 5]
+            self.assertEqual(vanilla[0], 0xE8,
+                msg=f"site at VA 0x{site.va:X} is not a CALL "
+                    f"(first byte {vanilla[0]:#04x})")
+            rel = struct.unpack("<i", vanilla[1:5])[0]
+            target = site.va + 5 + rel
+            self.assertEqual(target, 0x00054520,
+                msg=f"site at VA 0x{site.va:X} CALLs "
+                    f"0x{target:X}, not FUN_00054520 "
+                    f"(0x00054520)")
 
-    def test_patch_bytes_short_circuit_to_true(self):
-        """Replacement must be `MOV EAX, 1 ; RET` (6 bytes).
-        Ensures every caller of the getter sees ``1`` without
-        touching the real cvar in BSS."""
-        site = self.pack.sites[0]
-        self.assertEqual(
-            site.patch, bytes.fromhex("b801000000c3"),
-            msg="patch must be MOV EAX,1 + RET (b801000000c3)")
-        # First 5 bytes = MOV EAX, 1 (B8 imm32); byte 5 = C3 (RET)
-        self.assertEqual(site.patch[0], 0xB8)
-        self.assertEqual(site.patch[5], 0xC3)
+    def test_patch_bytes_are_xor_eax_plus_nops(self):
+        """Replacement must be ``XOR EAX, EAX ; NOP ; NOP ; NOP``
+        (5 bytes: 31 C0 90 90 90).  That forces AL=0 at the
+        following TEST/JZ, which makes the JZ fire and flow fall
+        into the next validator stage."""
+        for site in self.pack.sites:
+            self.assertEqual(site.patch,
+                             bytes.fromhex("31c0909090"),
+                msg=f"patch at VA 0x{site.va:X} is not "
+                    f"XOR+NOPs: {site.patch.hex()}")
 
-    def test_apply_lands_six_byte_write(self):
-        """Applying the patch must rewrite exactly 6 bytes at the
-        getter address.  One of those bytes happens to stay 0x00
-        (the high byte of both the vanilla PUSH imm32 and our MOV
-        EAX, 1 imm32), so the byte-diff count is 5 — the WRITTEN
-        range is still 6 contiguous bytes at offset va_to_file
-        (0x000FFFC0).  Catches accidental over-writes outside that
-        window."""
+    def test_third_validator_is_left_intact(self):
+        """The third validator at VA 0x000533E8 MUST NOT be in
+        our site list — it's the fallback that actually loads
+        ``"levels/selector"``.  If we short-circuited it too,
+        the function would hit its ``can't find a level`` panic
+        handler at VA 0x00053583."""
+        third_va = 0x000533E8
+        for site in self.pack.sites:
+            self.assertNotEqual(site.va, third_va,
+                msg="third validator MUST remain intact — it's "
+                    "what actually triggers the selector load.")
+
+    def test_third_validator_still_pushes_levels_selector(self):
+        """Drift check: at VA 0x00053400..0x00053405 the
+        assembly must still be ``PUSH imm32`` where the imm32
+        dereferences to ``"levels/selector"``.  If this drifts,
+        we're no longer forcing selector — our XOR EAX patches
+        would send flow into an unknown string."""
+        import struct
+        from azurik_mod.patching.xbe import va_to_file
+        push_off = va_to_file(0x00053400)
+        push_bytes = self.xbe[push_off:push_off + 5]
+        self.assertEqual(push_bytes[0], 0x68,
+            msg="third-try setup must start with PUSH imm32 "
+                "(opcode 0x68)")
+        imm_va = struct.unpack("<I", push_bytes[1:5])[0]
+        # Read the string the immediate points at.
+        str_off = va_to_file(imm_va)
+        self.assertEqual(self.xbe[str_off:str_off + 15],
+                         b"levels/selector",
+            msg=f"third-try PUSH points at VA 0x{imm_va:X} "
+                f"which is not 'levels/selector' — the patch "
+                f"would route flow to an unknown string")
+
+    def test_apply_lands_ten_byte_diff(self):
+        """Applying the patch must change exactly 10 bytes — 5
+        per validator site, all contiguous within each site's
+        window.  Catches accidental over-writes."""
         from azurik_mod.patches.enable_dev_menu import (
             apply_enable_dev_menu_patch)
         from azurik_mod.patching.xbe import va_to_file
@@ -120,18 +174,20 @@ class EnableDevMenuFeature(unittest.TestCase):
         apply_enable_dev_menu_patch(buf)
         diffs = [i for i, (a, b) in enumerate(zip(self.xbe, buf))
                  if a != b]
-        # Between 5 and 6 actual byte flips (one high-byte collision
-        # is possible because 0x00 == 0x00 on purpose).
-        self.assertIn(len(diffs), (5, 6),
-            msg=f"unexpected byte-flip count {len(diffs)}")
-        # Every flipped byte must live inside the 6-byte getter
-        # window.  Any flip outside the window = collateral damage.
-        getter_start = va_to_file(0x000FFFC0)
-        getter_end = getter_start + 6
+        self.assertEqual(len(diffs), 10,
+            msg=f"expected exactly 10 byte flips, got "
+                f"{len(diffs)}")
+        # Every flipped byte must live inside one of the two
+        # 5-byte site windows.
+        windows = []
+        for site in self.pack.sites:
+            start = va_to_file(site.va)
+            windows.append((start, start + 5))
         for d in diffs:
-            self.assertTrue(getter_start <= d < getter_end,
-                msg=f"diff at {d} is outside the 6-byte getter "
-                    f"window [{getter_start}..{getter_end})")
+            self.assertTrue(
+                any(lo <= d < hi for lo, hi in windows),
+                msg=f"diff at offset {d:#x} is outside the "
+                    f"site windows {[hex(lo) for lo,_ in windows]}")
 
     def test_apply_is_idempotent(self):
         """Running apply twice produces identical bytes + doesn't
@@ -145,22 +201,24 @@ class EnableDevMenuFeature(unittest.TestCase):
         apply_enable_dev_menu_patch(buf)
         self.assertEqual(bytes(buf), first_run)
 
-    def test_patched_getter_returns_one_at_runtime(self):
-        """Semantic check: if we disassemble the patched getter,
-        it must be `MOV EAX, 1 ; RET` — anything else means the
-        cvar will still be read from BSS (== false)."""
+    def test_patched_bytes_make_validator_return_zero(self):
+        """Semantic check: after patch, both validator sites
+        must decode to ``XOR EAX, EAX ; NOP x3`` — if a
+        future change uses a different encoding (e.g. ``MOV
+        EAX, 0``), the following TEST AL, AL might still fire
+        correctly, but the drift guard catches refactors that
+        forgot to update the expected bytes."""
         from azurik_mod.patches.enable_dev_menu import (
             apply_enable_dev_menu_patch)
         from azurik_mod.patching.xbe import va_to_file
         buf = bytearray(self.xbe)
         apply_enable_dev_menu_patch(buf)
-        off = va_to_file(0x000FFFC0)
-        patched = bytes(buf[off:off + 6])
-        # B8 01 00 00 00 = MOV EAX, 1
-        self.assertEqual(patched[0], 0xB8)
-        self.assertEqual(patched[1:5], b"\x01\x00\x00\x00")
-        # C3 = RET
-        self.assertEqual(patched[5], 0xC3)
+        for site in self.pack.sites:
+            off = va_to_file(site.va)
+            self.assertEqual(
+                bytes(buf[off:off + 5]),
+                bytes.fromhex("31c0909090"),
+                msg=f"patched bytes at VA 0x{site.va:X} drifted")
 
 
 # ---------------------------------------------------------------------------
