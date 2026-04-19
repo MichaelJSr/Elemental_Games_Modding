@@ -1,7 +1,7 @@
 {
-  "name": "Default Settings (Vanilla)",
+  "name": "Default Settings (Vanilla) — historical dump, NOT authoritative",
   "author": "Azurik Modding Team",
-  "description": "All verified patchable values at original vanilla defaults. Generated from config.xbr binary using corrected 64-bit double format.",
+  "description": "Historical dump of config.xbr values captured during early reverse engineering.  NOT authoritative: some entity / property names in the deeper sections (critters_walking et al.) were aligned against the keyed-table grid BEFORE the corrected row/column resolution pass, so field names do not always match values.  Safe for casual reference; do NOT patch from this file directly.  For a canonical view of current defaults, run `azurik-cli dump --iso <Azurik.iso> --section <name>` which reads the live XBR.",
   "format": "grouped",
   "sections": {
     "settings_foo": {

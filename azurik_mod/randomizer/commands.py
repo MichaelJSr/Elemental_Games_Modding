@@ -1207,7 +1207,12 @@ def cmd_randomize_full(args):
                         # azurik_mod.config; no need to dynamically load
                         # it from disk.
                         from azurik_mod.config import keyed_tables as ktp
-                        tables = ktp.load_all_tables(str(config_xbr))
+                        # Only parse the sections we actually patch —
+                        # load_all_tables is O(sections) so skipping
+                        # the rest is a meaningful saving when the
+                        # user is only editing one or two tables.
+                        tables = ktp.load_all_tables(
+                            str(config_xbr), sections=list(keyed.keys()))
                         for section_key, entities in keyed.items():
                             if section_key not in tables:
                                 print(f"    WARNING: keyed section '{section_key}' not found")

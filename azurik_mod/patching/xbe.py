@@ -41,6 +41,14 @@ def parse_xbe_sections(data: bytes) -> tuple[int, list[dict[str, Any]]]:
     Useful for analysis scripts that want to walk any XBE, not just
     Azurik's. For the known-Azurik fast path, prefer `va_to_file()` /
     `XBE_SECTIONS`.
+
+    ~170 µs per call on a ~4 MB XBE; called O(5-10) times per build.
+    We tried a buffer-attached memoisation cache here but plain
+    ``bytearray`` (the shape all hot-path callers use) does not
+    support attribute assignment, and switching to a subclass would
+    invasively touch every ``bytearray(...)`` construction site.
+    The ~1 ms aggregate overhead isn't worth that — parsing stays
+    unconditional.
     """
     if data[:4] != b"XBEH":
         raise ValueError("Not a valid XBE file (bad magic)")

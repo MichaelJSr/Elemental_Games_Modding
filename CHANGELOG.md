@@ -2,6 +2,82 @@
 
 ## Unreleased
 
+### Optimization + developer-ergonomics pass
+
+Round of surgical optimizations + quality-of-life refinements
+based on a full-tree profiling / dead-code audit.  Every change
+includes a regression test so nothing silently undoes itself.
+296 tests passing (+10 new).
+
+#### Developer ergonomics — stale-.o auto-rebuild
+
+Editing ``shim.c`` and re-running a patch used to silently reuse
+the stale ``.o`` because ``apply_trampoline_patch`` only built
+when the ``.o`` was missing outright.  Now ``apply.py`` compares
+``shim.c`` vs ``shim.o`` mtimes and rebuilds whenever the source
+is newer.  ``AZURIK_SHIM_FORCE_REBUILD=1`` env var forces an
+unconditional rebuild; ``AZURIK_SHIM_NO_AUTOCOMPILE=1`` still
+disables the whole mechanism.  Fixes a classic "why didn't my
+change take effect?" debugging trap.
+
+#### Developer ergonomics — friendly clang-missing error
+
+``shims/toolchain/compile.sh`` now checks for ``clang`` on PATH
+BEFORE ``exec``ing it.  When missing, prints a multi-line install-
+hint covering macOS (Xcode CLT / Homebrew), Debian/Ubuntu, Fedora,
+Arch, and Windows — instead of the shell's default ``clang:
+command not found``.
+
+#### Performance — keyed-tables partial load
+
+``load_all_tables(sections=[...])`` accepts an optional
+iterable of section names and only parses those.  Used from
+``cmd_randomize_full``'s ``_keyed_patches`` path so a
+``--config-mod`` that touches one section doesn't force parsing
+of all keyed tables.  Default ``None`` preserves the old full-
+load behaviour.  Unknown section names are silently ignored so
+callers don't have to pre-filter against ``KEYED_SECTIONS``.
+
+#### Performance — GUI temp-dir reuse + cache invalidation
+
+``gui/backend.py`` ``extract_config_xbr`` was creating a fresh
+``tempfile.mkdtemp`` on every call, accumulating gigabytes of
+unpacked config data over a long session (Entity Editor tab
+reloads).  Now caches by ISO-path + mtime + size; repeat calls
+with the same unchanged ISO reuse the temp file, modifying the
+ISO invalidates atomically, and ``cleanup_temp_dirs`` clears the
+cache too.
+
+#### examples/ hygiene
+
+``examples/default_settings.json`` had an authoritative-sounding
+description but deeper sections (critters_walking etc.) carry
+pre-correction row/column alignments.  The name+description now
+explicitly flag it as a historical dump, with guidance to use
+``azurik-cli dump --iso ...`` for the canonical live view.
+
+#### Considered + declined
+
+- **Memoising `parse_xbe_sections`**: implemented + reverted.
+  Plain ``bytearray`` doesn't support attribute assignment, so
+  the cache never attached in practice.  Benchmarking showed
+  real-world overhead is ~25 ms per build (168 µs × ~150 parses)
+  — not a bottleneck worth the complexity of bytearray subclassing
+  or id()-keyed dict bookkeeping.  Documented in the docstring.
+
+#### Regression tests (``tests/test_optimizations.py``, 11 tests)
+
+- 3 tests on the stale-``.o`` decision logic (stale → rebuild,
+  fresh → skip, source-level guard that the mtime comparison
+  stays in ``apply_trampoline_patch``).
+- 5 tests on the keyed-table section filter (default loads all,
+  filter limits results, unknown names ignored, mixed known +
+  unknown, empty filter returns ``{}``).
+- 2 tests on the GUI temp-dir cache (same ISO reuses temp, ISO
+  mtime/size bump invalidates atomically).
+- 1 test on the clang-missing message (skipped on hosts with
+  system clang at /usr/bin).
+
 ### Dead-code + orphan-wiring audit — critical fix + cleanup
 
 Comprehensive sweep of `azurik_mod/`, `gui/`, and `scripts/` for

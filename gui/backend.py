@@ -425,12 +425,55 @@ def load_keyed_tables(config_path: Path) -> dict | None:
 
 _temp_dirs: list[str] = []
 
+# Cache key: ISO path + mtime + size.  If the user reloads the SAME
+# ISO (common: Entity Editor tab repeatedly opened during one session)
+# we hand back the already-extracted config.xbr instead of spawning
+# another ``xdvdfs copy-out`` + ``tempfile.mkdtemp`` pair that would
+# slowly pile up gigabytes of unpacked data over a long session.
+#
+# Cache invalidates automatically if the ISO changes on disk (mtime
+# / size delta) because then the previous ``config.xbr`` is stale.
+_cached_config: tuple[tuple[str, float, int], Path] | None = None
+
 
 def extract_config_xbr(iso_path: Path) -> Path | None:
-    """Extract config.xbr from ISO to a temp file and return its path."""
+    """Extract config.xbr from ISO to a temp file and return its path.
+
+    Cached per-ISO: a second call with the same unchanged ISO reuses
+    the first call's temp file.  Changing ISOs (or letting the
+    original be rewritten on disk) transparently invalidates the
+    cache and runs a fresh extract.
+    """
+    global _cached_config
+
     xdvdfs = find_xdvdfs()
     if not xdvdfs:
         return None
+
+    # Build the cache key.  ``stat`` failures (deleted / unreadable
+    # ISO) fall through to a fresh extract attempt — callers already
+    # tolerate None, so there's nothing to gain by short-circuiting.
+    try:
+        st = iso_path.stat()
+        key = (str(iso_path.resolve()), st.st_mtime, st.st_size)
+    except OSError:
+        key = None
+
+    if key is not None and _cached_config is not None:
+        cached_key, cached_path = _cached_config
+        if cached_key == key and cached_path.exists():
+            return cached_path
+
+    # Any previous cache entry (different ISO, or same ISO that's
+    # been modified on disk) is now stale — release its temp dir.
+    if _cached_config is not None:
+        _, old_path = _cached_config
+        old_dir = str(old_path.parent)
+        shutil.rmtree(old_dir, ignore_errors=True)
+        if old_dir in _temp_dirs:
+            _temp_dirs.remove(old_dir)
+        _cached_config = None
+
     tmpdir = tempfile.mkdtemp(prefix="azurik_cfg_")
     _temp_dirs.append(tmpdir)
     out_file = Path(tmpdir) / "config.xbr"
@@ -441,6 +484,8 @@ def extract_config_xbr(iso_path: Path) -> Path | None:
             capture_output=True, text=True,
         )
         if result.returncode == 0 and out_file.exists():
+            if key is not None:
+                _cached_config = (key, out_file)
             return out_file
     except Exception:  # noqa: BLE001
         pass
@@ -462,6 +507,8 @@ def load_all_pickups() -> dict | None:
 
 def cleanup_temp_dirs() -> None:
     """Remove temp directories created by extract_config_xbr."""
+    global _cached_config
     for d in _temp_dirs:
         shutil.rmtree(d, ignore_errors=True)
     _temp_dirs.clear()
+    _cached_config = None

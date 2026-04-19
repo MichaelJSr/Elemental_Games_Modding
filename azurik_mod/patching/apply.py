@@ -483,10 +483,28 @@ def apply_trampoline_patch(
     # `azurik_mod/patches/<name>/shim.c` (or, for test fixtures,
     # `shims/fixtures/<name>.c`).  Opt out with
     # AZURIK_SHIM_NO_AUTOCOMPILE=1.
-    if not shim_path.exists() and not os.environ.get(
-            "AZURIK_SHIM_NO_AUTOCOMPILE"):
+    #
+    # STALE-.o DETECTION: even if the .o exists, rebuild it when the
+    # matching .c source has a newer mtime.  This is the edit-shim-
+    # and-rebuild developer loop: previously editing `shim.c` and
+    # re-running a patch would silently reuse the stale .o, leading
+    # to confused "why didn't my change take effect?" debugging.
+    # Opt out via AZURIK_SHIM_NO_AUTOCOMPILE; explicit override via
+    # AZURIK_SHIM_FORCE_REBUILD=1 also triggers a rebuild.
+    if not os.environ.get("AZURIK_SHIM_NO_AUTOCOMPILE"):
         src = _guess_shim_source(shim_path, repo_root)
-        if src is not None and src.exists():
+        should_build = not shim_path.exists()
+        if not should_build and src is not None and src.exists():
+            try:
+                if src.stat().st_mtime > shim_path.stat().st_mtime:
+                    print(f"  {patch.label} — {src.name} is newer than "
+                          f"{shim_path.name}, rebuilding")
+                    should_build = True
+            except OSError:
+                pass
+        if os.environ.get("AZURIK_SHIM_FORCE_REBUILD"):
+            should_build = True
+        if should_build and src is not None and src.exists():
             if _auto_compile(src, shim_path, repo_root, patch.label):
                 pass  # fall through to the existence check below
     if not shim_path.exists():

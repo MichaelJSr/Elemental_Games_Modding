@@ -254,11 +254,27 @@ KEYED_SECTIONS = [
 ]
 
 
-def load_all_tables(config_path):
-    """Load all keyed tables from config.xbr. Returns dict of name -> KeyedTable."""
+def load_all_tables(config_path, sections=None):
+    """Load keyed tables from config.xbr. Returns dict of name -> KeyedTable.
+
+    ``sections``: optional iterable of section names.  When provided,
+    only the named sections are loaded — the rest are skipped entirely.
+    This is a meaningful saving for callers that only need one or two
+    tables (e.g. a ``--config-mod`` with ``_keyed_patches`` touching
+    a single section): full load parses every byte of every grid in
+    every section, but partial load is roughly O(|sections|) of that
+    total.  Default ``None`` loads everything, preserving prior
+    behaviour.
+
+    Unknown section names are silently ignored — callers don't have to
+    filter against ``KEYED_SECTIONS`` themselves.
+    """
+    want = set(sections) if sections is not None else None
     tables = {}
     with open(config_path, 'rb') as f:
         for toc_idx, offset, name in KEYED_SECTIONS:
+            if want is not None and name not in want:
+                continue
             try:
                 tables[name] = KeyedTable(f, offset, name)
             except Exception as e:
