@@ -65,19 +65,29 @@ class EntropyHeuristics(unittest.TestCase):
         self.assertEqual(classify_entry(len(payload), payload[:64]),
                          "likely-animation")
 
-    def test_classify_high_entropy_is_audio(self):
+    def test_classify_high_entropy_without_header_is_non_audio(self):
+        """Post-April-2026 — entropy alone is no longer enough to
+        classify something as audio.  The engine's ``FUN_000AC400``
+        rejects entries whose codec_id isn't in {0, 1}; high-entropy
+        blobs without a valid header are ``non-audio`` payloads the
+        game never decodes, not ``likely-audio`` decoder gaps."""
         from azurik_mod.xbe_tools.audio_dump import classify_entry
         payload = bytes(range(256)) * 4  # uniform high entropy
         self.assertEqual(
             classify_entry(len(payload), payload[:64]),
-            "likely-audio")
+            "non-audio")
 
-    def test_classify_low_entropy_is_animation(self):
+    def test_classify_low_entropy_without_tags_is_non_audio(self):
+        """Low entropy + no animation TOC tags → still ``non-audio``.
+        The old heuristic bucketed these as ``likely-animation`` on
+        low entropy alone, but that's an overreach — only the
+        explicit 4-byte-tag signature justifies the animation label.
+        """
         from azurik_mod.xbe_tools.audio_dump import classify_entry
         payload = b"\x00\x01\x02\x03" * 64  # very low entropy
         self.assertEqual(
             classify_entry(len(payload), payload[:64]),
-            "likely-animation")
+            "non-audio")
 
 
 def _make_fake_fx_xbr(*, waves: list[bytes]) -> bytes:
@@ -134,28 +144,35 @@ class AudioDumpSynthetic(unittest.TestCase):
         report = dump_waves(self.fx_path, self.output)
         self.assertEqual(report.total_waves, 3)
         self.assertEqual(report.written, 3)
-        self.assertEqual(report.likely_audio, 1)
+        # Post-April-2026 reclassification: the "high-entropy no
+        # header" payload is ``non-audio`` (the engine doesn't
+        # decode it), not ``likely-audio``.
+        self.assertEqual(report.non_audio, 1)
         self.assertEqual(report.likely_animation, 1)
         self.assertEqual(report.too_small, 1)
         self.assertTrue((self.output / "manifest.json").exists())
         files = sorted((self.output / "waves").iterdir())
         self.assertEqual(len(files), 3)
 
-    def test_only_audio_skips_animation_and_too_small(self):
+    def test_only_audio_skips_non_audio_and_animation(self):
+        """``--only-audio`` now requires a parsed audio header —
+        high-entropy non-audio blobs are no longer in the "audio"
+        bucket they used to slip into via the entropy heuristic."""
         from azurik_mod.xbe_tools.audio_dump import dump_waves
         report = dump_waves(self.fx_path, self.output,
                             only_audio=True)
-        self.assertEqual(report.written, 1)
-        # Manifest still contains every entry, but only the audio
-        # one has a non-empty output path.
+        # Our synthetic fixture has zero parseable audio headers,
+        # so --only-audio writes nothing.
+        self.assertEqual(report.written, 0)
         outs = [e.output_rel for e in report.entries
                 if e.output_rel]
-        self.assertEqual(len(outs), 1)
+        self.assertEqual(len(outs), 0)
 
     def test_entropy_min_filters(self):
         from azurik_mod.xbe_tools.audio_dump import dump_waves
         # 0.9 is higher than the animation + too-small entries
-        # produce, so only the high-entropy audio one writes.
+        # produce, so only the single high-entropy blob writes —
+        # regardless of how it's later classified.
         report = dump_waves(self.fx_path, self.output,
                             entropy_min=0.9)
         self.assertEqual(report.written, 1)
@@ -300,8 +317,10 @@ class AudioDumpWithHeader(unittest.TestCase):
 
 
 class RawPreviewWav(unittest.TestCase):
-    """The raw-PCM preview wrapper for the 448 headerless
-    likely-audio entries whose real codec we haven't reversed yet."""
+    """The raw-PCM preview wrapper for non-audio entries — blobs
+    whose header fails the engine's acceptance check.  It's a
+    diagnostic helper for inspecting binary structure in Audacity;
+    NOT intended playback (the engine doesn't decode these either)."""
 
     def test_wraps_payload_as_riff_16bit_mono(self):
         from azurik_mod.xbe_tools.audio_dump import build_raw_preview_wav
@@ -345,8 +364,10 @@ class DuplicateDetection(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="azurik-dup-"))
         self.addCleanup(shutil.rmtree, self.tmp)
-        # Build three entries: two identical, one distinct.
-        # All classified as likely-audio (high entropy, no header).
+        # Build three entries: two identical, one distinct.  All
+        # fall into the ``non-audio`` bucket (high entropy, no
+        # parseable engine header) — same path the real-world
+        # 448-entry cluster takes.
         common = bytes(range(256)) * 2        # 512 B, uniform histogram
         distinct = bytes(reversed(range(256))) * 2
         self.fx_path = self.tmp / "synthetic_fx.xbr"
@@ -420,17 +441,27 @@ class AudioDumpVanilla(unittest.TestCase):
         the April 2026 RE pass."""
         self.assertEqual(self.report.total_waves, 700)
 
-    def test_classification_split_reasonable(self):
-        """~70%+ of blobs classify as likely-audio on the vanilla
-        ISO.  Animation + too-small together cover < 30%."""
-        total = self.report.total_waves
-        self.assertGreater(
-            self.report.likely_audio, total * 0.6,
-            msg=f"expected >60% audio, got "
-                f"{self.report.likely_audio}/{total}")
-        self.assertLess(
-            self.report.likely_animation + self.report.too_small,
-            total * 0.4)
+    def test_xbox_adpcm_count_pinned(self):
+        """vanilla fx.xbr ships exactly 103 entries whose header
+        passes the engine's acceptance check — 102 mono + 1 stereo,
+        all Xbox ADPCM.  If this count drifts the engine-header
+        parser regressed or fx.xbr changed."""
+        self.assertEqual(self.report.xbox_adpcm, 103)
+
+    def test_non_audio_bucket_matches_engine_reality(self):
+        """Most wave TOC entries don't decode as audio because
+        their header fails ``FUN_000AC400``'s check — they're
+        non-audio payloads stored under the ``wave`` fourcc.
+        Expected ~550+ in vanilla; anything <500 would mean the
+        classifier started mistaking non-audio for something else.
+        """
+        self.assertGreater(self.report.non_audio, 500)
+        # And xbox-adpcm + non-audio + likely-animation +
+        # too-small + pcm-raw must account for every entry.
+        total = (self.report.xbox_adpcm + self.report.pcm_raw
+                 + self.report.non_audio + self.report.likely_animation
+                 + self.report.too_small)
+        self.assertEqual(total, self.report.total_waves)
 
 
 # ---------------------------------------------------------------------------
@@ -652,7 +683,7 @@ class CliSmokeAudioPlugins(unittest.TestCase):
                 "audio", "dump", str(_VANILLA_FX),
                 "--output", tmp, "--only-audio")
             self.assertEqual(rc, 0)
-            self.assertIn("likely-audio:", stdout)
+            self.assertIn("non-audio:", stdout)
             self.assertTrue((Path(tmp) / "manifest.json").exists())
 
 

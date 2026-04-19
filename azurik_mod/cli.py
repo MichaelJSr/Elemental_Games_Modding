@@ -788,9 +788,10 @@ def main() -> None:
             "each entry, and wrap recognised codecs in RIFF/WAVE\n"
             "so vgmstream / Audacity / ffmpeg can play them back.\n\n"
             "Classification labels:\n"
-            "  * xbox-adpcm        — 20-byte header decoded, .wav emitted\n"
-            "  * pcm-raw           — 8/16-bit linear PCM, .wav emitted\n"
-            "  * likely-audio      — no header but high-entropy bytes\n"
+            "  * xbox-adpcm        — header decoded (codec_id=1), .wav emitted\n"
+            "  * pcm-raw           — header decoded (codec_id=0), .wav emitted\n"
+            "  * non-audio         — header fails engine's acceptance check;\n"
+            "                        the game doesn't decode these either\n"
             "  * likely-animation  — structured Maya particle-system data\n"
             "  * too-small         — < 64 bytes\n\n"
             "Pass --index-xbr to pull symbolic names (fx/sound/...) from\n"
@@ -817,11 +818,10 @@ def main() -> None:
              "blobs (default: emit one .wav per xbox-adpcm / pcm-raw "
              "entry so external audio tools can play them directly).")
     p_ad.add_argument("--raw-previews", action="store_true",
-        help="Emit *.preview.wav alongside every likely-audio entry "
-             "(the 448 blobs whose codec isn't decoded yet) — wraps "
-             "the raw bytes as 16-bit mono PCM so you can open them "
-             "in Audacity for waveform / spectrogram inspection. "
-             "NOT the intended playback; diagnostic only.")
+        help="Emit *.preview.wav alongside every non-audio entry — "
+             "wraps the raw bytes as 16-bit mono PCM so you can open "
+             "them in Audacity for binary-structure inspection. NOT "
+             "audio the engine decodes; diagnostic aid only.")
     p_ad.add_argument("--preview-sample-rate", type=int, default=22050,
         help="Sample rate for --raw-previews wrappers (default 22050, "
              "the most common Azurik rate).")

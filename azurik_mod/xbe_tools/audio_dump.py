@@ -3,47 +3,65 @@ Azurik's ``fx.xbr``.
 
 Tool #14 on the roadmap.  Bulk-extracts every ``wave`` TOC entry
 from a fx-style XBR file; classifies each blob by payload header;
-for blobs whose 20-byte prefix matches Azurik's Xbox-ADPCM header,
-wraps the payload in a RIFF/WAV so external tools (vgmstream,
-Audacity, ffmpeg) can consume it directly; and emits a manifest
-mapping every blob to its decoded metadata.
+for blobs whose 16-byte prefix matches Azurik's engine-accepted
+audio header, wraps the payload in a RIFF/WAV so external tools
+(vgmstream, Audacity, ffmpeg) can consume it directly; and emits
+a manifest mapping every blob to its decoded metadata.
 
-## Format — pinned in the April 2026 RE pass
+## Format — pinned in the April 2026 RE pass (final)
 
-**100 of 700** ``wave`` entries open with a 20-byte header we
-decoded from multi-entry comparison (see
-``tests/test_audio_and_plugins.py`` for the exact regression
-fixtures):
+The authoritative parser is the game's own
+``FUN_000AC400`` @ VA ``0x000AC400`` — called by the wave-init
+vtable method ``FUN_000AC6F0`` (VA ``0x000AC6F0``) before the
+payload is handed to ``IDirectSoundBuffer_SetBufferData``.
+Ghidra MCP xrefs chain: ``load_asset_by_fourcc`` → caller
+``FUN_000A20C0`` → factory ``FUN_000AE030`` → vtable slot +0x34
+``FUN_000AC6F0`` → header parser ``FUN_000AC400``.
 
-    offset 0x00  u32  sample_rate    (22050 / 32000 / 44100 etc.)
-    offset 0x04  u32  sample_count   (frame_count when ADPCM; duration
-                                      = sample_count / sample_rate)
-    offset 0x08  u32  format_magic   (0x01000401 in 97 entries,
-                                      0x01000402 + 0x01010401 elsewhere)
-    offset 0x0C  u32  reserved       (observed 0 in every entry)
-    offset 0x10  u32  reserved       (observed 0 or a small flag)
-    offset 0x14  ...  payload        (ADPCM samples, mono 4-bit)
+**16-byte audio header** (bytes 0x00..0x10 of each wave entry)::
 
-The format-magic dword decomposes byte-for-byte as:
+    offset 0x00  u32  sample_rate       (22050 / 32000 / 44100 / …)
+    offset 0x04  u32  sample_count      (duration = count / rate;
+                                         unused by parser, kept for docs)
+    offset 0x08  u8   channels          (1 or 2)
+    offset 0x09  u8   bits_per_sample   (PCM: 8 or 16; XADPCM: 4)
+    offset 0x0A  u8   (unused)
+    offset 0x0B  u8   codec_id          (0 = PCM, 1 = Xbox ADPCM)
+    offset 0x0C  u32  (unused — padding)
+    offset 0x10  ...  codec payload fed to DirectSound
 
-    byte[0] = channels (1 = mono)
-    byte[1] = bits_per_sample (4 = ADPCM, 8/16 = PCM)
-    byte[2] = reserved (0 in observed samples)
-    byte[3] = codec_id (1 = Xbox ADPCM, 2 = PCM-ish variant)
+The engine REJECTS any entry whose ``codec_id`` is outside
+``{0, 1}`` (``FUN_000AC400`` returns 0 → sound silently not
+played).  We match that acceptance set exactly.
 
-**Distribution** (vanilla ``fx.xbr``):
+## Why the engine needs no custom decoder
 
-- 74  sample_rate=22050
-- 13  sample_rate=32000
--  7  sample_rate=44100
--  4  sample_rate=11025
--  2  sample_rate=8000
-- 97  format_magic=0x01000401  (channels=1, bits=4, codec=1)
+Xbox DirectSound handles ``WAVE_FORMAT_XBOX_ADPCM`` (0x0069)
+natively in hardware — ``FUN_000AC6F0`` just builds a
+``WAVEFORMATEX`` from the 16-byte header + hands the raw payload
+at ``entry + 16`` to ``IDirectSoundBuffer_SetBufferData``.  Our
+RIFF/WAVE wrappers use the same format tag so ffmpeg /
+vgmstream / Audacity decode identically.
 
-The remaining 600 entries either have a different header layout
-(60 with ``u32[2]==0``, looked like simpler PCM frames) or aren't
-audio (animation-curve metadata with embedded 4-byte TOC tags like
-``gshd``, ``ndbg``, ``rdms``).
+## Distribution — vanilla ``fx.xbr`` (700 entries)
+
+- 102  xbox-adpcm (codec_id=1, channels=1, bits=4) — the main SFX set
+-   1  xbox-adpcm (codec_id=1, channels=2, bits=4) — sole stereo entry
+-   0  pcm-raw (the game has the code path but no entries use it)
+- 118  likely-animation (4-byte TOC tags in first 64 bytes —
+        Maya particle-system curve data)
+- 448  non-audio (high-entropy bytes but header fails parse —
+        NOT decoded by the game either; leftover / effect data
+        stored under the ``wave`` fourcc)
+-  31  too-small (<64 byte payload)
+
+An earlier draft classified the 448 "non-audio" entries as
+``likely-audio`` on entropy alone; the April 2026 Ghidra walk
+proved they never reach the wave-init pipeline, so there's
+nothing to decode.  The ``--raw-previews`` flag still exists
+for ad-hoc inspection of any non-audio blob's bytes as a raw
+PCM WAV, but it's strictly a diagnostic aid, not an
+audio-recovery path.
 
 ## Cross-referencing with ``index.xbr``
 
@@ -93,59 +111,58 @@ Produces::
 
 Classification values:
 
-- ``xbox-adpcm``      — 20-byte header recognised; WAV wrapper emitted
-- ``pcm-raw``         — 20-byte header with bits_per_sample ∈ {8, 16};
-                         WAV wrapper emitted with WAVE_FORMAT_PCM
-- ``likely-audio``    — entropy ≥ 0.5, no recognised header, no
-                         animation tags → raw bytes only
-- ``likely-animation`` — animation-curve metadata (TOC tags in first
-                         64 bytes, or low entropy)
+- ``xbox-adpcm``      — header parsed, codec_id=1; WAV wrapper
+                         emitted with ``WAVE_FORMAT_XBOX_ADPCM`` (0x0069)
+- ``pcm-raw``         — header parsed, codec_id=0; WAV wrapper
+                         emitted with ``WAVE_FORMAT_PCM`` (0x0001)
+- ``non-audio``       — header fails the engine's acceptance check
+                         (codec_id ∉ {0, 1}).  NOT decodable as audio;
+                         the game doesn't decode these either.
+- ``likely-animation`` — Maya particle-system curve data (4-byte TOC
+                         tags in first 64 bytes)
 - ``too-small``       — < 64 bytes of payload
 
-## Decoding the 448 likely-audio entries
+## Why many entries don't decode
 
-These don't carry the 20-byte header and their exact codec has NOT
-been reversed.  The April 2026 analysis ruled out:
+The ``non-audio`` bucket (448 entries in vanilla ``fx.xbr``) used
+to be labelled ``likely-audio`` and looked like a decoder gap.
+The April 2026 Ghidra walk proved otherwise:
 
-- **Straight 16-bit / 8-bit PCM** — adjacent-sample delta is close to
-  uniform-random (mean |Δ| ≈ 30 000 on int16 interpretation); real
-  audio gives mean |Δ| ≲ 3 000.
-- **Headerless IMA ADPCM** with either ``(0, 0)`` start state or
-  first-4-bytes-as-header — both produce noise.
-- **MS/Xbox ADPCM** 36-byte block variant — 0 of 448 sizes divide
-  cleanly by 36, 72, 140, or any other standard ADPCM block.
-- **Common RIFF / XMA / XMA2 / xWMA / FSB / OggS / BNK containers**
-  — no matching magic.
+- ``FUN_000AC400`` (the engine's header parser) rejects anything
+  with ``codec_id ∉ {0, 1}``.
+- The wave-init vtable method ``FUN_000AC6F0`` silently aborts
+  when the parser fails → ``FUN_000A20C0`` leaves the sound
+  object NULL → no playback attempted.
+- So the 448 blobs that don't parse are never consumed as audio
+  BY THE GAME.  They're payloads stored under the ``wave`` fourcc
+  for historical reasons (effect metadata, unused resources,
+  development leftovers) — not a codec we need to reverse.
 
-Most likely candidates given what matches the bytes:
+For reference the pipeline is:
 
-- A proprietary Azurik ADPCM variant (some sizes divide by 8 or 16
-  which hints at a block-based codec with non-standard block size).
-- Data that's been post-processed (XOR-key'd, nibble-interleaved,
-  byte-reversed) on top of a standard codec.
-- A codec whose decoder sits in ``default.xbe`` and hasn't been
-  reversed yet.  Likely callsite to bisect:
-  ``load_asset_by_fourcc`` (VA ``0x000A67A0``) → ``wave``-tag branch.
+::
 
-Until someone reverses the decoder, the tool offers two pragmatic
-workflows for the likely-audio bucket:
+    symbolic name (fx/sound/...)
+        ↓ index.xbr
+    load_asset_by_fourcc(0x65766177, 1)           → offset into fx.xbr
+        ↓ FUN_000A20C0 (per-frame sound tick)
+    FUN_000AE030(channel, offset, flags)          → sound-object alloc
+        ↓ vtable[+0x34]
+    FUN_000AC6F0(this, channel, wave_entry, flags)
+        ↓
+    FUN_000AC400(wave_entry)                      → WAVEFORMATEX
+    DSOUND::DirectSoundCreateBuffer(desc, out)
+    DSOUND::IDirectSoundBuffer_SetBufferData(buf, wave_entry+16, n)
 
-1. **Duplicate detection.**  Many entries share identical first-32
-   bytes across different symbolic names — the same SFX referenced
-   from multiple ``fx/sound/...`` paths.  The manifest's
-   ``duplicate_of`` field points each duplicate at the earlier
-   canonical index so RE tooling can deduplicate before spending
-   cycles on redundant blobs.
-2. **Raw-PCM preview wrappers.**  Pass ``--raw-previews`` to emit
-   ``*.preview.wav`` alongside every likely-audio entry, wrapping
-   the raw bytes as 16-bit mono PCM at 22050 Hz.  This is NOT the
-   intended audio — it's a diagnostic that lets you drop the
-   payload into Audacity to inspect the waveform / spectrogram,
-   spot codec-frame boundaries visually, or confirm duplicates by
-   shape.
+Xbox DirectSound decodes ``WAVE_FORMAT_XBOX_ADPCM`` (0x0069) in
+hardware, which is why there's no custom decoder to reverse.
 
-Decoder RE progress is tracked in ``docs/LEARNINGS.md`` §
-fx.xbr wave codec.
+If you want to poke at non-audio entries for RE purposes,
+``--raw-previews`` emits ``*.preview.wav`` wrappers around their
+raw bytes (16-bit mono PCM at the chosen sample rate) so you can
+drop them into Audacity.  It's a generic "high-entropy bytes as
+diagnostic WAV" helper — NOT an audio-recovery path.  Most users
+can leave it off.
 """
 
 from __future__ import annotations
@@ -246,7 +263,7 @@ class WaveEntry:
     wav_output_rel: str = ""    # "" if no WAV wrapper emitted
     probable_name: str = ""     # from index.xbr cross-reference
     duplicate_of: int = -1      # -1 or the lowest index sharing first 32B
-    preview_output_rel: str = ""  # raw-PCM preview .wav (likely-audio only)
+    preview_output_rel: str = ""  # raw-PCM preview .wav (non-audio only)
 
     def to_dict(self) -> dict:
         d = {
@@ -284,7 +301,7 @@ class DumpReport:
     duplicates_detected: int = 0
     xbox_adpcm: int = 0
     pcm_raw: int = 0
-    likely_audio: int = 0
+    non_audio: int = 0
     likely_animation: int = 0
     too_small: int = 0
     entries: list[WaveEntry] = field(default_factory=list)
@@ -301,7 +318,7 @@ class DumpReport:
             "classification_counts": {
                 "xbox-adpcm":        self.xbox_adpcm,
                 "pcm-raw":           self.pcm_raw,
-                "likely-audio":      self.likely_audio,
+                "non-audio":         self.non_audio,
                 "likely-animation":  self.likely_animation,
                 "too-small":         self.too_small,
             },
@@ -336,40 +353,70 @@ def entropy_ratio(data: bytes) -> float:
 
 
 def parse_wave_header(payload: bytes) -> WaveHeader | None:
-    """Return the decoded 20-byte audio header, or ``None`` if the
+    """Return the decoded 16-byte audio header, or ``None`` if the
     prefix doesn't match Azurik's wave layout.
 
-    The header is considered valid when:
+    The layout is pinned from the Ghidra decomp of the game's actual
+    header parser ``FUN_000AC400`` @ VA ``0x000AC400`` (the function
+    that the wave-init vtable slot ``IDirectSoundBuffer_Init`` @
+    ``0x000AC6F0`` calls before handing the payload to
+    ``IDirectSoundBuffer_SetBufferData``):
 
-    - ``u32[0]`` is in :data:`_PLAUSIBLE_SAMPLE_RATES`;
-    - ``u32[2]`` decomposes into ``channels ∈ {1, 2}``, ``bits ∈
-      {4, 8, 16}``, ``codec_id ∈ {1, 2}`` when read byte-by-byte.
+    ::
 
-    The double-guard (plausible rate AND sane format_magic) costs
-    nothing to evaluate and rules out the ~60% of wave entries
-    whose first bytes aren't audio headers at all.
+        offset  0  u32  sample_rate       (22050 / 32000 / 44100 / …)
+        offset  4  u32  sample_count      (unused by the parser;
+                                           kept for duration display)
+        offset  8  u8   channels          (1 or 2)
+        offset  9  u8   bits_per_sample   (PCM: 8 or 16; XADPCM: 4)
+        offset 10  u8   (unused)
+        offset 11  u8   codec_id          (0 = PCM, 1 = Xbox ADPCM)
+        offset 12  u32  (unused — padding)
+        offset 16  ...  codec payload fed to DirectSound
+
+    The game's parser REJECTS any entry with ``codec_id`` outside
+    ``{0, 1}`` — so do we.  Earlier drafts of this function read
+    bytes 8-11 as a little-endian ``format_magic`` ``u32`` and
+    checked its integer value against a magic list; that
+    accidentally excluded plain PCM (codec_id=0) and included a
+    stray codec_id=2 that the game would refuse.  Aligned with the
+    real engine logic now.
     """
-    if len(payload) < 20:
+    if len(payload) < 16:
         return None
-    sample_rate, sample_count, format_magic = struct.unpack_from(
-        "<III", payload, 0)
+    sample_rate, sample_count = struct.unpack_from("<II", payload, 0)
     if sample_rate not in _PLAUSIBLE_SAMPLE_RATES:
         return None
-    channels = format_magic & 0xFF
-    bits_per_sample = (format_magic >> 8) & 0xFF
-    codec_id = (format_magic >> 24) & 0xFF
-    # Shape guards — reject obviously-wrong decompositions.
+    channels = payload[8]
+    bits_per_sample = payload[9]
+    codec_id = payload[11]
+    # The engine's acceptance set — FUN_000AC400 returns 0 otherwise.
+    if codec_id not in (0, 1):
+        return None
     if channels not in (1, 2):
         return None
     if bits_per_sample not in (4, 8, 16):
         return None
-    if codec_id not in (1, 2):
+    # Shape guards — bits/codec must be self-consistent.  Anything
+    # else would make DirectSound reject the buffer.
+    if codec_id == 0 and bits_per_sample not in (8, 16):
+        return None
+    if codec_id == 1 and bits_per_sample != 4:
         return None
     # Sanity: sample_count must correspond to a non-insane duration.
     # Anything over 10 minutes of audio in a single fx.xbr blob is
     # almost certainly a bogus reinterpretation of noise bytes.
     if sample_count > sample_rate * 600:
         return None
+    # Preserve the original "format_magic" interpretation (byte[11]
+    # as high byte of the u32) so downstream consumers of the
+    # manifest can still inspect it.  We keep it synthesised even
+    # though it isn't how the engine actually reads the fields.
+    format_magic = (
+        channels
+        | (bits_per_sample << 8)
+        | (payload[10] << 16)
+        | (codec_id << 24))
     return WaveHeader(
         sample_rate=sample_rate,
         sample_count=sample_count,
@@ -385,7 +432,29 @@ def classify_entry(size: int, head: bytes,
     """Label a wave entry.
 
     Priority order: too-small → recognised codec → animation tag →
-    entropy-based fallback.
+    non-audio fallback.
+
+    **Labels**:
+
+    - ``xbox-adpcm`` — header parsed with codec_id=1 (Xbox hardware
+      ADPCM); ``.wav`` wrapper emitted using
+      ``WAVE_FORMAT_XBOX_ADPCM``.
+    - ``pcm-raw`` — header parsed with codec_id=0 (uncompressed PCM);
+      ``.wav`` wrapper emitted using ``WAVE_FORMAT_PCM``.
+    - ``likely-animation`` — structured Maya particle-system data
+      (4-byte TOC tags in the first 64 bytes).  Not audio.
+    - ``non-audio`` — header doesn't parse as audio AND no animation
+      tags detected.  The engine's own header parser
+      (``FUN_000AC400``) rejects anything with codec_id ∉ {0, 1}, so
+      these blobs are NOT decoded by the game either.  They're
+      payloads stored under the ``wave`` fourcc for historical
+      reasons — most likely leftover effect / particle data that
+      didn't get promoted to a dedicated fourcc.  Decoding them as
+      audio is a dead end; the earlier ``likely-audio`` label was
+      a false positive based solely on entropy and was renamed
+      ``non-audio`` once the header-parser RE confirmed the engine
+      never tries to decode them.
+    - ``too-small`` — payload shorter than 64 bytes.
     """
     if size < 64:
         return "too-small"
@@ -396,9 +465,7 @@ def classify_entry(size: int, head: bytes,
     for tag in _ANIMATION_TAGS:
         if tag in head[:64]:
             return "likely-animation"
-    if entropy_ratio(head[:256]) >= 0.5:
-        return "likely-audio"
-    return "likely-animation"
+    return "non-audio"
 
 
 # ---------------------------------------------------------------------------
@@ -417,23 +484,22 @@ def build_raw_preview_wav(
     """Wrap ``payload`` as a raw-PCM WAV using the given sample-rate
     guess.
 
-    Use case: the 448 ``likely-audio`` entries in Azurik's
-    ``fx.xbr`` carry no recognisable header (see module docstring).
-    The bytes have high entropy, no consistent block size, and
-    naive IMA / MS-ADPCM decoders produce noise.  Until someone
-    reverses the exact codec from Azurik's XBE, a RAW-PCM WAV
-    wrapper at the most common Azurik sample rate (22050 Hz mono)
-    gives analysts something they can drop into Audacity to:
+    Use case: the 448 ``non-audio`` entries in Azurik's
+    ``fx.xbr`` are high-entropy payloads stored under the ``wave``
+    fourcc that the engine never decodes (see module docstring
+    for the full RE trail — the header parser ``FUN_000AC400``
+    rejects them, the wave-init vtable slot silently aborts).  A
+    RAW-PCM WAV wrapper at a plausible sample rate lets an analyst
+    drop them into Audacity to inspect byte structure visually:
 
-    - Spot codec hints by eye (spectrogram shows frame boundaries
-      or regular beating patterns for ADPCM-style codecs)
-    - Identify duplicates from waveform shape
-    - Confirm the entry is actually audio vs binary garbage
+    - Confirm they're not PCM masquerading as something else
+    - Spot block / frame boundaries in otherwise-opaque binary
+    - Identify duplicates by waveform shape
 
-    The output is NOT playable as intended audio — it's a
-    diagnostic wrapper.  ``bits_per_sample`` defaults to 16 because
-    a payload aligned to 16-bit samples is the most common
-    interpretation to probe; callers can override to 8.
+    The output is NOT intended audio; it's a diagnostic wrapper
+    for any high-entropy binary blob.  ``bits_per_sample`` defaults
+    to 16 because a payload aligned to 16-bit samples is the most
+    common interpretation to probe; callers can override to 8.
     """
     block_align = channels * (bits_per_sample // 8)
     byte_rate = sample_rate * block_align
@@ -594,12 +660,11 @@ def dump_waves(
         (vgmstream, Audacity, ffmpeg) can pick them up directly.
     emit_raw_previews
         When ``True``, emit a ``*.preview.wav`` alongside every
-        ``likely-audio`` entry — the raw payload wrapped as
-        16-bit mono PCM at ``preview_sample_rate``.  Output is
-        NOT the intended audio (the real codec isn't decoded
-        yet) but makes the bytes openable in Audacity for
-        waveform / spectrogram inspection; useful for eyeballing
-        codec boundaries + spotting duplicates by shape.
+        ``non-audio`` entry — the raw payload wrapped as 16-bit
+        mono PCM at ``preview_sample_rate``.  Output is NOT
+        intended audio (the engine doesn't decode these bytes
+        either) — it's a diagnostic aid for eyeballing binary
+        structure in Audacity.  Most users leave this off.
     preview_sample_rate
         Sample rate to use for raw-preview wrappers (default
         22050 Hz — the most common Azurik rate, so plausible
@@ -638,7 +703,7 @@ def dump_waves(
 
     # First pass — build a (first-32-bytes) -> earliest-index map so
     # the main loop can flag duplicates without re-scanning.  Many of
-    # the 448 headerless ``likely-audio`` entries share identical
+    # the 448 headerless ``non-audio`` entries share identical
     # prefixes across different TOC slots (same sound referenced by
     # multiple symbolic names); surfacing the redundancy cuts analysis
     # time for RE workflows.
@@ -670,8 +735,8 @@ def dump_waves(
             report.xbox_adpcm += 1
         elif classification == "pcm-raw":
             report.pcm_raw += 1
-        elif classification == "likely-audio":
-            report.likely_audio += 1
+        elif classification == "non-audio":
+            report.non_audio += 1
         else:
             report.likely_animation += 1
 
@@ -679,7 +744,7 @@ def dump_waves(
         if entropy_min > 0.0 and ratio < entropy_min:
             should_write = False
         if only_audio and classification not in (
-                "xbox-adpcm", "pcm-raw", "likely-audio"):
+                "xbox-adpcm", "pcm-raw"):
             should_write = False
 
         if should_write:
@@ -688,21 +753,26 @@ def dump_waves(
 
         wav_output_rel = ""
         if should_write and emit_wav and header is not None:
-            # Strip the 20-byte header before wrapping so the WAV
-            # ``data`` chunk is pure codec payload.
-            wav_bytes = _build_wav_container(header, payload[20:])
+            # Strip the 16-byte header before wrapping so the WAV
+            # ``data`` chunk is pure codec payload, matching what
+            # the engine hands to ``IDirectSoundBuffer_SetBufferData``.
+            wav_bytes = _build_wav_container(header, payload[16:])
             wav_output_rel = output_rel[:-4] + ".wav"
             (out / wav_output_rel).write_bytes(wav_bytes)
             report.wav_written += 1
 
-        # Raw-PCM preview wrapper for likely-audio entries.  The
-        # actual codec hasn't been reversed yet; this gives the user
-        # something they can drop into Audacity (NOT the intended
-        # playback).  Skip duplicates — they share bytes with the
-        # canonical entry so the same preview would land N times.
+        # Raw-PCM preview wrapper for non-audio entries.  The April
+        # 2026 RE pass pinned that these bytes are NOT consumed as
+        # audio by the engine (``FUN_000AC400`` rejects anything
+        # with codec_id ∉ {0, 1}); keeping the preview path around
+        # only as a generic "dump anything high-entropy as a raw-PCM
+        # WAV for inspection" helper.  Most users can leave
+        # ``--raw-previews`` off now that the non-audio status of
+        # these entries is confirmed.  Skip duplicates — same bytes
+        # would land N times otherwise.
         preview_output_rel = ""
         if (should_write and emit_raw_previews
-                and classification == "likely-audio"
+                and classification == "non-audio"
                 and duplicate_of < 0):
             preview_bytes = build_raw_preview_wav(
                 payload, sample_rate=preview_sample_rate,
@@ -754,7 +824,7 @@ def format_report(report: DumpReport, *, preview: int = 0) -> str:
         "  classification:",
         f"     xbox-adpcm:           {report.xbox_adpcm}",
         f"     pcm-raw:              {report.pcm_raw}",
-        f"     likely-audio:         {report.likely_audio}",
+        f"     non-audio:            {report.non_audio}",
         f"     likely-animation:     {report.likely_animation}",
         f"     too-small:            {report.too_small}",
     ]

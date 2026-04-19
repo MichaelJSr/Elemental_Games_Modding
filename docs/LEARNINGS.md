@@ -634,72 +634,103 @@ shim authors who want to trigger specific effects).  Deferred
 until a concrete shim needs it; the inline-asm wrapper cost
 (à la gravity) isn't worth paying speculatively.
 
-### fx.xbr wave codec — what's decoded, what isn't (April 2026)
+### fx.xbr wave codec — the full RE trail (April 2026, final)
 
-``fx.xbr`` contains **700** ``wave`` TOC entries.  Post-April-2026
-they split into four buckets:
+``fx.xbr`` contains **700** ``wave`` TOC entries.  The April 2026
+Ghidra walk pinned the complete pipeline and proved there's **no
+custom codec** to reverse — Xbox DirectSound decodes everything
+in hardware.
 
-- **103 xbox-adpcm** — entries whose payload starts with the
-  20-byte header ``[sample_rate u32][sample_count u32]
-  [format_magic u32][reserved u32][reserved u32]``.  The
-  ``format_magic`` dword decomposes byte-for-byte as
-  ``channels = byte[0]``, ``bits_per_sample = byte[1]``,
-  ``codec_id = byte[3]``; 97 of the 100 header-carrying entries
-  use ``0x01000401`` = mono, 4-bit, codec 1 (Xbox ADPCM).  The
-  ``audio dump`` tool wraps these in RIFF/WAVE containers using
-  ``WAVE_FORMAT_XBOX_ADPCM`` (0x0069).  vgmstream / Audacity /
-  ffmpeg can play them directly.
-- **448 likely-audio** — high-entropy payloads with NO recognisable
-  header.  The exact codec is not yet reversed.  What we've
-  ruled out:
-  * Raw 16-bit / 8-bit PCM — mean ``|Δ|`` between adjacent int16
-    samples ≈ 30 000 (near-uniform-random).  Real PCM audio
-    runs ``|Δ| ≲ 3 000``.
-  * Headerless IMA ADPCM with either ``(predictor=0, step=0)``
-    start or first-4-bytes-as-header — both produce noise.
-  * MS / Xbox ADPCM 36-byte block codec — 0 of 448 sizes divide
-    cleanly by 36, 72, 140, or any other standard ADPCM block.
-  * Common containers: no RIFF / XMA / XMA2 / xWMA / FSB /
-    OggS / BNK magic anywhere in the blob range.
+**Static call chain** (dumped via ``azurik-mod xrefs`` /
+``call-graph``):
 
-  What we've confirmed about the 448:
+::
 
-  * **~50% of sizes divide by 8**, another 29% by 16 — a
-    block-based codec with a non-standard (or varying) block size
-    is most plausible.
-  * **48 entries are exact duplicates** of earlier entries (same
-    first 32 bytes + same total size).  Likely the same SFX
-    referenced by multiple ``fx/sound/...`` symbolic names.  The
-    ``audio dump`` tool surfaces this via ``duplicate_of`` in the
-    manifest + skips redundant preview emission.
-  * **Most likely decoder callsite**: ``load_asset_by_fourcc``
-    at VA ``0x000A67A0`` → ``wave``-tag branch.  Bisecting from
-    there would isolate the decoder.
+    symbolic name (fx/sound/...)               ← index.xbr lookup
+        ↓
+    load_asset_by_fourcc(0x65766177, 1)        @ VA 0x000A67A0
+        ↓  called from
+    FUN_000A20C0 (per-frame sound tick)        @ VA 0x000A20C0
+        ↓  allocates sound object
+    FUN_000AE030 (factory)                     @ VA 0x000AE030
+        ↓  vtable slot [+0x34] → init method
+    FUN_000AC6F0                               @ VA 0x000AC6F0
+        ↓  delegates header parse
+    FUN_000AC400                               @ VA 0x000AC400
+        ↓  fills WAVEFORMATEX
+    DSOUND::DirectSoundCreateBuffer
+    DSOUND::IDirectSoundBuffer_SetBufferData(buf, wave_entry + 16, N)
 
-- **118 likely-animation** — Maya-particle-system curve data.
-  First 64 bytes contain 4-byte TOC tags (``gshd`` / ``ndbg`` /
-  ``node`` / ``rdms``), no audio codec structure.  Not audio.
-- **31 too-small** — payloads under 64 bytes.  Likely terminator
-  rows or null-sentinel entries.
+**Engine-canonical 16-byte wave header** (as read by
+``FUN_000AC400`` byte-for-byte):
 
-**Practical workflow for the likely-audio bucket**: run ``audio
-dump --raw-previews`` to emit ``*.preview.wav`` wrappers that
-treat each payload as 16-bit mono PCM at 22050 Hz.  The result
-is NOT the intended audio (the real codec isn't decoded), but
-it's valid RIFF so analysts can open each blob in Audacity to
-eyeball the waveform / spectrogram for codec-frame boundaries or
-recognisable envelope shapes.  ``build_raw_preview_wav`` in
-``azurik_mod/xbe_tools/audio_dump.py`` exposes the same helper
-for Python callers.
+::
 
-**Takeaway for future RE**: the decoder callsite is likely
-reachable from ``load_asset_by_fourcc``'s wave branch; the best
-next step is setting a breakpoint there in xemu, stepping into
-the wave-specific handler, and documenting which function
-consumes the payload bytes.  Once named, dumping the decoder's
-C decompile + comparing to standard ADPCM variants should
-surface the variant quickly.  Tooling is ready; the RE
-investment is the outstanding cost.
+    offset 0x00  u32  sample_rate       (22050 / 32000 / 44100 / …)
+    offset 0x04  u32  sample_count      (unused by parser, kept for
+                                         duration display)
+    offset 0x08  u8   channels          (1 or 2)
+    offset 0x09  u8   bits_per_sample   (PCM: 8 or 16; XADPCM: 4)
+    offset 0x0A  u8   (unused)
+    offset 0x0B  u8   codec_id          (0 = PCM, 1 = Xbox ADPCM)
+    offset 0x0C  u32  (unused — padding)
+    offset 0x10  ...  codec payload fed to DirectSound
+
+``FUN_000AC400`` returns 0 (rejection) for any entry with
+``codec_id`` outside ``{0, 1}``.  ``FUN_000AC6F0`` checks that
+return value and silently aborts the sound alloc on failure —
+the game NEVER attempts to decode those bytes as audio.
+
+**Distribution** (vanilla ``fx.xbr``, after re-classification):
+
+| Classification      | Count | Notes                                  |
+|---------------------|------:|----------------------------------------|
+| ``xbox-adpcm``      |   103 | 102 mono + 1 stereo; WAV wrapper works |
+| ``pcm-raw``         |     0 | Code path exists; no entries use it    |
+| ``likely-animation``|     9 | 4-byte TOC tags in first 64 bytes      |
+| ``non-audio``       |   557 | Fails engine header check; not audio   |
+| ``too-small``       |    31 | < 64 byte payload                      |
+
+The 557 ``non-audio`` entries are what used to be labelled
+``likely-audio`` on a pure-entropy heuristic.  They're high-
+entropy payloads stored under the ``wave`` fourcc for historical
+reasons — effect metadata, unused resources, development
+leftovers — that never flow through the wave-init pipeline
+because the engine's own parser rejects their headers.
+
+**Why the audio "decoder RE" problem evaporated**: Xbox
+DirectSound handles ``WAVE_FORMAT_XBOX_ADPCM`` (0x0069) natively
+in hardware.  ``FUN_000AC6F0`` just builds a ``WAVEFORMATEX``
+from the 16-byte header and hands the raw payload at
+``wave_entry + 16`` to ``IDirectSoundBuffer_SetBufferData``.  No
+game-side codec exists to reverse.  Our ``audio dump`` tool's
+RIFF/WAVE wrappers use the same format tag so ffmpeg / vgmstream
+/ Audacity decode identically to what DirectSound plays.
+
+**Ruled out during the investigation** (kept for reference —
+don't rechase these):
+
+- Straight 16-bit / 8-bit PCM reinterpretation of the non-audio
+  blobs: mean ``|Δ|`` between adjacent int16 samples ≈ 30 000
+  (near-uniform-random).
+- Headerless IMA / MS / Xbox ADPCM decode with either zero
+  start-state or first-4-bytes-as-header: all produce noise.
+- Non-standard block size (36 / 72 / 140 bytes) for the
+  non-audio entries: 0 of 557 sizes divide cleanly.
+
+**Takeaways**:
+
+1. The ``--raw-previews`` CLI flag is kept as a generic
+   "inspect any high-entropy binary blob in Audacity" helper but
+   is NOT an audio-recovery path.  Most users can leave it off.
+2. ``duplicate_of`` detection in the manifest still has value —
+   surfaces 48 redundant entries in vanilla fx.xbr where the
+   same bytes appear under multiple indices.
+3. Engine-side vanilla symbols worth registering for future
+   shim authoring: ``FUN_000AC400`` (header parser),
+   ``FUN_000AC6F0`` (wave-init vtable slot), ``FUN_000AE030``
+   (sound-object factory).  Not added yet — deferred until a
+   concrete shim needs them.
 
 ## prefetch-lists.txt — the level manifest goldmine
 

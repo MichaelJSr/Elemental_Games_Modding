@@ -2,6 +2,92 @@
 
 ## Unreleased
 
+### fx.xbr wave codec — RE closed (no custom decoder exists)
+
+The xemu-debug breakpoint at ``load_asset_by_fourcc`` (hit by the
+user) combined with a Ghidra xref walk from there pinned the
+entire wave pipeline.  The key finding: **Azurik has no custom
+wave codec to reverse.**
+
+**Static call chain** (via ``azurik-mod xrefs`` +
+``call-graph``):
+
+::
+
+    load_asset_by_fourcc(0x65766177, 1)        @ VA 0x000A67A0
+        ↓  called from
+    FUN_000A20C0 (per-frame sound tick)        @ VA 0x000A20C0
+        ↓  allocates sound object
+    FUN_000AE030 (factory)                     @ VA 0x000AE030
+        ↓  vtable slot +0x34 → init method
+    FUN_000AC6F0                               @ VA 0x000AC6F0
+        ↓  delegates header parse
+    FUN_000AC400                               @ VA 0x000AC400
+        ↓  fills WAVEFORMATEX
+    DSOUND::DirectSoundCreateBuffer
+    DSOUND::IDirectSoundBuffer_SetBufferData(buf, wave_entry + 16, N)
+
+Xbox DirectSound decodes ``WAVE_FORMAT_XBOX_ADPCM`` (0x0069) in
+hardware; ``FUN_000AC6F0`` just builds a WAVEFORMATEX from the
+16-byte header and hands the raw bytes at ``wave_entry + 16`` to
+``IDirectSoundBuffer_SetBufferData``.
+
+**Corrected 16-byte header** (was mis-decoded earlier as
+20 bytes with a ``format_magic`` u32 at +0x08):
+
+::
+
+    +0x00  u32  sample_rate
+    +0x04  u32  sample_count
+    +0x08  u8   channels          (1 or 2)
+    +0x09  u8   bits_per_sample   (PCM: 8 or 16; XADPCM: 4)
+    +0x0A  u8   (unused)
+    +0x0B  u8   codec_id          (0 = PCM, 1 = Xbox ADPCM)
+    +0x0C  u32  (unused — padding)
+    +0x10  ...  payload fed to DirectSound
+
+The engine's parser rejects any entry whose ``codec_id`` isn't
+in ``{0, 1}``; ``FUN_000AC6F0`` silently aborts on failure →
+sound object never created → no playback attempted.
+
+**Reclassified fx.xbr distribution** (700 entries):
+
+| Classification    | Count | Was (before) |
+|-------------------|------:|-------------:|
+| ``xbox-adpcm``    |   103 |          103 |
+| ``pcm-raw``       |     0 |            0 |
+| ``non-audio`` ★   |   557 | 448 ``likely-audio`` + 109 mis-tagged animation |
+| ``likely-animation`` |  9 |          118 |
+| ``too-small``     |    31 |           31 |
+
+★ The ``non-audio`` classification replaces ``likely-audio``.
+The earlier label implied "audio we haven't decoded"; the RE
+proved those bytes are NEVER consumed as audio by the engine
+either, so there's nothing for us to decode.  Relabelled
+accordingly so users stop hunting for a codec that doesn't exist.
+
+**Code changes**:
+
+- ``parse_wave_header`` now uses the engine's byte-per-field
+  layout (``channels / bits_per_sample / codec_id`` as
+  individual ``u8`` reads, not a packed ``format_magic`` u32).
+  Matches what the real parser (``FUN_000AC400``) does.
+- Payload stripping uses ``wave_entry + 16`` (was 20), aligning
+  with ``IDirectSoundBuffer_SetBufferData``'s actual argument.
+- Classification labels: ``likely-audio`` → ``non-audio``
+  throughout.  ``DumpReport.likely_audio`` field → ``non_audio``.
+  Old JSON consumers must rename the key.
+- Module + CLI docstrings rewritten around the full RE trail;
+  "we don't know what codec these use" disclaimer removed.
+- ``docs/LEARNINGS.md`` § fx.xbr wave codec rewritten with the
+  final conclusions + ruled-out hypotheses for posterity.
+
+**Regression coverage**: 2 new tests pinning the 103-entry
+xbox-adpcm count and the non-audio >500 invariant.  Updated 5
+existing tests that used the old ``likely-audio`` label.
+
+**Drift guards**: 715 passed / 1 skipped (up from 714).
+
 ### Audio extractor — duplicate detection + raw-PCM previews for the 448 undecoded entries
 
 The April 2026 audio pass decoded the 103 ``xbox-adpcm``

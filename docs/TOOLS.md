@@ -300,13 +300,18 @@ at the canonical index.  In vanilla ``fx.xbr`` this surfaces
 ~50 redundant SFX (same sound referenced by multiple symbolic
 names); ``--raw-previews`` skips redundant output automatically.
 
-**What about the 448 likely-audio entries?**  Their exact codec
-isn't reversed yet — April 2026 analysis ruled out raw PCM,
-headerless IMA ADPCM, and standard MS/Xbox ADPCM block sizes.
-``--raw-previews`` is the pragmatic workflow until someone
-bisects the decoder from ``load_asset_by_fourcc`` @ VA
-``0x000A67A0``.  See ``docs/LEARNINGS.md`` § fx.xbr wave codec
-for the full investigation trail + next RE steps.
+**What about the 557 "non-audio" entries?**  The April 2026
+Ghidra walk pinned the engine's header parser
+(``FUN_000AC400`` @ VA ``0x000AC400``) and confirmed it rejects
+any wave entry with ``codec_id`` outside ``{0, 1}`` — **the game
+itself never decodes those bytes as audio**.  They're high-
+entropy payloads stored under the ``wave`` fourcc for historical
+reasons (effect metadata, development leftovers), not an audio-
+decoder gap.  There's nothing to reverse.  The ``--raw-previews``
+flag is still handy as a generic "inspect any high-entropy blob
+in Audacity" helper, but it's diagnostic only — not intended
+playback.  See ``docs/LEARNINGS.md`` § fx.xbr wave codec for the
+full RE trail.
 
 ### `assets fingerprint` — sha1-index a file tree
 ```bash
