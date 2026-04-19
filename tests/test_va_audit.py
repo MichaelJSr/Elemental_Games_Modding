@@ -240,6 +240,11 @@ class VanillaFunctionAudit(unittest.TestCase):
         0x33,                                 # XOR r32, r32 (e.g. XOR EAX,EAX)
         0xD9,                                 # FLD ... (float-first prologue)
         0x6A, 0x68,                           # PUSH imm8 / imm32
+        # PE-COFF import thunks + kernel-variant prologues:
+        0xFF,   # FF 25 <abs32>  = JMP [abs]       (import thunk)
+                # FF 74 24 04    = PUSH [ESP+4]    (arg-shuffle wrapper)
+        0x64,   # 64 0F B6 05 ...  = MOVZX EAX, [FS:abs]
+                # (TIB-access prologue, e.g. GetLastError / SetLastError)
     }
 
     @classmethod

@@ -354,6 +354,291 @@ register(VanillaSymbol(
     ),
 ))
 
+# ---------------------------------------------------------------------------
+# Xbox kernel / XDK re-exports (April 2026 expansion)
+# ---------------------------------------------------------------------------
+# These all live inside Azurik's XBE image because the build-time
+# linker inlined the xboxkrnl import stubs.  Calling them from a
+# shim is safe and cheap — the VAs resolve to the game's own
+# inlined copies, not to cross-module thunks.
+#
+# Safety contract for adding new kernel/XDK entries:
+#
+#   1. Decompile the function in Ghidra and confirm the last
+#      instruction is ``RET N`` (stdcall) or plain ``RET``
+#      (cdecl / varargs).
+#   2. Count the on-stack argument bytes from the function
+#      signature.  For stdcall, ``arg_bytes`` == N.
+#   3. The C declaration in ``shims/include/azurik_vanilla.h``
+#      must match the calling convention (``__attribute__((stdcall))``
+#      or default cdecl) AND the exact argument-byte count.
+#   4. Run ``pytest tests/test_vanilla_thunks.py`` — the drift
+#      guard compiles the header and refuses any COFF-symbol
+#      mismatch.
+
+# ---- SHA-1 (kernel crypto) --------------------------------------
+
+register(VanillaSymbol(
+    name="XcSHAInit",
+    va=0x000E7E5C,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc=(
+        "Kernel SHA-1 context initialiser.  __stdcall(4): "
+        "pointer to a 0x4C-byte context buffer in ECX-after-"
+        "PUSH (on the stack).  Idiomatically the shim allocates "
+        "an 80-byte aligned buffer, calls XcSHAInit, then "
+        "streams data with XcSHAUpdate.\n\n"
+        "Vanilla VA 0x000E7E5C — matches the XDK re-export."
+    ),
+))
+register(VanillaSymbol(
+    name="XcSHAUpdate",
+    va=0x000E7E56,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc=(
+        "Kernel SHA-1 stream update.  __stdcall(12): "
+        "``(ctx, data, len)`` all on the stack.  Feeds "
+        "``len`` bytes of ``data`` into the accumulating "
+        "hash.  Pair with XcSHAInit / XcSHAFinal."
+    ),
+))
+register(VanillaSymbol(
+    name="XcSHAFinal",
+    va=0x000E7E62,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc=(
+        "Kernel SHA-1 finaliser.  __stdcall(8): ``(ctx, "
+        "out_digest)``.  Writes the final 20-byte SHA-1 "
+        "digest into the ``out_digest`` buffer and zeroes the "
+        "context.  Shim-side usage typically pairs with "
+        "XcSHAInit + XcSHAUpdate for custom hashing."
+    ),
+))
+
+# ---- Debug output ----------------------------------------------
+
+register(VanillaSymbol(
+    name="DbgPrint",
+    va=0x000F5EB0,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "Kernel printf-style debug output.  Varargs cdecl: "
+        "``int DbgPrint(const char *fmt, ...)``.  Output "
+        "appears in xemu's debug console.\n\n"
+        "**The single most useful vanilla symbol for shim "
+        "debugging.**  Call it from a trampoline to log what "
+        "the shim sees at runtime without needing a gdb-stub.  "
+        "Format specifiers match C stdio (``%d``, ``%s``, "
+        "``%x``, ``%f``)."
+    ),
+))
+
+register(VanillaSymbol(
+    name="OutputDebugStringA",
+    va=0x000F5658,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc=(
+        "Win32-style debug string output.  __stdcall(4): "
+        "``(const char *str)``.  Cheaper than DbgPrint when "
+        "the shim already has a formatted string — no "
+        "format-parsing overhead."
+    ),
+))
+
+# ---- String operations (C runtime, cdecl) ----------------------
+
+register(VanillaSymbol(
+    name="strncmp",
+    va=0x000EB240,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "``int strncmp(const char *s1, const char *s2, "
+        "size_t n)``.  Case-sensitive bounded compare.  "
+        "Cdecl — mangled as ``_strncmp`` in COFF."
+    ),
+))
+register(VanillaSymbol(
+    name="_stricmp",
+    va=0x000ECFB1,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "``int _stricmp(const char *a, const char *b)`` — "
+        "case-INSENSITIVE compare.  MSVC internal name "
+        "(double-underscore mangle).  Shim authors should "
+        "declare ``extern int _stricmp(const char *, const "
+        "char *);`` so clang emits the matching "
+        "``__stricmp`` undefined reference."
+    ),
+))
+register(VanillaSymbol(
+    name="_strnicmp",
+    va=0x000EB561,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "``int _strnicmp(const char *a, const char *b, "
+        "size_t n)`` — case-insensitive bounded compare.  "
+        "Mangled as ``__strnicmp``."
+    ),
+))
+register(VanillaSymbol(
+    name="strncpy",
+    va=0x000EB7C0,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="``char *strncpy(char *dst, const char *src, size_t n)``.",
+))
+register(VanillaSymbol(
+    name="strrchr",
+    va=0x000EB3C0,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="``char *strrchr(const char *s, int c)`` — last-occurrence search.",
+))
+register(VanillaSymbol(
+    name="strstr",
+    va=0x000ED2E0,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="``char *strstr(const char *haystack, const char *needle)``.",
+))
+register(VanillaSymbol(
+    name="atol",
+    va=0x000EBE54,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="``long atol(const char *s)`` — parse decimal integer.",
+))
+
+# ---- Wide-character / UTF-16 ops -------------------------------
+
+register(VanillaSymbol(
+    name="wcscmp",
+    va=0x000ECEE6,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "``int wcscmp(const wchar_t *a, const wchar_t *b)``.  "
+        "Xbox filesystem + save metadata paths are UTF-16; "
+        "shims that touch SaveMeta.xbx benefit from this."
+    ),
+))
+register(VanillaSymbol(
+    name="wcsstr",
+    va=0x000ECE72,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc="``wchar_t *wcsstr(const wchar_t *hay, const wchar_t *needle)``.",
+))
+
+# ---- Stdio (file ops) ------------------------------------------
+
+register(VanillaSymbol(
+    name="fclose",
+    va=0x000EB4E1,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "``int fclose(FILE *stream)``.  Game uses FATX-backed "
+        "FILE* handles for save I/O; pair with XcreateFileA / "
+        "game-internal fopen wrappers."
+    ),
+))
+
+# ---- Win32 synchronisation primitives --------------------------
+
+register(VanillaSymbol(
+    name="GetLastError",
+    va=0x000E2DA7,
+    calling_convention="stdcall",
+    arg_bytes=0,
+    doc=(
+        "``DWORD GetLastError(void)``.  Xbox kernel stores "
+        "per-thread last-error code; shims that wrap stdcall "
+        "Win32 calls should consult this when a call returns "
+        "FALSE / 0xFFFFFFFF."
+    ),
+))
+register(VanillaSymbol(
+    name="SetLastError",
+    va=0x000E2DCF,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="``void SetLastError(DWORD code)``.",
+))
+register(VanillaSymbol(
+    name="CreateEventA",
+    va=0x000E0CA3,
+    calling_convention="stdcall",
+    arg_bytes=16,
+    doc=(
+        "``HANDLE CreateEventA(attrs, manual, initial, name)`` — "
+        "create a Win32 event.  16 stack bytes "
+        "(4 × u32 / pointer args)."
+    ),
+))
+register(VanillaSymbol(
+    name="SetEvent",
+    va=0x000E0D60,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="``BOOL SetEvent(HANDLE h)`` — signal an event.",
+))
+register(VanillaSymbol(
+    name="ResetEvent",
+    va=0x000E0D80,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc="``BOOL ResetEvent(HANDLE h)``.",
+))
+
+# ---- Xbox-specific title / launch control ----------------------
+
+register(VanillaSymbol(
+    name="XGetLaunchInfo",
+    va=0x000DF948,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc=(
+        "``DWORD XGetLaunchInfo(DWORD *flags_out, void "
+        "*data_out)``.  Retrieves the launch-data blob "
+        "passed in from the dashboard or a prior XBE "
+        "invocation.  Useful for shims that want to detect "
+        "how the game was launched."
+    ),
+))
+register(VanillaSymbol(
+    name="XLaunchNewImageA",
+    va=0x000DFA10,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc=(
+        "``DWORD XLaunchNewImageA(const char *xbe_path, "
+        "void *data)``.  Launches a different XBE — pass "
+        "NULL for ``xbe_path`` to return to the dashboard.  "
+        "Companion: XapiBootToDash."
+    ),
+))
+register(VanillaSymbol(
+    name="XapiBootToDash",
+    va=0x000E6A2D,
+    calling_convention="stdcall",
+    arg_bytes=12,
+    doc=(
+        "``void XapiBootToDash(arg1, arg2, arg3)`` — exit to "
+        "the Xbox dashboard.  3 stack args (12 bytes).  "
+        "A shim that wants a 'quit to dashboard' hotkey can "
+        "call this directly."
+    ),
+))
+
 register(VanillaSymbol(
     name="gravity_integrate_raw",
     va=0x00085700,

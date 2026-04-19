@@ -174,6 +174,129 @@ __attribute__((stdcall))
 int xcalculate_signature_end(unsigned int *ctx, unsigned char *out20);
 
 
+/* ==================================================================
+ * Xbox kernel / XDK re-exports (April 2026 expansion)
+ * ==================================================================
+ *
+ * These live inside Azurik's XBE (the build-time linker inlined
+ * the kernel import stubs), so shim calls resolve to the game's
+ * own copies without hitting any cross-module thunk.  Every
+ * declaration below is ABI-verified against Ghidra decomp +
+ * a matching ``VanillaSymbol`` entry in vanilla_symbols.py.
+ */
+
+/* ---- SHA-1 (kernel crypto) ----------------------------------- */
+
+/* Vanilla VA 0x000E7E5C  (mangled: _XcSHAInit@4)
+ * __stdcall: ``ctx`` points to an 80-byte SHA context buffer. */
+__attribute__((stdcall))
+void XcSHAInit(unsigned char *ctx);
+
+/* Vanilla VA 0x000E7E56  (mangled: _XcSHAUpdate@12)
+ * Feed ``len`` bytes of ``data`` into the accumulator. */
+__attribute__((stdcall))
+void XcSHAUpdate(unsigned char *ctx, const unsigned char *data,
+                 unsigned long len);
+
+/* Vanilla VA 0x000E7E62  (mangled: _XcSHAFinal@8)
+ * Finalise and write 20 bytes of SHA-1 output. */
+__attribute__((stdcall))
+void XcSHAFinal(unsigned char *ctx, unsigned char *out20);
+
+/* ---- Debug output ------------------------------------------- */
+
+/* Vanilla VA 0x000F5EB0  (mangled: _DbgPrint)
+ * THE single most useful shim-debugging symbol.  Varargs cdecl.
+ * Format specifiers match C stdio.  Output goes to xemu's
+ * debug console. */
+unsigned long DbgPrint(const char *fmt, ...);
+
+/* Vanilla VA 0x000F5658  (mangled: _OutputDebugStringA@4) */
+__attribute__((stdcall))
+void OutputDebugStringA(const char *str);
+
+/* ---- C runtime (cdecl) -------------------------------------- */
+
+/* Vanilla VA 0x000EB240  (mangled: _strncmp) */
+int strncmp(const char *s1, const char *s2, unsigned int n);
+
+/* Vanilla VA 0x000ECFB1  (mangled: __stricmp)
+ * MSVC internal — the leading underscore in the C name is what
+ * causes clang to emit ``__stricmp`` as the undefined COFF
+ * symbol. */
+int _stricmp(const char *a, const char *b);
+
+/* Vanilla VA 0x000EB561  (mangled: __strnicmp) */
+int _strnicmp(const char *a, const char *b, unsigned int n);
+
+/* Vanilla VA 0x000EB7C0  (mangled: _strncpy) */
+char *strncpy(char *dst, const char *src, unsigned int n);
+
+/* Vanilla VA 0x000EB3C0  (mangled: _strrchr) */
+char *strrchr(const char *s, int c);
+
+/* Vanilla VA 0x000ED2E0  (mangled: _strstr) */
+char *strstr(const char *hay, const char *needle);
+
+/* Vanilla VA 0x000EBE54  (mangled: _atol) */
+long atol(const char *s);
+
+/* ---- Wide-character (UTF-16) -------------------------------- */
+
+/* Xbox filesystem + save metadata paths are UTF-16.
+ *
+ * Vanilla VA 0x000ECEE6  (mangled: _wcscmp) */
+int wcscmp(const unsigned short *a, const unsigned short *b);
+
+/* Vanilla VA 0x000ECE72  (mangled: _wcsstr) */
+unsigned short *wcsstr(const unsigned short *hay,
+                        const unsigned short *needle);
+
+/* ---- Stdio ----------------------------------------------- */
+
+/* Vanilla VA 0x000EB4E1  (mangled: _fclose) */
+int fclose(void *stream);
+
+/* ---- Win32 synchronisation ---------------------------------- */
+
+/* Vanilla VA 0x000E2DA7  (mangled: _GetLastError@0) */
+__attribute__((stdcall))
+unsigned long GetLastError(void);
+
+/* Vanilla VA 0x000E2DCF  (mangled: _SetLastError@4) */
+__attribute__((stdcall))
+void SetLastError(unsigned long code);
+
+/* Vanilla VA 0x000E0CA3  (mangled: _CreateEventA@16) */
+__attribute__((stdcall))
+void *CreateEventA(void *attrs, int manual_reset,
+                    int initial_state, const char *name);
+
+/* Vanilla VA 0x000E0D60  (mangled: _SetEvent@4) */
+__attribute__((stdcall))
+int SetEvent(void *h);
+
+/* Vanilla VA 0x000E0D80  (mangled: _ResetEvent@4) */
+__attribute__((stdcall))
+int ResetEvent(void *h);
+
+/* ---- Title / launch control --------------------------------- */
+
+/* Vanilla VA 0x000DF948  (mangled: _XGetLaunchInfo@8) */
+__attribute__((stdcall))
+unsigned long XGetLaunchInfo(unsigned long *flags_out,
+                              void *data_out);
+
+/* Vanilla VA 0x000DFA10  (mangled: _XLaunchNewImageA@8) */
+__attribute__((stdcall))
+unsigned long XLaunchNewImageA(const char *xbe_path, void *data);
+
+/* Vanilla VA 0x000E6A2D  (mangled: _XapiBootToDash@12) */
+__attribute__((stdcall))
+void XapiBootToDash(unsigned long arg1, unsigned long arg2,
+                     unsigned long arg3);
+
+
 #ifdef __cplusplus
 }
 #endif
