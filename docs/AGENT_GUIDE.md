@@ -1,13 +1,27 @@
 # Agent guide — working on this repo as an AI
 
 This file is written directly for AI agents (Claude, Codex, etc.)
-picking up work on the Azurik modding platform.  Start here; read
-the other docs on demand from the pointers below.
+picking up work on the Azurik modding platform.  **Read this file
+top-to-bottom once** so you know the rules, then use the pointers
+below to jump to task-specific docs on demand.
 
-> **If you've never worked in this repo before**, read
+> **Repo-root pointers:** [`../AGENTS.md`](../AGENTS.md) is the
+> thin "you just opened the repo" entry point — it references this
+> file.  If you're reading this, you've already taken the deep-dive
+> fork.
+>
+> **Never worked in this repo before?**  Read
 > [`ONBOARDING.md`](./ONBOARDING.md) first — it walks through the
 > feature-folder layout + `apply_pack` dispatcher with two worked
-> examples.
+> examples.  Then come back here.
+>
+> **Looking for a CLI verb?**  [`TOOLS.md`](./TOOLS.md) is the
+> complete reference (31 subcommands, grouped by workflow).
+>
+> **Looking for a script?**  [`SCRIPTS.md`](./SCRIPTS.md) catalogues
+> everything under `scripts/` + `scripts/analysis/`.
+>
+> **Full doc map:** [`INDEX.md`](./INDEX.md).
 
 > **Convention in this file:** lines beginning with 🛑 are hard
 > rules you must not violate.  Lines beginning with ✅ are mandatory

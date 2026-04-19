@@ -7,6 +7,14 @@ No original game assets or proprietary binaries are included.  You must own a le
 > **New here?**  Read [`docs/ONBOARDING.md`](docs/ONBOARDING.md) —
 > zero to a landed feature in two worked examples, plus a map of
 > where to look when something breaks.
+>
+> **AI agent picking up a task?**  Read [`AGENTS.md`](AGENTS.md) —
+> rules, checkpoints, and pointers to the task-specific docs.
+>
+> **Looking for a specific tool or script?**  Jump straight to
+> [`docs/TOOLS.md`](docs/TOOLS.md) (all 31 CLI verbs) or
+> [`docs/SCRIPTS.md`](docs/SCRIPTS.md) (standalone scripts).
+> The full doc map lives at [`docs/INDEX.md`](docs/INDEX.md).
 
 ---
 
@@ -37,22 +45,29 @@ The first time you build an ISO, the tool auto-downloads `xdvdfs` for your platf
 Elemental_Games_Modding/
   pyproject.toml
   README.md
+  AGENTS.md                          AI-agent entry point (read first if you're an agent)
   CHANGELOG.md
   Launch Azurik Mod Tools.command    macOS / Linux launcher
   Launch Azurik Mod Tools.bat        Windows launcher
   docs/                              Research notes and per-subsystem docs
-    ONBOARDING.md                    zero-to-landed-feature walkthrough (start here)
+    INDEX.md                         doc map — every .md file with one-line summary
+    ONBOARDING.md                    zero-to-landed-feature walkthrough
+    AGENT_GUIDE.md                   AI-agent-specific playbook
+    TOOLS.md                         catalog of every CLI verb (31 subcommands)
+    SCRIPTS.md                       catalog of standalone scripts
     SHIMS.md                         C-shim platform architecture
     SHIM_AUTHORING.md                end-to-end authoring guide
-    AGENT_GUIDE.md                   AI-agent-specific playbook
     LEARNINGS.md                     accumulated RE findings
     PATCHES.md                       catalog of every feature pack
+    TOOLING_ROADMAP.md               shipped + planned tooling
     D1_EXTEND.md                     runtime xboxkrnl export resolver design
     D2_NXDK.md                       (deferred) full NXDK integration plan
     SAVE_FORMAT.md                   Azurik save-game format + `save inspect` CLI
     RANDOMIZER_AUDIT.md              randomizer correctness audit + extension roadmap
-    MODDING_GUIDE.md                 legacy modding notes (partially superseded)
+    PLUGINS.md                       third-party plugin pack authoring
+    MODDING_GUIDE.md                 user-facing mod-JSON authoring guide
     DECOMP.md                        pointer to the Ghidra project
+    ghidra_snapshot.json             committed Ghidra state (490 funcs, 3 structs)
   azurik_mod/                        Library (pip-installable)
     cli.py                           argparse dispatcher ("azurik-mod")
     patching/                        patch engine (apply_pack, COFF, XBE map)
