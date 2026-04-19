@@ -1730,6 +1730,139 @@ def cmd_verify_patches(args):
 # ---------------------------------------------------------------------------
 
 
+def cmd_inspect_physics(args):
+    """Read an XBE / ISO and report the current physics-patch state.
+
+    Dumps: which sliders are vanilla vs patched, the injected float
+    values for walk/roll/swim/jump, gravity, roll force-always-on
+    state, and enable_dev_menu trampoline status.  Useful for
+    verifying that a built ISO actually contains the patches you
+    expect — if 'doesn't work' in gameplay, run this first to
+    confirm bytes are where they should be.
+    """
+    import struct as _struct
+    from pathlib import Path as _Path
+    from azurik_mod.iso.pack import extract_xbe_from_iso
+    from azurik_mod.patching.xbe import parse_xbe_sections, va_to_file
+    from azurik_mod.patches.player_physics import (
+        _JUMP_SITE_VA, _JUMP_SITE_VANILLA,
+        _ROLL_EDGE_LOCK_PATCH, _ROLL_EDGE_LOCK_VA,
+        _ROLL_FORCE_ON_1_PATCH, _ROLL_FORCE_ON_1_VA,
+        _ROLL_FORCE_ON_2_PATCH, _ROLL_FORCE_ON_2_VA,
+        _ROLL_SITE_VA, _ROLL_SITE_VANILLA,
+        _SWIM_SITE_VA, _SWIM_SITE_VANILLA,
+        _WALK_SITE_VA, _WALK_SITE_VANILLA,
+    )
+
+    iso_arg = getattr(args, "iso", None)
+    xbe_arg = getattr(args, "xbe", None)
+    if iso_arg:
+        iso_path = _Path(iso_arg)
+        if not iso_path.exists():
+            print(f"ERROR: ISO not found: {iso_path}")
+            sys.exit(1)
+        xbe_bytes = bytes(extract_xbe_from_iso(iso_path))
+    elif xbe_arg:
+        xbe_bytes = _Path(xbe_arg).read_bytes()
+    else:
+        print("Pass --iso or --xbe.")
+        sys.exit(1)
+
+    def _resolve(va: int) -> int | None:
+        _, secs = parse_xbe_sections(xbe_bytes)
+        for s in secs:
+            if s["vaddr"] <= va < s["vaddr"] + s["vsize"]:
+                delta = va - s["vaddr"]
+                if delta < s["raw_size"]:
+                    return s["raw_addr"] + delta
+        return None
+
+    def _check_site(label, va, vanilla_bytes, prefix):
+        off = va_to_file(va)
+        current = bytes(xbe_bytes[off:off + len(vanilla_bytes)])
+        if current == vanilla_bytes:
+            print(f"  {label:14s} [VANILLA]  site VA 0x{va:X}")
+            return
+        if current[:2] == prefix:
+            inject_va = _struct.unpack(
+                "<I", current[2:6])[0]
+            fo = _resolve(inject_va)
+            if fo is None:
+                print(f"  {label:14s} [PATCHED?] site rewritten "
+                      f"but inject VA 0x{inject_va:X} not "
+                      f"mappable — patch may be corrupt")
+                return
+            val = _struct.unpack(
+                "<f", xbe_bytes[fo:fo + 4])[0]
+            print(f"  {label:14s} [PATCHED]  inject VA "
+                  f"0x{inject_va:X} = {val:.4f}")
+            return
+        print(f"  {label:14s} [DRIFTED]  got {current.hex()}")
+
+    print(f"Inspecting: {iso_arg or xbe_arg}")
+    print(f"  XBE size: {len(xbe_bytes):,} bytes\n")
+
+    print("Player physics sliders:")
+    # Gravity (direct constant at 0x1980A8)
+    gfo = va_to_file(0x001980A8)
+    gval = _struct.unpack("<f", xbe_bytes[gfo:gfo + 4])[0]
+    gstate = "VANILLA" if abs(gval - 9.8) < 1e-4 else "PATCHED"
+    print(f"  {'gravity':14s} [{gstate}]  value = {gval:.4f} m/s²")
+
+    _check_site("walk",
+                _WALK_SITE_VA, _WALK_SITE_VANILLA, b"\xD9\x05")
+    _check_site("roll (FMUL)",
+                _ROLL_SITE_VA, _ROLL_SITE_VANILLA, b"\xD8\x0D")
+    _check_site("swim",
+                _SWIM_SITE_VA, _SWIM_SITE_VANILLA, b"\xD8\x0D")
+    _check_site("jump (FLD)",
+                _JUMP_SITE_VA, _JUMP_SITE_VANILLA, b"\xD9\x05")
+
+    # Roll aux: edge-lock + force-on sites.
+    print("\nRoll auxiliary patches:")
+    el_fo = va_to_file(_ROLL_EDGE_LOCK_VA)
+    el = bytes(xbe_bytes[el_fo:el_fo + 2])
+    el_state = ("[NOPED]  " if el == _ROLL_EDGE_LOCK_PATCH
+                else "[VANILLA]")
+    print(f"  edge-lock     {el_state} bytes = {el.hex()} "
+          f"(VA 0x{_ROLL_EDGE_LOCK_VA:X})")
+    f1_fo = va_to_file(_ROLL_FORCE_ON_1_VA)
+    f1 = bytes(xbe_bytes[f1_fo:f1_fo + 2])
+    f1_state = ("[PATCHED]" if f1 == _ROLL_FORCE_ON_1_PATCH
+                else "[VANILLA]")
+    print(f"  force-on #1   {f1_state} bytes = {f1.hex()} "
+          f"(VA 0x{_ROLL_FORCE_ON_1_VA:X})")
+    f2_fo = va_to_file(_ROLL_FORCE_ON_2_VA)
+    f2 = bytes(xbe_bytes[f2_fo:f2_fo + 2])
+    f2_state = ("[PATCHED]" if f2 == _ROLL_FORCE_ON_2_PATCH
+                else "[VANILLA]")
+    print(f"  force-on #2   {f2_state} bytes = {f2.hex()} "
+          f"(VA 0x{_ROLL_FORCE_ON_2_VA:X})")
+
+    # Dev-menu trampoline at VA 0x53750.
+    print("\nenable_dev_menu trampoline:")
+    hook_fo = va_to_file(0x00053750)
+    hook = bytes(xbe_bytes[hook_fo:hook_fo + 7])
+    if hook[0] == 0xE9 and hook[5:7] == b"\x90\x90":
+        rel = _struct.unpack("<i", hook[1:5])[0]
+        shim_va = 0x00053750 + 5 + rel
+        _, secs = parse_xbe_sections(xbe_bytes)
+        for s in secs:
+            if s["vaddr"] <= shim_va < s["vaddr"] + s["vsize"]:
+                print(f"  [INSTALLED] hook bytes = {hook.hex()} "
+                      f"-> JMP to VA 0x{shim_va:X} "
+                      f"(section {s['name']!r})")
+                break
+        else:
+            print(f"  [INSTALLED?] hook bytes = {hook.hex()} "
+                  f"-> VA 0x{shim_va:X} NOT IN A LOADED "
+                  f"SECTION — patch may be broken")
+    else:
+        print(f"  [VANILLA]   hook bytes = {hook.hex()}")
+
+    print()
+
+
 def cmd_apply_physics(args):
     """Apply the player_physics pack to an XBE / ISO in-place.
 

@@ -11,6 +11,7 @@ import sys
 
 from azurik_mod.randomizer.commands import (
     cmd_apply_physics,
+    cmd_inspect_physics,
     cmd_diff,
     cmd_dump,
     cmd_list,
@@ -322,8 +323,35 @@ def main() -> None:
              "Scales the 10.0 FMUL at VA 0x8B7BF inside FUN_0008b700.")
     p_physics.add_argument("--jump-speed", type=float, metavar="X",
         help="Player jump height multiplier (default 1.0; range 0.1-5.0).  "
-             "Scales the 9.0 jump-velocity imm32 at five airborne-state "
-             "init sites (including FUN_00089060, the main ground jump).")
+             "Rewrites the FLD [0x001980A8] at VA 0x89160 in "
+             "FUN_00089060's `v0 = sqrt(2gh)` formula to reference "
+             "an injected 9.8 * jump_scale^2 constant — linearly "
+             "scales initial jump velocity, quadratic effect on "
+             "peak jump height.  Independent of gravity slider.")
+
+    # inspect-physics (diagnostic — read-only dump of patch state)
+    p_inspect = sub.add_parser(
+        "inspect-physics",
+        help="Dump the current state of player_physics + enable_dev_menu "
+             "patches in a built ISO / XBE",
+        description=(
+            "Read-only diagnostic.  Reports:\n"
+            "  * Gravity constant current value\n"
+            "  * Walk / roll / swim / jump instruction sites:\n"
+            "    VANILLA / PATCHED (with the injected float)\n"
+            "  * Roll auxiliary patches (edge-lock NOP, force-always-on)\n"
+            "  * enable_dev_menu trampoline at FUN_00053750 entry\n"
+            "\n"
+            "Use this to verify a built ISO actually contains the\n"
+            "patches you expect.  If 'doesn't work' in gameplay, run\n"
+            "this FIRST — it'll show whether the bytes landed.\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_inspect.add_argument("--iso",
+        help="ISO to inspect (extracts default.xbe via xdvdfs)")
+    p_inspect.add_argument("--xbe",
+        help="Raw default.xbe to inspect (alternative to --iso)")
 
     # save (inspect / introspect save directories)
     p_save = sub.add_parser(
@@ -1230,6 +1258,7 @@ def main() -> None:
         "randomize": cmd_randomize,
         "randomize-full": cmd_randomize_full,
         "apply-physics": cmd_apply_physics,
+        "inspect-physics": cmd_inspect_physics,
         "verify-patches": cmd_verify_patches,
         "save": _dispatch_save,
         "iso-verify": _dispatch_iso_verify,

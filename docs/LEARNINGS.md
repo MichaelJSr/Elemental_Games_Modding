@@ -205,7 +205,60 @@ The old `run_*` kwargs / attr names remain as transparent
 aliases so pinned callers don't break, but all documentation
 and tests use the new name.
 
-### Jump velocity is an imm32 at 5 call sites (April 2026)
+### Jump velocity: the v2 correction (April 2026)
+
+`FUN_00089060` is the main jump initiation (plays
+`fx/sound/player/jump` and transitions into state 2).  My v1
+analysis was **wrong**: I saw 5 `MOV [reg+0x140], 0x41100000`
+(9.0) imm32 writes and assumed those set the jump velocity.
+They don't.  `entity + 0x140` is the **horizontal air-control
+speed** — used by `FUN_00089480` (the per-frame airborne physics
+function) as a multiplier on stick input for mid-air steering.
+
+The actual jump-velocity formula is at VA `0x89160` inside
+`FUN_00089060`:
+
+```asm
+VA 0x89160: D9 05 A8 80 19 00    FLD  [0x001980A8]   ; g = 9.8
+VA 0x89166: D8 8E 44 01 00 00    FMUL [ESI + 0x144]   ; × h (jump height)
+VA 0x8916C: DC C0                 FADD ST0, ST0        ; × 2
+VA 0x8916E: D9 FA                 FSQRT                ; v₀ = sqrt(2gh)
+VA 0x89170: D9 5C 24 0C           FSTP [ESP + 0xC]    ; store v₀
+```
+
+Classic projectile formula `v₀ = sqrt(2gh)`.  `entity + 0x144`
+is populated from `FUN_00083F90` for standard jumps or
+`*(entity+0x68)` for charged jumps; the imm32 `0x3F8CCCCD`
+(1.1) writes around it are transient initializer values that
+get immediately overwritten.
+
+**v2 patch**: rewrite the FLD at `0x89160` to
+`FLD [inject_va]` where `inject_va` holds
+`9.8 × jump_scale²`.  The SQRT then produces
+`sqrt(2 × 9.8 × jump_scale² × h) = jump_scale × sqrt(2gh) =
+jump_scale × vanilla_v₀` — linear scaling on initial velocity,
+quadratic on peak height (because `max_h = v₀² / (2g)`).
+
+Critical property: the shared gravity constant at
+`0x001980A8` is NOT touched.  The gravity slider continues to
+own that constant (which `FUN_00085700` reads per-frame to drag
+velocity down).  Jump and gravity are now independent controls.
+
+✅ **Learning**: **imm32s written to entity fields around
+physics sites are NOT always the physics parameter**.  Some are
+transient init values that get overwritten before use.  Always
+trace the RELEVANT FORMULA (the FPU chain that produces the
+output) to find the actual parameter, not just the stored
+fields near it.
+
+✅ **Learning**: **the post-mortem is the patch**.  v1 shipped
+with correct byte manipulation against the WRONG site and the
+user's "doesn't work" report was 100% accurate — my assumption
+about what `+0x140` meant was the bug.  Spending 10 minutes on
+the disassembly of the consuming formula BEFORE picking the
+target would have avoided v1 entirely.
+
+### Jump velocity (v1, historical) — imm32 at 5 call sites (WRONG TARGET)
 
 The main jump function is `FUN_00089060` (plays
 `fx/sound/player/jump` and transitions the player into airborne

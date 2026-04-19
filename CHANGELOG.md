@@ -2,6 +2,109 @@
 
 ## Unreleased
 
+### player_physics — jump-formula fix + roll force-always-on + inspect-physics
+
+Three user-reported "still doesn't work" issues traced to root
+cause and fixed.  **All three previous patches landed bytes
+correctly on disk**, but the bytes were either targeting the
+wrong physics field or the runtime gate they modified wasn't
+firing in the user's configuration.
+
+**#1. Jump: wrong field targeted in v1.**  v1 patched the
+`MOV [reg+0x140], 0x41100000` imm32 at 5 call sites, but
+`entity + 0x140` is the HORIZONTAL AIR-CONTROL speed (used by
+`FUN_00089480` as a per-frame multiplier while airborne), NOT
+the jump height.  The actual jump formula is at VA `0x89160`
+inside `FUN_00089060`:
+
+```
+FLD  [0x001980A8]            ; 9.8 (gravity)
+FMUL [ESI + 0x144]            ; × height scalar
+FADD ST0, ST0                 ; × 2
+FSQRT                          ; v₀ = sqrt(2gh)
+```
+
+v2 rewrites the FLD to load from an injected `9.8 × jump_scale²`
+constant instead of the shared gravity global.  The SQRT then
+produces `jump_scale × sqrt(2 × 9.8 × h)` — linear scaling on
+initial jump velocity, quadratic on peak height.  No shared
+constant touched; gravity slider remains independent.
+
+Single 6-byte FLD rewrite + 4-byte injected float, down from
+v1's 20-byte multi-site imm32 patch.
+
+**#2. Roll: byte patches applied, but WHITE/R3 wasn't firing
+at runtime for users whose xemu input config didn't route those
+buttons.**  v2 adds a "force-always-on" sub-patch (2 × 2 bytes
+at VAs `0x85214`, `0x8521C`) that makes bit `0x40` of the
+input-state flags unconditionally set every frame when
+`roll_scale != 1.0`.  The injected FMUL multiplier then fires
+on every movement frame regardless of controller input.
+
+Simplified `inject_roll_mult` to just `roll_scale` (was `3 ×
+roll_scale / walk_scale` in v3-pre-force).  With force-always-on
+in effect, the old "3× WHITE boost" meaning no longer applies;
+`roll_scale` is now a pure secondary walking-speed multiplier
+that stacks with `walk_scale`:
+
+```
+velocity = 7 × walk_scale × roll_scale × raw_stick × direction
+```
+
+Both sliders at `1.0` short-circuit to identity.  Existing
+`roll_scale != 1.0` configurations behave differently (became
+permanent multiplier, not WHITE-gated), but the effect is now
+always observable which is what users actually want.
+
+**#3. Dev menu: v4 trampoline bytes land correctly.**  Verified
+the FUN_00053750 entry trampoline installs at VA `0x53750`,
+redirects to the SHIMS section at VA `0x39F000`, and the SHIMS
+section has proper `flags=0x06` (EXECUTABLE | PRELOADED).  If
+users still see no effect, the issue is almost certainly that
+their build pipeline isn't actually including the patched XBE.
+
+**New CLI: `azurik-mod inspect-physics --iso <path>` / `--xbe
+<path>`.**  Diagnostic that reads a built ISO or raw XBE and
+reports — per slider — whether the bytes are `[VANILLA]`,
+`[PATCHED]` (with injected float values), or `[DRIFTED]`.  Also
+dumps the roll edge-lock / force-on state and checks the
+enable_dev_menu trampoline.  Run this FIRST when a patch seems
+inert — it confirms the bytes actually landed:
+
+```text
+$ azurik-mod inspect-physics --iso Azurik_patched.iso
+
+Player physics sliders:
+  gravity        [VANILLA]  value = 9.8000 m/s²
+  walk           [PATCHED]  inject VA 0x1001D0 = 14.0000
+  roll (FMUL)    [PATCHED]  inject VA 0x1001D4 = 3.0000
+  swim           [PATCHED]  inject VA 0x1001D8 = 15.0000
+  jump (FLD)     [PATCHED]  inject VA 0x1001DC = 39.2000
+
+Roll auxiliary patches:
+  edge-lock     [NOPED]   bytes = 9090 (VA 0x85200)
+  force-on #1   [PATCHED] bytes = b040 (VA 0x85214)
+  force-on #2   [PATCHED] bytes = 0ad0 (VA 0x8521C)
+
+enable_dev_menu trampoline:
+  [INSTALLED] hook bytes = e9abb834009090 -> JMP to VA 0x39F000
+              (section 'SHIMS')
+```
+
+**Tests** (748 passed, +4 from 744):
+- `ApplyJumpSpeedBehaviour` rewritten: tests the new FLD-site
+  target, verifies the shared gravity constant is untouched,
+  site isolation, reapply rejection.
+- `RollForceAlwaysOn` added: pins the 2-byte patches at
+  `0x85214` + `0x8521C` and the simplified `inject_roll_mult =
+  roll_scale` formula.
+- `SliderSemantics` replaces the old `IndependenceSemantics`
+  suite: walk/roll are now compounding multipliers (stack), not
+  independent.  Each slider's site isolation is still tested.
+- `DynamicWhitelistFromXbe` updated for the new site counts: 4
+  instruction sites (6-byte) + 3 two-byte roll-aux + up to 4
+  four-byte injected-float follows (walk, roll, swim, jump).
+
 ### player_physics — jump slider + roll edge-lock NOP; GUI slider unclamp
 
 Four user-reported issues addressed in one pass.
