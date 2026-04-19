@@ -338,26 +338,58 @@ def find_strings(xbe: bytes | bytearray, pattern: str, *,
 
 def hex_dump(xbe: bytes | bytearray, address: int, *,
              length: int = 64,
-             is_va: bool = True) -> list[HexRow]:
+             is_va: bool = True,
+             bss_as_zeros: bool = True) -> list[HexRow]:
     """Render ``length`` bytes starting at ``address`` as
     16-bytes-per-row :class:`HexRow` records.
 
     ``is_va`` controls whether ``address`` is a Virtual Address
     (default) or a raw file offset.
+
+    ``bss_as_zeros`` handles VAs that live in a ``.data`` section
+    past the file-backed portion (BSS zero-fill at runtime): when
+    ``True`` (default), synthetic zero rows are returned so shim
+    authors can still see the layout at that VA; when ``False``,
+    the dump returns an empty list and the caller is expected to
+    error out.
     """
     data = bytes(xbe)
     if is_va:
-        start = va_to_file(address)
+        try:
+            start = va_to_file(address)
+        except Exception:
+            return []
         start_va = address
     else:
         start = address
-        start_va = file_to_va(start)
+        try:
+            start_va = file_to_va(start)
+        except Exception:
+            return []
 
-    if start < 0 or start >= len(data):
+    # BSS fallback: VA resolves but the file offset is past the
+    # actual file.  Synthesise NUL rows so the caller sees the
+    # layout + knows those bytes will be zero at runtime.
+    if start >= len(data):
+        if not (is_va and bss_as_zeros):
+            return []
+        rows: list[HexRow] = []
+        off = start
+        va = start_va
+        remaining = length
+        while remaining > 0:
+            chunk = min(remaining, 16)
+            rows.append(HexRow(
+                va=va, file_offset=off, raw=b"\x00" * chunk))
+            off += chunk
+            va += chunk
+            remaining -= chunk
+        return rows
+    if start < 0:
         return []
     end = min(start + length, len(data))
 
-    rows: list[HexRow] = []
+    rows = []
     off = start
     va = start_va
     while off < end:
@@ -418,6 +450,12 @@ def resolve_address(xbe: bytes | bytearray, value: int, *,
     else:
         base_addr = struct.unpack_from("<I", data, 0x104)[0]
 
+    # Plausibility cap: image_size from the XBE header gives the
+    # highest VA the loader will ever map.  Anything past
+    # ``base_addr + image_size`` is guaranteed junk.
+    image_size = struct.unpack_from("<I", data, 0x10C)[0]
+    max_plausible_va = base_addr + max(image_size, 0x10_000_000)
+
     kind = force_kind
     va: int | None = None
     file_offset: int | None = None
@@ -428,6 +466,10 @@ def resolve_address(xbe: bytes | bytearray, value: int, *,
 
     try:
         if kind == "va":
+            if value > max_plausible_va:
+                raise ValueError(
+                    f"VA 0x{value:X} is past the image's virtual end "
+                    f"(0x{max_plausible_va:X})")
             file_offset = va_to_file(value)
             va = value
         else:

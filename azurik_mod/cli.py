@@ -508,6 +508,112 @@ def main() -> None:
     p_si.add_argument("--json", action="store_true",
         help="Emit JSON instead of the human-readable report")
 
+    # ------------------------------------------------------------------
+    # test-for-va — pytest narrowing by VA / pack name
+    # ------------------------------------------------------------------
+    p_tfv = sub.add_parser(
+        "test-for-va",
+        help="Find test classes that reference a VA or pack name",
+        description=(
+            "Scans tests/ for classes that mention a VA (hex) or a "
+            "pack/feature name as a bareword, optionally launches "
+            "pytest on just that subset.  Useful when iterating on "
+            "one patch without paying for the full ~470-test suite."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_tfv.add_argument("target",
+        help="Hex VA (0x85F62) OR a pack / feature name")
+    p_tfv.add_argument("--run", action="store_true",
+        help="Invoke pytest on the matches (default: just print them)")
+    p_tfv.add_argument("--json", action="store_true",
+        help="Machine-readable output")
+    p_tfv.add_argument("--tests-dir",
+        help="Override the tests/ directory (default: ./tests)")
+    p_tfv.add_argument("pytest_args", nargs="*",
+        help="Extra args forwarded to pytest when --run is set")
+
+    # ------------------------------------------------------------------
+    # plan-trampoline — size a hook site
+    # ------------------------------------------------------------------
+    p_pt = sub.add_parser(
+        "plan-trampoline",
+        help="Size a trampoline hook site (bytes to replace, asm context)",
+        description=(
+            "Given a hook-site VA, decode the instructions starting "
+            "there, suggest the smallest byte count that fits the "
+            "target trampoline budget + ends on an instruction "
+            "boundary, and flag any multi-byte instructions the shim "
+            "must preserve / restore.\n\n"
+            "Exit codes:\n"
+            "  0 — clean boundary; ready to hook\n"
+            "  1 — decoder produced warnings; review before shipping"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _add_source_args(p_pt)
+    p_pt.add_argument("va",
+        help="Hex VA of the hook site (e.g. 0x5F6E5)")
+    p_pt.add_argument("--budget", type=int, default=5,
+        help="Target trampoline size in bytes (5 for CALL rel32, "
+             "6 for FF25 thunk); default 5")
+    p_pt.add_argument("--window", type=int, default=16,
+        help="Bytes to decode forward from the VA; default 16")
+
+    # ------------------------------------------------------------------
+    # entity — diff subcommand
+    # ------------------------------------------------------------------
+    p_entity = sub.add_parser(
+        "entity",
+        help="Inspect config.xbr entities",
+        description=("Tools operating on named entities in the "
+                     "game's config.xbr keyed-table sections."),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _entity_sub = p_entity.add_subparsers(
+        dest="entity_command", required=True)
+    p_ediff = _entity_sub.add_parser(
+        "diff",
+        help="Compare two entities property-by-property")
+    p_ediff.add_argument("entity_a", help="First entity name")
+    p_ediff.add_argument("entity_b", help="Second entity name")
+    p_ediff.add_argument("--config",
+        help="Path to a raw config.xbr file")
+    p_ediff.add_argument("--iso",
+        help="Extract config.xbr from this ISO (xdvdfs)")
+    p_ediff.add_argument("--all", action="store_true",
+        help="Include shared-equal rows in the output "
+             "(default: show only differing rows)")
+    p_ediff.add_argument("--json", action="store_true",
+        help="Machine-readable output")
+
+    # ------------------------------------------------------------------
+    # xbr — inspect subcommand
+    # ------------------------------------------------------------------
+    p_xbr = sub.add_parser(
+        "xbr",
+        help="Inspect raw .xbr resource files",
+        description=("Tools for poking at Azurik's binary resource "
+                     "files (config.xbr + level XBRs)."),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _xbr_sub = p_xbr.add_subparsers(
+        dest="xbr_command", required=True)
+    p_xbri = _xbr_sub.add_parser(
+        "inspect",
+        help="Classify the first N records of a TOC-tagged section")
+    p_xbri.add_argument("path", help="Path to an .xbr file")
+    p_xbri.add_argument("--tag", required=True,
+        help="4-char TOC tag (e.g. 'surf', 'node', 'rdms')")
+    p_xbri.add_argument("--entries", type=int, default=3,
+        help="How many records to inspect (default 3)")
+    p_xbri.add_argument("--stride", type=int, default=None,
+        help="Force a specific record stride (default: auto-detect)")
+    p_xbri.add_argument("--fields-per-row", type=int, default=6,
+        help="Cap on 4-byte columns per record (default 6)")
+    p_xbri.add_argument("--json", action="store_true",
+        help="Machine-readable output")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -529,8 +635,43 @@ def main() -> None:
         "xbe": _dispatch_xbe,
         "ghidra-coverage": _dispatch_ghidra_coverage,
         "shim-inspect": _dispatch_shim_inspect,
+        "test-for-va": _dispatch_test_for_va,
+        "plan-trampoline": _dispatch_plan_trampoline,
+        "entity": _dispatch_entity,
+        "xbr": _dispatch_xbr,
     }
     dispatch[args.command](args)
+
+
+def _dispatch_test_for_va(args) -> None:
+    from azurik_mod.xbe_tools.commands import cmd_test_for_va
+    cmd_test_for_va(args)
+
+
+def _dispatch_plan_trampoline(args) -> None:
+    from azurik_mod.xbe_tools.commands import cmd_plan_trampoline
+    cmd_plan_trampoline(args)
+
+
+def _dispatch_entity(args) -> None:
+    """Route the ``entity`` subcommand to the right verb."""
+    from azurik_mod.xbe_tools.commands import cmd_entity_diff
+    verbs = {"diff": cmd_entity_diff}
+    verb = verbs.get(args.entity_command)
+    if verb is None:
+        raise SystemExit(
+            f"unknown entity verb: {args.entity_command!r}")
+    verb(args)
+
+
+def _dispatch_xbr(args) -> None:
+    from azurik_mod.xbe_tools.commands import cmd_xbr_inspect
+    verbs = {"inspect": cmd_xbr_inspect}
+    verb = verbs.get(args.xbr_command)
+    if verb is None:
+        raise SystemExit(
+            f"unknown xbr verb: {args.xbr_command!r}")
+    verb(args)
 
 
 def _dispatch_iso_verify(args) -> None:

@@ -78,7 +78,103 @@ the loader lays it out?" WITHOUT a full build-and-patch cycle.
 
 ---
 
-## Tier 2 — Planned (high ROI)
+## Tier 2 — Shipped
+
+### 5. `azurik-mod plan-trampoline` — hook-site sizer
+
+Status: **shipped** (see
+`azurik_mod/xbe_tools/trampoline_planner.py`).
+
+Given a hook-site VA, decodes instructions starting there with a
+minimal hand-rolled x86 length decoder (no Capstone dependency),
+suggests the smallest byte count that fits the trampoline budget
+and ends on an instruction boundary, and flags any multi-byte
+instructions the shim must preserve / restore.
+
+Decoder coverage: PUSH imm / MOV r32, imm32 / CALL rel32 / JMP
+rel32 / JCC rel8+rel32 / RET / NOP / INC/DEC r32 / ALU AL, imm8
+/ FF 25 thunk / FF 15 indirect / FLD dword [imm32].  Unknown
+opcodes (most ModR/M-heavy forms) are flagged as "UNKNOWN —
+inspect in Ghidra" rather than silently sized wrong.
+
+Exit code is 0 on clean boundary, 1 when warnings fired — CI
+wrappers can distinguish "needs review" from "error".
+
+### 7. `azurik-mod xbr inspect` — record-layout classifier
+
+Status: **shipped** (see
+`azurik_mod/xbe_tools/xbr_inspect.py`).
+
+Given an XBR file + a TOC-tag filter, classifies the first N
+records as a stride-N grid of 4-byte columns.  Each column is
+typed heuristically (``f32``, ``int32``, ``u32``, ``ptr``,
+``off``, ``fourcc``, ``zero``) so the author can spot column-
+consistent patterns across records.  Stride is auto-probed from
+the canonical set (16 / 20 / 24 / 28 / 32 / 40 / 48 / 64 / 80 /
+96 bytes) or set explicitly via ``--stride``.
+
+Use case: speeding up RE of level-XBR record layouts (e.g.
+decoding ``surf`` / ``rdms`` / per-level entity tables) without
+Ghidra.
+
+### 8. `azurik-mod entity diff` — two-entity property compare
+
+Status: **shipped** (see
+`azurik_mod/xbe_tools/entity_diff.py`).
+
+Loads every keyed-table section in a ``config.xbr`` and diffs
+two named entities property-by-property.  Shows:
+
+- ``~`` differences (both present, values differ)
+- ``-`` A-only (present on A, missing from B's column)
+- ``+`` B-only (present on B, missing from A's column)
+
+Suppresses shared-equal rows by default; ``--all`` includes
+them.  Loud error when neither entity exists.  Extracts
+``config.xbr`` from an ISO when invoked with ``--iso`` instead
+of ``--config``.
+
+### 9. `azurik-mod test-for-va` — pytest narrowing
+
+Status: **shipped** (see
+`azurik_mod/xbe_tools/test_selector.py`).
+
+Finds every ``class`` in ``tests/`` that mentions a given VA
+(hex) or pack name (bareword) + optionally launches pytest on
+just that subset.  Typical usage while iterating on a single
+patch site:
+
+```bash
+azurik-mod test-for-va 0x85700        # print matching classes
+azurik-mod test-for-va 0x85700 --run  # run just those tests
+azurik-mod test-for-va player_physics --run -- -v  # pytest flags
+```
+
+Exits with pytest's standard return codes when ``--run`` is
+used; exits with 5 (pytest "no tests ran" convention) when the
+match list is empty.
+
+### 10. `pin_va_*` helpers — VA-drift pin library
+
+Status: **shipped** (see
+`azurik_mod/xbe_tools/pin_va.py`).
+
+Three pytest-friendly assertions replacing the hand-rolled
+"read-bytes-at-VA + assertEqual" dance in drift-guard tests:
+
+- :func:`pin_va_bytes(xbe, va=0x..., expected="hex" | b"bytes")`
+- :func:`pin_va_string(xbe, va=0x..., expected="text")`
+- :func:`pin_va_pattern(xbe, va=0x..., length=N, predicate=lambda b: ...)`
+
+On mismatch, raises ``PinFailure`` with structured attrs
+(``va``, ``section``, ``expected``, ``actual``, ``description``)
+so the test runner can render a rich diff.  Shared
+``load_vanilla_xbe()`` caches the 1.8 MB read across test
+classes.
+
+---
+
+## Tier 2 — Planned (high ROI, remaining)
 
 ### 4. Ghidra knowledge-sync — push Python-side annotations to MCP
 
@@ -247,12 +343,12 @@ upstream PRs.
 | 2 | `ghidra-coverage`           | 7     | 2    | 9   | shipped  |
 | 3 | `shim-inspect`              | 6     | 2    | 8   | shipped  |
 | 4 | Ghidra knowledge-sync       | 9     | 3    | 10  | planned  |
-| 5 | Trampoline planner          | 7     | 2    | 9   | planned  |
+| 5 | Trampoline planner          | 7     | 2    | 9   | **shipped** |
 | 6 | Shim scaffolder w/ ABI      | 6     | 2    | 8   | planned  |
-| 7 | XBR layout inspector        | 5     | 3    | 7   | planned  |
-| 8 | Entity diff                 | 4     | 1    | 7   | planned  |
-| 9 | Test selector               | 4     | 1    | 7   | planned  |
-|10 | VA-drift pin helper         | 3     | 1    | 6   | planned  |
+| 7 | XBR layout inspector        | 5     | 3    | 7   | **shipped** |
+| 8 | Entity diff                 | 4     | 1    | 7   | **shipped** |
+| 9 | Test selector               | 4     | 1    | 7   | **shipped** |
+|10 | VA-drift pin helper         | 3     | 1    | 6   | **shipped** |
 |11 | RE session recorder         | 5     | 4    | 5   | maybe    |
 |12 | Level XBR diff              | 3     | 2    | 5   | maybe    |
 |13 | Bink metadata               | 2     | 1    | 4   | maybe    |

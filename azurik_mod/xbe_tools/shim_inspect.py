@@ -132,11 +132,25 @@ def inspect_object(target: Path) -> ShimInspection:
     layout) and resolve its ``ShimSource`` to find the compiled
     object.
 
-    Raises :exc:`FileNotFoundError` if no matching .o is found, or
-    :exc:`ValueError` if the .o doesn't parse as PE-COFF.
+    Raises
+    ------
+    FileNotFoundError
+        No matching .o is found (bad path or unbuilt feature).
+    ValueError
+        The file exists but doesn't parse as PE-COFF — e.g. a
+        stray .xbe / raw binary passed by mistake.  The message
+        includes the file's first 4 bytes for diagnostic context.
     """
     obj_path = _resolve_target(target)
-    coff = parse_coff(obj_path.read_bytes())
+    raw = obj_path.read_bytes()
+    try:
+        coff = parse_coff(raw)
+    except Exception as exc:  # coff.py raises ValueError + others
+        magic = raw[:4].hex() if raw else "(empty)"
+        raise ValueError(
+            f"{obj_path} is not a parseable PE-COFF .o file "
+            f"(first 4 bytes: 0x{magic}).  "
+            f"Underlying error: {exc}") from exc
     return _summarise(obj_path, coff)
 
 

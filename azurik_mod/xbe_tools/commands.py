@@ -262,11 +262,23 @@ def cmd_ghidra_coverage(args) -> None:
 # ---------------------------------------------------------------------------
 
 def cmd_shim_inspect(args) -> None:
-    """Dispatch into :mod:`.shim_inspect`."""
+    """Dispatch into :mod:`.shim_inspect`.
+
+    Wraps :func:`~azurik_mod.xbe_tools.shim_inspect.inspect_object`
+    with user-facing error handling: bad paths and non-COFF files
+    produce a single-line stderr message + exit 1, not a traceback.
+    """
     from .shim_inspect import inspect_object, format_inspection
 
     target = Path(args.target).expanduser().resolve()
-    result = inspect_object(target)
+    try:
+        result = inspect_object(target)
+    except FileNotFoundError as exc:
+        print(f"shim-inspect: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except ValueError as exc:
+        print(f"shim-inspect: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     if args.json:
         _emit(result.to_json_dict(), as_json=True)
@@ -274,13 +286,196 @@ def cmd_shim_inspect(args) -> None:
         print(format_inspection(result))
 
 
+# ---------------------------------------------------------------------------
+# test-for-va — run just the test classes that reference a given VA / pack
+# ---------------------------------------------------------------------------
+
+def cmd_test_for_va(args) -> None:
+    """``azurik-mod test-for-va 0xHEX|PACK_NAME [--run]`` — find
+    test classes that reference the target + optionally run pytest
+    on just that subset."""
+    from .test_selector import find_matches, run_pytest
+    from pathlib import Path as _P
+
+    # Resolve the tests dir relative to the repo (where the CLI
+    # was invoked from).  Override with --tests-dir for out-of-tree
+    # runs.
+    tests_dir = _P(args.tests_dir).resolve() if args.tests_dir else _P.cwd() / "tests"
+    if not tests_dir.is_dir():
+        print(f"test-for-va: tests directory not found: {tests_dir}",
+              file=sys.stderr)
+        sys.exit(2)
+
+    # Decide: is the target a hex VA or a pack name?
+    target = args.target
+    va: int | None = None
+    pack: str | None = None
+    try:
+        va = int(target, 0)
+    except ValueError:
+        pack = target
+
+    try:
+        matches = find_matches(va=va, pack=pack, tests_dir=tests_dir)
+    except ValueError as exc:
+        print(f"test-for-va: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+    if args.json:
+        _emit([{
+            "file": m.file.as_posix(),
+            "class": m.class_name,
+            "selector": m.pytest_selector(),
+            "hit_lines": list(m.hit_lines),
+        } for m in matches], as_json=True)
+    else:
+        if not matches:
+            print(f"(no test classes reference "
+                  f"{'VA ' + hex(va) if va is not None else 'pack ' + repr(pack)})")
+        else:
+            print(f"{len(matches)} test class(es) reference "
+                  f"{'VA ' + hex(va) if va is not None else 'pack ' + repr(pack)}:")
+            for m in matches:
+                line_hint = (f"  (lines: {', '.join(map(str, m.hit_lines[:4]))}"
+                             + ("…" if len(m.hit_lines) > 4 else "") + ")")
+                print(f"  {m.pytest_selector()}{line_hint}")
+
+    if args.run:
+        rc = run_pytest(matches,
+                        extra_args=list(args.pytest_args or []))
+        sys.exit(rc)
+
+
+# ---------------------------------------------------------------------------
+# plan-trampoline — size a hook site before writing any shim
+# ---------------------------------------------------------------------------
+
+def cmd_plan_trampoline(args) -> None:
+    """``azurik-mod plan-trampoline VA [--budget 5]`` — decode the
+    instructions at VA, suggest a trampoline length, flag any
+    multi-byte instructions the shim must preserve."""
+    from .trampoline_planner import plan_trampoline, format_plan
+
+    xbe = _load_xbe(args)
+    try:
+        va = int(args.va, 0)
+    except ValueError:
+        print(f"plan-trampoline: bad VA {args.va!r}", file=sys.stderr)
+        sys.exit(2)
+    plan = plan_trampoline(xbe, va,
+                           budget=args.budget,
+                           window=args.window)
+    if args.json:
+        _emit({
+            "va": plan.va, "file_offset": plan.file_offset,
+            "budget": plan.budget,
+            "suggested_length": plan.suggested_length,
+            "clean_boundary": plan.clean_boundary,
+            "warnings": plan.warnings,
+            "preserved_mnemonics": plan.preserved_mnemonics,
+            "instructions": [{
+                "offset": i.offset, "length": i.length,
+                "mnemonic": i.mnemonic, "bytes": i.raw.hex(),
+            } for i in plan.instructions],
+        }, as_json=True)
+    else:
+        print(format_plan(plan))
+    # Clean boundary → exit 0; warnings present → exit 1 so CI
+    # wrappers can distinguish "needs review" from "error".
+    sys.exit(0 if plan.clean_boundary else 1)
+
+
+# ---------------------------------------------------------------------------
+# entity diff — side-by-side config.xbr property compare
+# ---------------------------------------------------------------------------
+
+def cmd_entity_diff(args) -> None:
+    """``azurik-mod entity diff A B``"""
+    from .entity_diff import diff_entities, format_diff
+
+    config_path = args.config
+    if config_path is None and args.iso is not None:
+        # Extract config.xbr from the ISO into a temp file.
+        import tempfile
+        from azurik_mod.iso.pack import extract_config_from_iso
+        data = bytes(extract_config_from_iso(Path(args.iso)))
+        tmp = tempfile.NamedTemporaryFile(
+            suffix=".xbr", delete=False)
+        tmp.write(data); tmp.close()
+        config_path = tmp.name
+
+    if config_path is None:
+        # Try repo-local unpacked ISO as a convenience.
+        guess = (Path(__file__).resolve().parents[3] /
+                 "Azurik - Rise of Perathia (USA).xiso" /
+                 "gamedata" / "config.xbr")
+        if guess.exists():
+            config_path = str(guess)
+        else:
+            print("entity diff: pass --config PATH or --iso PATH",
+                  file=sys.stderr)
+            sys.exit(2)
+
+    try:
+        diff = diff_entities(config_path, args.entity_a, args.entity_b,
+                             include_equal=args.all)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"entity diff: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.json:
+        _emit(diff.to_json_dict(include_equal=args.all), as_json=True)
+    else:
+        print(format_diff(diff, include_equal=args.all))
+
+
+# ---------------------------------------------------------------------------
+# xbr inspect — record-layout classifier
+# ---------------------------------------------------------------------------
+
+def cmd_xbr_inspect(args) -> None:
+    """``azurik-mod xbr inspect FILE --tag TAG``"""
+    from .xbr_inspect import inspect_xbr, format_inspection
+
+    try:
+        insp = inspect_xbr(
+            args.path, tag=args.tag,
+            entries=args.entries, stride=args.stride,
+            fields_per_row=args.fields_per_row)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"xbr inspect: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.json:
+        _emit({
+            "tag": insp.tag,
+            "stride": insp.stride,
+            "auto_detected_stride": insp.auto_detected_stride,
+            "records": [{
+                "index": r.index,
+                "file_offset": r.file_offset,
+                "fields": [{
+                    "offset": f.offset, "raw": f.raw.hex(),
+                    "best_type": f.best_type,
+                    "value_display": f.value_display,
+                } for f in r.fields],
+            } for r in insp.records],
+        }, as_json=True)
+    else:
+        print(format_inspection(insp))
+
+
 __all__ = [
+    "cmd_entity_diff",
     "cmd_ghidra_coverage",
+    "cmd_plan_trampoline",
     "cmd_shim_inspect",
+    "cmd_test_for_va",
     "cmd_xbe_addr",
     "cmd_xbe_find_floats",
     "cmd_xbe_find_refs",
     "cmd_xbe_hexdump",
     "cmd_xbe_sections",
     "cmd_xbe_strings",
+    "cmd_xbr_inspect",
 ]
