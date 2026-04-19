@@ -537,5 +537,77 @@ class PrefetchVsHardcodedDelta(unittest.TestCase):
                  f"the game's prefetch manifest: {missing_from_manifest}"))
 
 
+class VerifyExtractedIsoHook(unittest.TestCase):
+    """``azurik_mod.iso.pack.verify_extracted_iso`` is called by
+    every unpack path in the builder pipeline.  It must:
+
+    - Detect size-mismatches against filelist.txt
+    - Return the issue count (0 == clean)
+    - Silently skip when filelist.txt is absent (non-Azurik ISO)
+    - Never raise — corrupted extractions should warn, not abort
+    """
+
+    def setUp(self) -> None:
+        import shutil
+        import tempfile
+        self.root = Path(tempfile.mkdtemp(prefix="azurik-xh-"))
+        (self.root / "gamedata").mkdir()
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self.root)
+
+    def _write_manifest(self, payload: bytes, declared_size: int) -> None:
+        (self.root / "gamedata" / "t.xbr").write_bytes(payload)
+        md5_hex = hashlib.md5(payload).hexdigest()
+        (self.root / "filelist.txt").write_text(
+            "\\\n"
+            f"f {md5_hex} {declared_size} t.xbr\n")
+
+    def test_clean_extraction_returns_zero(self):
+        from azurik_mod.iso.pack import verify_extracted_iso
+        payload = b"Y" * 100
+        self._write_manifest(payload, len(payload))
+        self.assertEqual(verify_extracted_iso(self.root), 0)
+
+    def test_missing_filelist_skipped_silently(self):
+        """Not every ISO is Azurik — absent filelist.txt is OK."""
+        from azurik_mod.iso.pack import verify_extracted_iso
+        self.assertEqual(verify_extracted_iso(self.root), 0)
+
+    def test_size_mismatch_detected_not_raised(self):
+        from azurik_mod.iso.pack import verify_extracted_iso
+        # Write 50 bytes but declare 100 — a truncated extraction
+        # scenario that xdvdfs can hit silently.
+        (self.root / "gamedata" / "t.xbr").write_bytes(b"Y" * 50)
+        md5_hex = hashlib.md5(b"Y" * 50).hexdigest()
+        (self.root / "filelist.txt").write_text(
+            "\\\n"
+            f"f {md5_hex} 100 t.xbr\n")
+        # Must return >0 and NOT raise.
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            n = verify_extracted_iso(self.root)
+        self.assertGreater(n, 0)
+        self.assertIn("WARNING", buf.getvalue())
+        self.assertIn("size mismatch", buf.getvalue())
+
+    def test_missing_file_detected_not_raised(self):
+        from azurik_mod.iso.pack import verify_extracted_iso
+        # Manifest declares a file that doesn't exist on disk.
+        (self.root / "filelist.txt").write_text(
+            "\\\n"
+            "f abc 42 phantom.xbr\n")
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            n = verify_extracted_iso(self.root)
+        self.assertEqual(n, 1)
+        self.assertIn("missing", buf.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

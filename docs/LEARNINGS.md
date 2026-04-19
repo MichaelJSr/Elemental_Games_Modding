@@ -756,6 +756,147 @@ candidate roots and using whichever matches more files.  If
 Microsoft's ISO layout ever changes this could need extending,
 but the heuristic has zero false positives today.
 
+### Extract-pipeline integration
+
+Every ``run_xdvdfs ... unpack`` call in
+``azurik_mod/randomizer/commands.py`` is followed by a
+``verify_extracted_iso(extract_dir)`` call.  The helper runs a
+size-only integrity scan (no MD5 — too expensive on the hot
+path) and prints a warning block with up to 20 mismatches if
+anything looks wrong.  It never raises, so a corrupted
+extraction still produces something usable for diagnosis, but
+the user gets a loud heads-up pointing them at
+``azurik-mod iso-verify`` for the full MD5 audit.
+
+Size-only scan cost: ~3 ms for 42 entries on an M1 SSD, vs
+~1.5 s for the full MD5 pass.
+
+## selector.xbr — the developer level-select hub
+
+Discovered during the filelist/prefetch cross-check: 2 MB level
+XBR that IS on disk, IS referenced by the XBE, but is NOT in
+``prefetch-lists.txt``.
+
+### What it is
+
+``selector.xbr`` is a legitimate, playable in-game level built on
+the same layout as every other level (``node``, ``levl``, ``surf``,
+``rdms``, etc.).  Its ``node`` section carries **35 portal
+strings** that between them reach every live level in the game,
+plus direct cutscene triggers:
+
+- 22 regular level portals — ``levels/fire/f1`` through
+  ``levels/water/w4``, ``levels/life``, ``levels/town``, etc.
+- 1 self-reference (``levels/selector``)
+- 1 portal to a **cut level** (``levels/earth/e4``) — the only
+  on-disk reference to this level anywhere
+- 10 movie-scene triggers (``movies/scenes/prophecy``,
+  ``movies/scenes/training1``, …``disksdestroyed``,
+  ``catalisks``, ``airship2``, ``death1``, ``deathmeeting2``,
+  ``disks_restoredall``, ``newdeath``)
+
+So it's a developer cheat menu — loading this level gives you
+single-click access to every level + cutscene.
+
+### How to activate it
+
+The XBE has 4 ``.text`` callsites that push the VA of the
+``"levels/selector"`` string at ``VA 0x1A1E3C``:
+
+- ``VA 0x12C56``  — probably init/boot-path
+- ``VA 0x52FA7, 0x533E3, 0x53400`` — inside ``FUN_00052F50``,
+  a conditional load gated on a boot-flag read from BSS
+  ``VA 0x001BCDD8``.  Disassembly shows:
+
+```
+  mov  esi, [0x001BCDD8]    ; read debug-mode flag
+  cmp  esi, -1
+  jnz  +0x05
+  mov  esi, 0x3             ; default when flag unset
+  mov  ebp, 0x1A1E3C        ; "levels/selector" string
+```
+
+So a ``qol_enable_dev_menu`` shim could force-enable the cheat
+menu by priming ``[0x001BCDD8]`` to a non-``-1`` value during
+boot.  Not shipped today — no one has asked for it — but the
+plumbing is a ~20-line shim when someone does.
+
+### Why it's a prefetch-manifest orphan
+
+The streaming loader doesn't see it because it's never on a
+level's ``neighbor=`` list.  It's loaded directly by
+``FUN_00052F50`` which bypasses the prefetch system entirely.
+The ``azurik-mod iso-verify`` orphan-detector lists it
+(alongside ``loc.xbr``) as a manifest orphan — both are
+legitimate, both are unused by the normal game flow.
+
+### Cut-level discoveries
+
+Two cut levels are now documented as ``KNOWN_CUT_LEVELS``:
+
+- ``f7`` — referenced only by ``f1``'s ``neighbor=`` list in
+  ``prefetch-lists.txt``.  The randomizer's
+  ``EXCLUDE_TRANSITIONS`` already knows about it.
+- ``e4`` — referenced only by ``selector.xbr``'s portal list.
+  No XBE code paths reference it.
+
+Both are useful flags for a future "randomizer finds all known
+dead portals" audit pass.
+
+## index.xbr — the global asset-path index
+
+Second orphan-looking file that's actually in the ``always``
+stanza of ``prefetch-lists.txt`` — the streaming loader keeps
+it resident throughout the game.
+
+### Structure
+
+168 KB file with exactly ONE TOC entry tagged ``indx``.  Payload
+contains ~3,100 unique name strings (parser-extracted) and the
+4-char type tags the game uses to disambiguate asset kinds:
+
+| tag    | purpose                                      |
+|--------|----------------------------------------------|
+| ``surf`` | surface / material reference               |
+| ``wave`` | audio or animation wave resource           |
+| ``banm`` | bone animation (``b``one-``anm``)           |
+| ``node`` | scene-graph node                           |
+| ``body`` | character body mesh                        |
+| ``gems`` | gem-pickup definition                      |
+| ``indx`` | index entry self-tag                       |
+
+Each name string is followed by a single discriminator byte
+(``!``, ``"``, ``#``, …) which likely encodes an asset-version
+or sub-type index.
+
+### What it's used for (inferred)
+
+Based on the tag distribution + prefetch-manifest placement:
+
+- Global asset **directory** — maps every named asset (e.g.
+  ``characters/garret4/body``) to a lookup record the engine
+  uses to locate the data inside the other XBRs.
+- **Always loaded** — so any level, any config value, any
+  character spec can reference an asset by name without a
+  chain of file-open calls.
+
+We haven't fully decoded the index-entry record layout.  It's
+not blocking anything today: level / character / effect mods go
+through their native XBRs (``config.xbr``, ``characters.xbr``,
+level files) rather than through this index.  If a future mod
+wants to add NEW assets (not just modify existing ones), the
+index will need to be extended too — tracked as a future
+project in docs/ONBOARDING.md.
+
+### Why we don't need to parse it further today
+
+The ``config.xbr``-driven modding workflow we've built operates
+entirely on keyed-table entries that ALREADY exist in the game.
+We rename gems, swap power-ups, tweak drop tables — all
+in-place edits to records the engine already indexes.  The only
+time we'd need the index is to add *new* entity types, which
+isn't on any current roadmap.
+
 ## What to add here next
 
 Things we haven't pinned down but should when a shim needs them:

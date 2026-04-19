@@ -22,6 +22,7 @@ from azurik_mod.iso.pack import (
     read_config_data,
     read_xbe_bytes,
     run_xdvdfs,
+    verify_extracted_iso,
 )
 from azurik_mod.iso.xdvdfs import require_xdvdfs
 
@@ -283,6 +284,7 @@ def cmd_patch(args):
         step = 1
         print(f"\n[{step}/{total_steps}] Extracting {iso_path.name}...")
         run_xdvdfs(xdvdfs, ["unpack", str(iso_path), str(extract_dir)])
+        verify_extracted_iso(extract_dir)
 
         # Validate
         if not (extract_dir / "default.xbe").exists():
@@ -395,6 +397,7 @@ def cmd_randomize_gems(args):
         # Step 1: Extract
         print(f"\n[1/3] Extracting {iso_path.name}...")
         run_xdvdfs(xdvdfs, ["unpack", str(iso_path), str(extract_dir)])
+        verify_extracted_iso(extract_dir)
 
         if not (extract_dir / "default.xbe").exists():
             print("  ERROR: Extracted folder missing default.xbe — not a valid game ISO")
@@ -543,6 +546,7 @@ def cmd_randomize(args):
         # Step 1: Extract
         print(f"\n[1/4] Extracting {iso_path.name}...")
         run_xdvdfs(xdvdfs, ["unpack", str(iso_path), str(extract_dir)])
+        verify_extracted_iso(extract_dir)
 
         if not (extract_dir / "default.xbe").exists():
             print("  ERROR: Not a valid game ISO")
@@ -907,6 +911,7 @@ def cmd_randomize_full(args):
         # Step 1: Extract
         print(f"\n[1/7] Extracting {iso_path.name}...")
         run_xdvdfs(xdvdfs, ["unpack", str(iso_path), str(extract_dir)])
+        verify_extracted_iso(extract_dir)
 
         if not (extract_dir / "default.xbe").exists():
             print("  ERROR: Not a valid game ISO")
@@ -1752,6 +1757,7 @@ def cmd_apply_physics(args):
             extract = Path(tmp) / "game"
             print(f"Unpacking {iso_path.name}...")
             run_xdvdfs(xdvdfs, ["unpack", str(iso_path), str(extract)])
+            verify_extracted_iso(extract)
 
             xbe = extract / "default.xbe"
             if not xbe.exists():

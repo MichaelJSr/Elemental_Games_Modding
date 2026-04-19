@@ -263,6 +263,13 @@ class PrefetchManifest:
 # :py:meth:`PrefetchManifest.level_tags`.
 _ALIAS_TAGS = frozenset({"default"})
 
+# Levels that appear as strings / references in the shipped ISO
+# but have no corresponding stanza in ``prefetch-lists.txt`` and
+# no XBR file on disk.  ``f7`` is referenced by ``f1``'s neighbor
+# list; ``e4`` is referenced by ``selector.xbr``'s dev level-select
+# hub.  See docs/LEARNINGS.md § selector.xbr for the provenance.
+KNOWN_CUT_LEVELS = frozenset({"f7", "e4"})
+
 # Languages we've seen Azurik ship (matches the %LANGUAGE%.xbr slot).
 # Kept conservative; extend when / if localisations surface.
 _KNOWN_LANGUAGES = ("english", "french", "german", "spanish", "italian",

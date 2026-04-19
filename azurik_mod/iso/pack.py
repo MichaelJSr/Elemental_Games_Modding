@@ -33,10 +33,80 @@ def run_xdvdfs(xdvdfs: str, args: list[str]) -> None:
         sys.exit(1)
 
 
-def extract_iso_to_dir(iso_path: Path, dest: Path) -> None:
-    """Unpack an Xbox ISO into `dest` via `xdvdfs unpack`."""
+def extract_iso_to_dir(iso_path: Path, dest: Path, *,
+                       verify: bool = True) -> None:
+    """Unpack an Xbox ISO into ``dest`` via ``xdvdfs unpack``.
+
+    Parameters
+    ----------
+    iso_path
+        Source .iso file.
+    dest
+        Destination directory (created if needed by xdvdfs).
+    verify
+        When ``True`` (default) and the unpacked tree contains
+        both ``filelist.txt`` and ``prefetch-lists.txt`` (Azurik
+        ISOs always do), run a quick size-only integrity check
+        against the manifest.  Any mismatch is reported loudly
+        but does NOT abort — a corrupted extraction often still
+        produces something usable for diagnosis, and callers can
+        decide how to react.
+
+        Pass ``verify=False`` for non-Azurik ISOs or when the
+        caller runs its own verification pass afterwards.
+    """
     xdvdfs = require_xdvdfs()
     run_xdvdfs(str(xdvdfs), ["unpack", str(iso_path), str(dest)])
+    if verify:
+        _verify_extracted_iso(dest)
+
+
+def verify_extracted_iso(root: Path) -> int:
+    """Size-only integrity scan of ``root`` against its own
+    filelist.txt.
+
+    Returns the number of issues found (0 == OK).  Prints a
+    warning block when issues are detected; does NOT raise so
+    callers can decide how to react.  See docs/LEARNINGS.md
+    § filelist.txt for semantics.
+
+    The check is deliberately size-only (not MD5) because the
+    extraction pipeline is the hot path — MD5 adds ~1.5 s per GB
+    and the common failure mode (truncated xdvdfs output) shows
+    up as size mismatches anyway.  MD5 auditing remains available
+    via the ``azurik-mod iso-verify`` subcommand.
+
+    Silently skips verification if ``filelist.txt`` isn't present
+    (non-Azurik ISO) so the helper is safe to wire into generic
+    unpack pipelines.
+    """
+    fl_path = root / "filelist.txt"
+    if not fl_path.exists():
+        return 0
+    try:
+        from azurik_mod.assets.filelist import load_filelist
+        manifest = load_filelist(fl_path)
+    except Exception as exc:
+        print(f"  warning: could not load filelist.txt ({exc}); "
+              f"skipping integrity check")
+        return 0
+
+    issues = manifest.verify(root, check_md5=False, limit=20)
+    if not issues:
+        return 0
+    print()
+    print(f"  WARNING: {len(issues)} integrity issue(s) detected "
+          f"in extracted ISO at {root}:")
+    for issue in issues:
+        print(f"    - {issue}")
+    print(f"  Use 'azurik-mod iso-verify {root}' for a full report "
+          f"(including MD5 checks).")
+    print()
+    return len(issues)
+
+
+# Backwards-compat alias for the internal helper name.
+_verify_extracted_iso = verify_extracted_iso
 
 
 def repack_dir_to_iso(src: Path, iso_path: Path) -> None:
@@ -170,4 +240,5 @@ __all__ = [
     "read_xbe_bytes",
     "repack_dir_to_iso",
     "run_xdvdfs",
+    "verify_extracted_iso",
 ]

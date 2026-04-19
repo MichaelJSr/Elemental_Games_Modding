@@ -23,6 +23,7 @@ should read from here instead of duplicating the tables.
 
 from azurik_mod.assets.filelist import FileEntry, FilelistManifest
 from azurik_mod.assets.prefetch import (
+    KNOWN_CUT_LEVELS,
     PrefetchManifest,
     PrefetchTag,
     load_prefetch,
@@ -31,6 +32,7 @@ from azurik_mod.assets.prefetch import (
 __all__ = [
     "FileEntry",
     "FilelistManifest",
+    "KNOWN_CUT_LEVELS",
     "PrefetchManifest",
     "PrefetchTag",
     "load_prefetch",
