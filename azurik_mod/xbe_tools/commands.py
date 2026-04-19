@@ -633,6 +633,43 @@ def cmd_xbr_diff(args) -> None:
     sys.exit(0 if not diff.has_changes else 1)
 
 
+def cmd_audio_dump(args) -> None:
+    """``azurik-mod audio dump FX.XBR --output DIR``"""
+    from .audio_dump import dump_waves, format_report
+
+    try:
+        report = dump_waves(
+            args.fx_xbr, args.output,
+            entropy_min=args.entropy_min,
+            only_audio=args.only_audio)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"audio dump: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.json:
+        _emit(report.to_dict(), as_json=True)
+    else:
+        print(format_report(report, preview=args.preview))
+
+
+def cmd_plugins_list(args) -> None:
+    """``azurik-mod plugins list``"""
+    from azurik_mod.plugins import (
+        discover_plugins, format_report, load_plugins)
+
+    if args.reload:
+        report = load_plugins()
+    else:
+        # Fast path — just discover without importing anything.
+        from azurik_mod.plugins import PluginLoadReport
+        report = PluginLoadReport(discovered=discover_plugins())
+
+    if args.json:
+        _emit(report.to_dict(), as_json=True)
+    else:
+        print(format_report(report))
+
+
 def cmd_movies_info(args) -> None:
     """``azurik-mod movies info PATH``"""
     from .bink_info import (
@@ -692,6 +729,7 @@ def cmd_xbr_inspect(args) -> None:
 
 
 __all__ = [
+    "cmd_audio_dump",
     "cmd_entity_diff",
     "cmd_ghidra_coverage",
     "cmd_ghidra_snapshot",
@@ -699,6 +737,7 @@ __all__ = [
     "cmd_movies_info",
     "cmd_new_shim",
     "cmd_plan_trampoline",
+    "cmd_plugins_list",
     "cmd_shim_inspect",
     "cmd_test_for_va",
     "cmd_xbe_addr",

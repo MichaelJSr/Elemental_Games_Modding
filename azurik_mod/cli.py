@@ -759,6 +759,71 @@ def main() -> None:
         help="Path to a .bik file OR a directory (aggregates)")
     p_mi.add_argument("--json", action="store_true")
 
+    # ------------------------------------------------------------------
+    # audio (tier 3 #14 — wave-blob bulk extractor)
+    # ------------------------------------------------------------------
+    p_audio = sub.add_parser(
+        "audio",
+        help="Extract audio blobs from fx.xbr (partial — format "
+             "only partially decoded)",
+        description=(
+            "Bulk-extract every ``wave`` TOC entry from fx.xbr,\n"
+            "classifying each as 'likely-audio' (high-entropy raw\n"
+            "bytes) vs 'likely-animation' (Maya-particle-system\n"
+            "curve data).  Produces one file per blob + a\n"
+            "manifest.json.\n\n"
+            "Full codec decoding is NOT implemented — the wave\n"
+            "payload has no RIFF/XMA/etc. header.  Shipped so RE\n"
+            "work can proceed on plain files; see the module\n"
+            "docstring for format status."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _audio_sub = p_audio.add_subparsers(
+        dest="audio_command", required=True)
+    p_ad = _audio_sub.add_parser(
+        "dump",
+        help="Bulk-extract wave blobs + write a manifest")
+    p_ad.add_argument("fx_xbr",
+        help="Path to gamedata/fx.xbr")
+    p_ad.add_argument("--output", "-o", required=True,
+        help="Output directory (created if missing)")
+    p_ad.add_argument("--entropy-min", type=float, default=0.0,
+        help="Skip blobs with Shannon entropy below this (0..1). "
+             "Higher = more-likely-audio; 0 writes everything.")
+    p_ad.add_argument("--only-audio", action="store_true",
+        help="Skip blobs classified as likely-animation / too-small")
+    p_ad.add_argument("--preview", type=int, default=0,
+        help="Show the first N manifest entries inline")
+    p_ad.add_argument("--json", action="store_true")
+
+    # ------------------------------------------------------------------
+    # plugins (tier 3 #16 — third-party pack distribution)
+    # ------------------------------------------------------------------
+    p_plugins = sub.add_parser(
+        "plugins",
+        help="Inspect discovered third-party plugin packs",
+        description=(
+            "Third-party ``azurik-mod`` packs install themselves\n"
+            "via the ``azurik_mod.patches`` entry-point group in\n"
+            "pyproject.toml.  After ``pip install <pkg>`` the CLI\n"
+            "picks them up automatically at startup.\n\n"
+            "``plugins list`` shows every plugin the loader\n"
+            "discovered.  See docs/PLUGINS.md for the authoring\n"
+            "guide."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _plugins_sub = p_plugins.add_subparsers(
+        dest="plugins_command", required=True)
+    p_pl = _plugins_sub.add_parser(
+        "list",
+        help="List every discovered plugin + load status")
+    p_pl.add_argument("--reload", action="store_true",
+        help="Re-run the loader now (default: use the auto-loaded "
+             "state)")
+    p_pl.add_argument("--json", action="store_true")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -788,6 +853,8 @@ def main() -> None:
         "xbr": _dispatch_xbr,
         "movies": _dispatch_movies,
         "new-shim": _dispatch_new_shim,
+        "audio": _dispatch_audio,
+        "plugins": _dispatch_plugins,
     }
     dispatch[args.command](args)
 
@@ -847,6 +914,25 @@ def _dispatch_movies(args) -> None:
 def _dispatch_new_shim(args) -> None:
     from azurik_mod.xbe_tools.commands import cmd_new_shim
     cmd_new_shim(args)
+
+
+def _dispatch_audio(args) -> None:
+    from azurik_mod.xbe_tools.commands import cmd_audio_dump
+    verbs = {"dump": cmd_audio_dump}
+    verb = verbs.get(args.audio_command)
+    if verb is None:
+        raise SystemExit(f"unknown audio verb: {args.audio_command!r}")
+    verb(args)
+
+
+def _dispatch_plugins(args) -> None:
+    from azurik_mod.xbe_tools.commands import cmd_plugins_list
+    verbs = {"list": cmd_plugins_list}
+    verb = verbs.get(args.plugins_command)
+    if verb is None:
+        raise SystemExit(
+            f"unknown plugins verb: {args.plugins_command!r}")
+    verb(args)
 
 
 def _dispatch_iso_verify(args) -> None:

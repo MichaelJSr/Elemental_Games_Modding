@@ -373,11 +373,35 @@ Vanilla ISO: 14 Bink files, all 640×480 @ 30 fps, totalling
 
 ### 14. Audio asset dump (from `wave` tags in `fx.xbr`)
 
-Status: **deferred**.  Extracting the embedded audio blobs
-from `fx.xbr`'s ``wave`` TOC entries is straightforward;
-interpreting them is not — no one's decoded Azurik's wave
-header format yet.  Re-open when someone has time to RE the
-header OR when audio replacement becomes a user ask.
+Status: **shipped (partial)** (see
+`azurik_mod/xbe_tools/audio_dump.py`).
+
+``azurik-mod audio dump FX_XBR --output DIR`` bulk-extracts
+every ``wave`` TOC entry from ``fx.xbr`` + writes a
+``manifest.json`` classifying each blob as ``likely-audio``
+(high-entropy raw bytes), ``likely-animation`` (Maya particle-
+system curve data with embedded 4-byte TOC tags), or
+``too-small`` (< 64 bytes).
+
+**Format status**: partially decoded.  We confirmed:
+
+- ``fx.xbr`` has 700 ``wave`` entries.
+- Audio is referenced by SYMBOLIC NAME (``fx/sound/player/jump``
+  etc.) via ``index.xbr``.
+- NO standard audio magic (RIFF / XMA / xWMA / OggS / FSB) in
+  fx.xbr anywhere.
+- ~70% of blobs classify as likely-audio, ~25% as
+  likely-animation.
+
+Full codec decoding is NOT implemented — the wave payload
+appears to be raw DSOUND samples or a proprietary container
+Azurik layered itself.  Shipped so the RE work can proceed on
+plain files; a future decoder can consume ``waves/*.bin``
+directly.
+
+Filters: ``--entropy-min 0.5`` skips low-entropy (likely-
+animation) blobs; ``--only-audio`` writes only the audio-
+classified ones.
 
 ### 15. Ghidra snapshot exporter
 
@@ -397,14 +421,37 @@ truth for tests.
 
 ### 16. Plugin-pack distribution
 
-Status: **not started**.  Would turn each feature folder into
-a PyPI-installable plugin using entry-point group
-``azurik_mod.patches`` so third-party modders can ship packs
-as standalone installables rather than upstream PRs.
-Requires designing a stable ABI for external packs + wiring
-``pkg_resources`` discovery into the registry.  Scope-heavy;
-defer until there's a concrete third-party pack to validate
-against.
+Status: **shipped** (see `azurik_mod/plugins.py` +
+`docs/PLUGINS.md`).
+
+Third-party packs ship themselves via the
+``azurik_mod.patches`` entry-point group in ``pyproject.toml``.
+After ``pip install <pkg>``, the CLI discovers + imports the
+plugin at startup; ``register_feature(...)`` side effects wire
+the pack into the same global registry shipped features use.
+
+CLI:
+
+```bash
+azurik-mod plugins list                  # discovery only
+azurik-mod plugins list --reload         # force re-import
+```
+
+Safety model:
+
+- Broken plugins are caught with ``try/except`` — one bad
+  plugin can't take down the CLI.
+- ``AZURIK_NO_PLUGINS=1`` in the environment skips plugin
+  discovery entirely (CI / diagnostic use).
+- Plugins that pick a fresh category get an auto-created
+  Category placeholder (same mechanism shipped features use).
+
+Authoring guide + complete worked example in
+[docs/PLUGINS.md](PLUGINS.md).  Third-party plugins can ship
+any feature shape shipped packs support — byte patches, shim
+trampolines, parametric sliders, custom apply callbacks,
+brand-new categories — using only the public
+:func:`register_feature` API.
 
 ---
 
@@ -431,9 +478,9 @@ against.
 |11 | RE session recorder         | 5     | 4    | 5   | **shipped** |
 |12 | Level XBR diff              | 3     | 2    | 5   | **shipped** |
 |13 | Bink metadata               | 2     | 1    | 4   | **shipped** |
-|14 | Audio asset dump            | 3     | 4    | 3   | deferred |
+|14 | Audio asset dump            | 3     | 4    | 3   | **shipped (partial)** |
 |15 | Ghidra snapshot exporter    | 5     | 2    | 6   | **shipped** |
-|16 | Plugin pack distribution    | 4     | 3    | 5   | not started |
+|16 | Plugin pack distribution    | 4     | 3    | 5   | **shipped** |
 
 The top three shipped today deliver ≥25 minutes of saved time
 per RE session, based on real measurement against the
@@ -531,10 +578,9 @@ cutscenes.
 **#4** ghidra-sync extensions — struct application + variable
 renaming via ``PATCH /variables/...`` endpoints.
 
-**#14** Audio asset dump — still blocked on wave header RE.
-
-**#16** Plugin pack distribution — still blocked on
-external-pack ABI design.
+**#14** Audio codec decoder — the extraction tool is shipped,
+but the actual wave / PCM / ADPCM decoder still needs RE work.
+Extracted blobs (``waves/*.bin``) are the starting point.
 
 ---
 

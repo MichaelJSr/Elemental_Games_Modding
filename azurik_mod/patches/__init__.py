@@ -71,6 +71,25 @@ from azurik_mod.patches.qol import (
 )
 
 
+# Third-party plugin discovery — happens AFTER every shipped
+# feature has registered so plugin collisions fail loud on their
+# specific (colliding) name rather than on an arbitrary earlier
+# import.  Broken plugins are caught individually; one bad
+# plugin never takes down azurik-mod.
+#
+# Set ``AZURIK_NO_PLUGINS=1`` in the environment to skip this
+# entirely (useful for CI parity against vanilla installs).
+import os as _os
+if not _os.environ.get("AZURIK_NO_PLUGINS"):
+    try:
+        from azurik_mod.plugins import load_plugins as _load_plugins
+        _load_plugins()  # best-effort; errors logged inside
+    except Exception:  # noqa: BLE001
+        # Plugins are optional by design — if the loader itself
+        # blows up we keep going with just the shipped features.
+        pass
+
+
 __all__ = [
     "FPS_DATA_PATCHED_VAS",
     "FPS_PATCH_SITES",
