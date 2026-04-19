@@ -1059,6 +1059,13 @@ def main() -> None:
     p_lpp = _lp_sub.add_parser("preview",
         help="Structural preview of a level XBR")
     p_lpp.add_argument("path", help="Path to <level>.xbr")
+    p_lpp.add_argument("--include-raw", action="store_true",
+        help="Also show strings that passed the quality filter "
+             "but didn't match a structured category (noisy)")
+    p_lpp.add_argument("--max-items", type=int, default=30,
+        help="Cap per-category listings at this many rows "
+             "(default 30; use a large value when piping to a "
+             "file)")
     p_lpp.add_argument("--json", action="store_true")
 
     # #26 movies frames (extends movies subcommand)

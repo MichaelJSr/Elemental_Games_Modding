@@ -247,9 +247,14 @@ class DecompCache:
 
     def _write(self, path: Path,
                decomp: GhidraDecomp) -> None:
+        # Atomic write: stream to ``<path>.tmp`` then rename.
+        # Guarantees readers never observe a half-written file,
+        # and that an interrupted write doesn't corrupt the
+        # cache entry (the old one survives, or no entry exists).
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(
                 json.dumps({
                     "decompiled": decomp.decompiled,
                     "function_name": decomp.function_name,
@@ -257,6 +262,7 @@ class DecompCache:
                         "%Y-%m-%dT%H:%M:%S"),
                 }, indent=2),
                 encoding="utf-8")
+            tmp.replace(path)
         except OSError:
             # Cache is best-effort — callers still get the
             # decomp in memory even if we can't persist it.

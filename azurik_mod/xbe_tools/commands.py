@@ -1008,11 +1008,16 @@ def cmd_level_preview(args) -> None:
     """``azurik-mod level preview <xbr>``."""
     from .level_preview import format_preview, preview_level
 
-    preview = preview_level(Path(args.path))
+    preview = preview_level(
+        Path(args.path),
+        include_raw=bool(getattr(args, "include_raw", False)))
     if args.json:
         _emit(preview.to_json_dict(), as_json=True)
     else:
-        print(format_preview(preview))
+        print(format_preview(
+            preview,
+            max_items_per_category=getattr(
+                args, "max_items", 30)))
 
 
 def cmd_movies_frames(args) -> None:

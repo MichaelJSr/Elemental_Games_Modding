@@ -55,9 +55,8 @@ from __future__ import annotations
 import shutil
 import struct
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 from azurik_mod.xbe_tools.bink_info import (
     BinkInfo,
@@ -116,38 +115,76 @@ class BinkFramePlan:
 # ---------------------------------------------------------------------------
 
 
+_BINK_FIXED_HEADER = 0x2C       # BinkInfo reads exactly this many bytes
+# Per ffmpeg/libavformat/bink.c each audio track consumes 16 bytes:
+# 4 bytes (max packet size) + 8 bytes (track header: sample_rate /
+# channels / flags) + 4 bytes (track id).  Earlier Bink revisions
+# used 12 B/track — we auto-detect below so both layouts work.
+_BINK_AUDIO_TRACK_SIZES = (16, 12, 8)
+
+
 def describe_bink(path: Path) -> BinkFrameTable:
     """Full metadata + per-frame offset table for a Bink 1.x
-    file.  Raises :exc:`ValueError` on a non-Bink file."""
+    file.
+
+    The Bink 1.9 "BIKi" container puts audio-track descriptors
+    between the fixed header and the per-frame offset table.
+    Per-track size varies between revisions (16 B for 1.9b as
+    shipped with Azurik; 12 B and 8 B for earlier revisions seen
+    in other games), so we auto-detect by probing candidate
+    layouts and picking the first one that yields a strictly
+    monotonic offset sequence where the first offset matches
+    ``header + audio_bytes + 4*(frame_count+1)`` (there's one
+    extra offset after the last frame for the end-of-stream
+    sentinel).
+
+    Raises :exc:`ValueError` on non-Bink files or when no
+    candidate layout fits.
+    """
     info = inspect_bink_file(path)
-    # ``inspect_bink_file`` already refuses non-BIKi magic by
-    # raising ValueError, but keep a defensive check so callers
-    # that supply a pre-parsed BinkInfo can't slip past us.
     data = Path(path).read_bytes()
     if data[:4] != b"BIKi":
         raise ValueError(
             f"{path} is not a Bink 1 file (magic={data[:4]!r})")
 
-    # Offsets table starts immediately after the fixed header
-    # (0x2C + 12 * audio_track_count).  The Bink 1.x container
-    # puts audio-track descriptors between the header and the
-    # offset table; each audio track uses 12 bytes (4 flags + 4
-    # sample-rate + 4 reserved) — empirical from xemu's own
-    # Bink code + FFmpeg's binkdec.c.
-    header_size = 0x2C  # BinkInfo reads exactly this many bytes
-    table_start = header_size + 12 * max(0, info.audio_track_count)
-
-    if table_start + 4 * info.frame_count > len(data):
+    if info.frame_count <= 0:
+        # Malformed header — bail before we try to unpack garbage.
         raise ValueError(
-            f"{path}: offset table runs off EOF "
-            f"(start=0x{table_start:x}, "
-            f"frames={info.frame_count}, size={len(data)})")
-    raw = struct.unpack_from(
-        f"<{info.frame_count}I", data, table_start)
-    offsets = tuple(v & ~1 for v in raw)
-    keyframes = tuple(i for i, v in enumerate(raw) if v & 1)
-    return BinkFrameTable(
-        info=info, offsets=offsets, keyframes=keyframes)
+            f"{path}: header reports {info.frame_count} frames")
+
+    last_err: str | None = None
+    for per_track in _BINK_AUDIO_TRACK_SIZES:
+        table_start = (_BINK_FIXED_HEADER
+                       + per_track * max(0, info.audio_track_count))
+        # +1 for the Bink EOF sentinel offset (frame_count + 1 entries).
+        table_end = table_start + 4 * (info.frame_count + 1)
+        if table_end > len(data):
+            last_err = (f"table with per_track={per_track} runs off "
+                        f"EOF (end=0x{table_end:x}, "
+                        f"size=0x{len(data):x})")
+            continue
+        raw = struct.unpack_from(
+            f"<{info.frame_count + 1}I", data, table_start)
+        offsets = tuple(v & ~1 for v in raw)
+        # Layout check: offsets must be monotonic, first offset
+        # must land exactly AT table_end (i.e., the first frame
+        # follows the offset table immediately), and the
+        # sentinel at the end must be ≤ file size.
+        if (offsets[0] == table_end
+                and all(offsets[i] <= offsets[i + 1]
+                        for i in range(len(offsets) - 1))
+                and offsets[-1] <= len(data)):
+            keyframes = tuple(
+                i for i, v in enumerate(raw[:-1]) if v & 1)
+            return BinkFrameTable(
+                info=info,
+                offsets=offsets[:-1],  # drop the EOF sentinel
+                keyframes=keyframes)
+        last_err = (f"per_track={per_track}: first=0x{offsets[0]:x} "
+                    f"expected=0x{table_end:x}")
+    raise ValueError(
+        f"{path}: couldn't auto-detect offset table layout; "
+        f"last attempt: {last_err}")
 
 
 # ---------------------------------------------------------------------------

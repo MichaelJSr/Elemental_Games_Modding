@@ -2,6 +2,77 @@
 
 ## Unreleased
 
+### Next-wave tooling audit pass — correctness, perf, level-preview rework
+
+Follow-up to the next-wave landing: audited every tool for
+correctness, optimisation, and cleanup.
+
+**Correctness fixes:**
+
+- **Bink offset-table layout** (``azurik_mod.xbe_tools.bink_extract``):
+  per-audio-track header is 16 B for Bink 1.9 (not 12 B as the
+  first draft assumed).  Off-by-4 on the first frame offset
+  made ``frame_size(0)`` return the wrong size on every vanilla
+  ``.bik``.  Fixed by auto-detecting the layout (16 → 12 → 8 B
+  candidates, pick the one that yields monotonic offsets with
+  a matching table-end equality) + consuming the trailing
+  end-of-stream sentinel the Bink container appends.
+- **Decomp cache atomic writes** (``decomp_cache._write``): write
+  to ``<path>.tmp`` + ``replace()`` so an interrupted write
+  can't leave a half-serialised JSON file the next reader
+  trips over.
+- **Call-graph edge orientation** (``call_graph._orient_edge``):
+  the dead ``if direction == "forward"`` branch returned the
+  same tuple as the fallthrough.  Collapsed to a direction-
+  agnostic helper (matches the real semantics: call edges have
+  fixed caller→callee orientation regardless of walk direction)
+  and documented the invariant.
+
+**Optimisations:**
+
+- ``XbrEditor.replace_string_in_tag`` now calls
+  ``bytearray.find(needle, lo, hi)`` directly on the in-memory
+  buffer instead of copying each TOC entry into a new ``bytes``
+  before searching.  Drops allocations to zero on this path.
+
+**Level-preview rework (``xbe_tools.level_preview``):**
+
+Complete rewrite.  The first version emitted *"50 sample
+position triples (e.g. (0,0,0))"* and *"strings: 'tdBg~T^',
+'dBb!', 'P|v&['"* — i.e. noise the user had to mentally
+filter.  The new version emits **structured, mod-actionable
+categories**:
+
+- `level_connections`  — ``levels/<elem>/<name>`` (portal
+  graph / adjacency).
+- `asset_references`   — ``characters/.../...`` etc.
+- `localisation_keys`  — ``loc/<lang>/<path>``.
+- `cutscene_refs`       — ``bink:<name>.bik``.
+- `identifiers`         — ``snake_case`` two-word+ identifiers.
+- `raw_strings`         — opt-in catch-all with strict quality
+  filter (high-alphanumeric ratio, no repeating runs).
+
+Only string-bearing TOC tags (``node``, ``levl``) are scanned;
+binary-heavy tags (``rdms``, ``surf``, ``tern``, ``wave``,
+``sdsr``) are skipped for both performance and noise.  28 ms
+per 60 MiB level (was seconds and mostly junk).
+
+The `sample_positions` feature was removed.  Every scan
+produced (0,0,0) / (0,0,1) / tiny-float noise without a way
+to distinguish signal; a proper spatial preview belongs in a
+structured parser that understands vertex-count headers, not a
+byte-level scan.
+
+**Cleanup:**
+
+- Removed unused imports (``field``, ``Sequence``) from
+  ``struct_diff``, ``asset_fingerprint``, ``bink_extract``,
+  ``level_preview``.
+
+**Tests:** 9 new regression tests.  651 pass (was 642).
+
+---
+
 ### Next-wave tooling (#17 – #26) shipped
 
 All ten next-wave tools from ``docs/TOOLING_ROADMAP.md`` land in

@@ -201,22 +201,24 @@ def build_call_graph(client: GhidraClient, *,
 
 
 def _orient_edge(edge: GhidraXref,
-                 direction: Direction
+                 direction: Direction,
                  ) -> tuple[int | None, int | None]:
-    """Return ``(src, dst)`` in *logical* direction.
+    """Return ``(src, dst)`` in program-semantic order.
 
-    For a forward walk we want the caller on the left (src) and
-    callee on the right (dst), regardless of which side of the
-    edge the traversal started from.  Collapsing intra-function
-    calls onto their enclosing function VAs keeps the graph small
-    and readable.
+    Regardless of which side of the edge the traversal started
+    from, ``src`` is always the caller (or data-emitter) and
+    ``dst`` is always the callee (or data target).  Intra-
+    function calls collapse onto their enclosing function VAs
+    so the graph stays small and readable.
+
+    ``direction`` is only used by the caller to decide which
+    frontier side to chase — the edge itself has a fixed
+    call/data orientation regardless of walk direction.
     """
+    del direction  # kept for API clarity; semantic is direction-agnostic
     caller_va = edge.from_function_va or edge.from_addr
     callee_va = edge.to_function_va or edge.to_addr
-    if direction == "forward":
-        return caller_va, callee_va
-    return caller_va, callee_va  # semantic is the same; the
-    # frontier selection below handles direction.
+    return caller_va, callee_va
 
 
 def _annotate_node(client: GhidraClient, graph: CallGraph,

@@ -196,16 +196,20 @@ class XbrEditor:
                 f"search string {old!r} contains non-ASCII "
                 f"characters")
         search_bytes = old.encode("ascii") + b"\x00"
+        # ``bytearray.find(needle, lo, hi)`` scans in-place with
+        # no copy, so this stays O(N) total across every TOC
+        # entry rather than O(sum(entry_size)) with per-entry
+        # copies on the old implementation.
         regions = self._entry_regions(tag)
         matches: list[int] = []
+        buf = self._data
         for start, end in regions:
-            window = bytes(self._data[start:end])
-            idx = 0
+            idx = start
             while True:
-                hit = window.find(search_bytes, idx)
+                hit = buf.find(search_bytes, idx, end)
                 if hit < 0:
                     break
-                matches.append(start + hit)
+                matches.append(hit)
                 idx = hit + 1
         if occurrence >= len(matches):
             raise XbrEditError(

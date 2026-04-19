@@ -627,38 +627,108 @@ class XbrEditorCore(unittest.TestCase):
 
 
 class LevelPreviewSynthetic(unittest.TestCase):
-    def test_preview_collects_strings_per_tag(self) -> None:
-        data = _build_synthetic_xbr([
-            ("node", b"hello_node\x00spawn_point_1\x00"),
-            ("surf", b"surface_mesh_a\x00surface_mesh_b\x00"),
-        ])
-        tmp = Path(tempfile.mkdtemp(prefix="azurik-lvl-"))
-        self.addCleanup(
-            lambda: __import__("shutil").rmtree(
-                tmp, ignore_errors=True))
-        xbr_path = tmp / "synth.xbr"
-        xbr_path.write_bytes(data)
-        preview = preview_level(xbr_path)
-        by_tag = {s.tag: s for s in preview.summaries}
-        self.assertIn("node", by_tag)
-        self.assertIn("surf", by_tag)
-        self.assertIn(
-            "hello_node", by_tag["node"].sample_strings)
-        self.assertIn(
-            "surface_mesh_a", by_tag["surf"].sample_strings)
+    """Pin the structured-category behaviour of the preview.
 
-    def test_format_preview_is_stable(self) -> None:
-        data = _build_synthetic_xbr([
-            ("node", b"abc\x00def\x00"),
-        ])
-        tmp = Path(tempfile.mkdtemp(prefix="azurik-lvl-"))
+    The preview categorises strings into ``level_connections``,
+    ``asset_references``, ``localisation_keys``,
+    ``cutscene_refs``, ``identifiers`` and (opt-in)
+    ``raw_strings``.  These tests exercise each bucket with a
+    synthetic XBR so the regex suite stays honest.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="azurik-lvl-"))
         self.addCleanup(
             lambda: __import__("shutil").rmtree(
-                tmp, ignore_errors=True))
-        xbr_path = tmp / "synth.xbr"
-        xbr_path.write_bytes(data)
-        rendered = format_preview(preview_level(xbr_path))
-        self.assertIn("[node]", rendered)
+                self.tmp, ignore_errors=True))
+
+    def _write(self, name: str, entries: list) -> Path:
+        path = self.tmp / name
+        path.write_bytes(_build_synthetic_xbr(entries))
+        return path
+
+    def test_structured_categories_extracted(self) -> None:
+        # Cram every category into one ``node`` entry so we can
+        # verify the regex suite at once.
+        body = (b"prefix\x00"
+                b"levels/earth/e6\x00"
+                b"characters/key_air1/fx/fx_key_air1\x00"
+                b"loc/english/popups/seal_air\x00"
+                b"bink:airship2.bik\x00"
+                b"water_elemental\x00"
+                b"garbage!!!"
+                b"\x00")
+        path = self._write("synth_node.xbr", [("node", body)])
+        preview = preview_level(path)
+        self.assertIn("levels/earth/e6", preview.level_connections)
+        self.assertIn(
+            "characters/key_air1/fx/fx_key_air1",
+            preview.asset_references)
+        self.assertIn(
+            "loc/english/popups/seal_air",
+            preview.localisation_keys)
+        self.assertIn(
+            "bink:airship2.bik", preview.cutscene_refs)
+        self.assertIn("water_elemental", preview.identifiers)
+        # Raw bucket stays empty by default.
+        self.assertEqual(preview.raw_strings, ())
+
+    def test_binary_tags_are_skipped_for_strings(self) -> None:
+        # Stuff an asset path into a binary tag — it should NOT
+        # appear anywhere in the structured categories because we
+        # skip binary tags during string scanning.
+        path = self._write("synth_binary.xbr", [
+            ("rdms", b"characters/secret/should_not_appear\x00"),
+        ])
+        preview = preview_level(path)
+        self.assertEqual(preview.asset_references, ())
+        # But the TOC stats should still surface the tag.
+        by_tag = {s.tag: s for s in preview.tag_stats}
+        self.assertIn("rdms", by_tag)
+        self.assertEqual(by_tag["rdms"].classification, "binary")
+
+    def test_unknown_tag_is_flagged(self) -> None:
+        path = self._write("synth_unknown.xbr", [
+            ("zzzz", b"some_payload\x00"),
+        ])
+        preview = preview_level(path)
+        by_tag = {s.tag: s for s in preview.tag_stats}
+        self.assertEqual(by_tag["zzzz"].classification, "unknown")
+
+    def test_include_raw_surfaces_quality_strings(self) -> None:
+        path = self._write("synth_raw.xbr", [
+            ("node", b"AirshipBalthazaar_killed\x00"
+                     b"!!!garbage...\x00"),
+        ])
+        preview = preview_level(path, include_raw=True)
+        self.assertIn(
+            "AirshipBalthazaar_killed", preview.raw_strings)
+        # Garbage (high-punctuation) should NOT pass the filter.
+        self.assertNotIn("!!!garbage...", preview.raw_strings)
+
+    def test_format_preview_stable_layout(self) -> None:
+        path = self._write("synth_fmt.xbr", [
+            ("node", b"levels/air/a1\x00water_elemental\x00"),
+        ])
+        rendered = format_preview(preview_level(path))
+        for heading in ("TOC roll-up",
+                        "Level connections",
+                        "Localisation keys",
+                        "Cutscenes",
+                        "Asset references",
+                        "Identifiers"):
+            self.assertIn(heading, rendered,
+                          msg=f"missing heading: {heading}")
+
+    def test_quality_filter_rejects_repeated_runs(self) -> None:
+        # 4+ identical chars in a row is the fingerprint of
+        # garbage bytes passing the ASCII-printable filter.
+        path = self._write("synth_runs.xbr", [
+            ("node", b"UUUU33DDDDDD\x00real_name_here\x00"),
+        ])
+        preview = preview_level(path, include_raw=True)
+        self.assertIn("real_name_here", preview.identifiers)
+        self.assertNotIn("UUUU33DDDDDD", preview.raw_strings)
 
 
 # ---------------------------------------------------------------------------
@@ -669,7 +739,8 @@ class LevelPreviewSynthetic(unittest.TestCase):
 class BinkExtractPlanner(unittest.TestCase):
     """``plan_frame_extraction`` must never crash even when
     ffmpeg isn't on PATH; ``describe_bink`` must survive short
-    malformed files with a :class:`ValueError`."""
+    malformed files with a :class:`ValueError` and auto-detect
+    the audio-track layout."""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="azurik-bik-"))
@@ -696,6 +767,152 @@ class BinkExtractPlanner(unittest.TestCase):
         self.assertIn(plan.tool, {"ffmpeg", "none"})
         self.assertTrue(plan.reason)
         self.assertEqual(plan.available, bool(plan.command))
+
+    def test_describe_bink_auto_detects_audio_track_size(self
+                                                        ) -> None:
+        """Regression guard for the 16-vs-12-byte audio-track
+        layout.  Builds a minimal synthetic Bink header with one
+        audio track, picks audio-bytes/track = 16, and verifies
+        ``describe_bink`` doesn't mis-decode the offset table."""
+        from azurik_mod.xbe_tools.bink_extract import describe_bink
+        frame_count = 3
+        audio_track_count = 1
+        audio_bytes_per_track = 16
+        # Fixed header: 0x2C bytes.  struct-pack the BinkInfo
+        # fields the way inspect_bink_file expects them.
+        header = struct.pack(
+            "<4s10I",
+            b"BIKi",
+            0,              # declared_size
+            frame_count,    # frame_count slot a
+            0,              # max_frame_bytes
+            frame_count,    # frame_count slot b
+            640, 480,       # width, height
+            30, 1,          # rate num/den
+            0,              # flags
+            audio_track_count,
+        )
+        audio_block = b"\x00" * (
+            audio_bytes_per_track * audio_track_count)
+        table_start = len(header) + len(audio_block)
+        # (frame_count + 1) offsets.  First frame immediately
+        # after the table; subsequent stepped 100 B apart.
+        first = table_start + 4 * (frame_count + 1)
+        offsets = [first + 100 * i
+                   for i in range(frame_count + 1)]
+        # Flag first frame as keyframe via low bit.
+        offsets[0] |= 1
+        table = struct.pack(f"<{frame_count + 1}I", *offsets)
+        # Payload sized so the sentinel lands inside the file.
+        payload_size = offsets[-1] - first
+        payload = b"\x00" * payload_size
+        blob = header + audio_block + table + payload
+        p = self.tmp / "synth.bik"
+        p.write_bytes(blob)
+        frames = describe_bink(p)
+        self.assertEqual(len(frames.offsets), frame_count)
+        self.assertIn(0, frames.keyframes)
+        self.assertEqual(
+            frames.offsets[0], first & ~1)
+
+
+class BinkSupportsTwelveByteTracks(unittest.TestCase):
+    """Auto-detect must fall back to 12-byte tracks when the
+    16-byte layout doesn't fit (older Bink revisions do this)."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="azurik-bik-"))
+        self.addCleanup(
+            lambda: __import__("shutil").rmtree(
+                self.tmp, ignore_errors=True))
+
+    def test_12_byte_audio_track_layout(self) -> None:
+        from azurik_mod.xbe_tools.bink_extract import describe_bink
+        frame_count = 2
+        audio_bytes_per_track = 12
+        header = struct.pack(
+            "<4s10I",
+            b"BIKi", 0, frame_count, 0, frame_count,
+            320, 240, 30, 1, 0, 1)
+        audio_block = b"\x00" * audio_bytes_per_track
+        table_start = len(header) + len(audio_block)
+        first = table_start + 4 * (frame_count + 1)
+        offsets = [first + 50 * i
+                   for i in range(frame_count + 1)]
+        table = struct.pack(f"<{frame_count + 1}I", *offsets)
+        payload = b"\x00" * (offsets[-1] - first)
+        p = self.tmp / "synth12.bik"
+        p.write_bytes(header + audio_block + table + payload)
+        frames = describe_bink(p)
+        self.assertEqual(len(frames.offsets), frame_count)
+
+
+class CallGraphOrientation(unittest.TestCase):
+    """``_orient_edge`` must return caller/callee in semantic
+    order regardless of traversal direction.  The old code had
+    a dead branch that happened to work but suggested the two
+    directions would produce different orientations."""
+
+    def test_direction_does_not_flip_edge(self) -> None:
+        from azurik_mod.xbe_tools.call_graph import _orient_edge
+        edge = GhidraXref(
+            from_addr=0x2000, to_addr=0x1000,
+            ref_type="UNCONDITIONAL_CALL",
+            from_instruction="CALL 0x00001000",
+            from_function_va=0x2000,
+            from_function_name="caller",
+            to_function_va=0x1000,
+            to_function_name="callee",
+        )
+        forward = _orient_edge(edge, "forward")
+        reverse = _orient_edge(edge, "reverse")
+        self.assertEqual(forward, (0x2000, 0x1000))
+        self.assertEqual(forward, reverse)
+
+
+class DecompCacheAtomicWrites(unittest.TestCase):
+    """The on-disk cache must never leave a ``.tmp`` turd behind
+    after a successful write, and must recover cleanly when a
+    previous write was interrupted (represented here as a
+    half-finished JSON file)."""
+
+    def setUp(self) -> None:
+        self.mock = MockGhidraServer()
+        self.mock.start()
+        self.addCleanup(self.mock.stop)
+        self.mock.register_function(0x1000, "FN")
+        self.mock.register_decomp(0x1000, "/* body */")
+        self.client = GhidraClient(
+            port=self.mock.port, timeout=30.0)
+        self.tmp = Path(tempfile.mkdtemp(prefix="azurik-atom-"))
+        self.addCleanup(
+            lambda: __import__("shutil").rmtree(
+                self.tmp, ignore_errors=True))
+
+    def test_no_tmp_file_remains_after_write(self) -> None:
+        cache = DecompCache(
+            client=self.client,
+            program_key=program_cache_key("atomic"),
+            root=self.tmp)
+        cache.get(0x1000)
+        # Filesystem listing should contain only the .json, no
+        # leftover .tmp from the atomic rename.
+        files = list(cache.program_dir().iterdir())
+        suffixes = {f.suffix for f in files}
+        self.assertEqual(suffixes, {".json"})
+
+    def test_corrupt_cache_entry_is_refetched(self) -> None:
+        cache = DecompCache(
+            client=self.client,
+            program_key=program_cache_key("corrupt"),
+            root=self.tmp)
+        cache.program_dir().mkdir(parents=True)
+        # Write a truncated JSON blob — should be treated as a
+        # miss, not raised to the caller.
+        (cache.program_dir() / "00001000.json").write_text(
+            "{incomplete", encoding="utf-8")
+        decomp = cache.get(0x1000)
+        self.assertIn("body", decomp.decompiled)
 
 
 if __name__ == "__main__":
