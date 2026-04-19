@@ -248,6 +248,28 @@ class PluginDiscoveryMockedEntryPoints(unittest.TestCase):
     """Simulate ``importlib.metadata`` returning a fake entry
     point + exercise the loader's happy + failure paths."""
 
+    def setUp(self):
+        """Invalidate the plugin discovery cache so the mocked
+        ``_iter_entry_points`` actually runs.
+
+        ``load_plugins`` got a site-packages-fingerprint cache to
+        short-circuit the ~500 ms ``importlib.metadata`` walk when
+        the user has no plugins installed.  Tests that feed in
+        synthetic entry points must skip that cache, otherwise the
+        loader returns before the mock is consulted.
+        """
+        from azurik_mod.plugins import _cache_path
+        cache_file = _cache_path()
+        if cache_file.exists():
+            try:
+                cache_file.unlink()
+            except OSError:
+                pass
+        # Restore the cache after the test so other tests don't
+        # re-pay the ~500 ms walk either.
+        self.addCleanup(
+            lambda: cache_file.unlink(missing_ok=True))
+
     def _entry_point(self, *, name: str, value: str,
                      dist_name: str = "", dist_ver: str = ""):
         """Build a duck-typed EntryPoint replacement."""

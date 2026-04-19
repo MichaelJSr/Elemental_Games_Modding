@@ -355,45 +355,64 @@ when the monitor is paused, suggesting either:
 
 We've run out of static recovery vectors.
 
-### Path forward (pragmatic)
+### Path forward (pragmatic) — SHIPPED
 
-Given that static recovery is exhausted, the actually-useful
-deliverable for mod authors is a **``qol_skip_save_signature``
-shim patch** that NOPs Azurik's signature-verify callsite so
-any ``.sav`` edit loads regardless of whether ``signature.sav``
-matches.
+The actually-useful deliverable here is the
+**``qol_skip_save_signature``** patch.  It's now shipped — tick
+it on the GUI's Patches tab (or pass via the CLI pack selector)
+and the verify callsite at VA ``0x0005C990`` gets rewritten to
+``MOV AL, 1 ; RET`` so any ``.sav`` edit loads regardless of
+whether ``signature.sav`` matches.
 
-Tracked in ``docs/TOOLING_ROADMAP.md``.  The verify site
-wasn't exposed by static xrefs (it's invoked through a method
-pointer / vtable); implementation needs runtime tracing in
-xemu to locate the exact callsite.  When built, it becomes the
-permanent "edit any save" workflow for mod users.
+Three-byte patch, 1 site, ``category="qol"``.  Full
+documentation lives in
+[``docs/PATCHES.md`` § ``qol_skip_save_signature``](PATCHES.md).
+Regression tests pin the end-to-end invariant:
+[``tests/test_qol_skip_save_signature.py``](../tests/test_qol_skip_save_signature.py).
+
+How it was found (April 2026 pass):
+
+- ``calculate_save_signature`` (the *write* side) lives at VA
+  ``0x0005C920`` — already in ``vanilla_symbols.py``.
+- Direct xrefs point only at its vtable slot (``0x0019E278``),
+  not at any call site, because the engine dispatches the
+  whole save-handling family through a function-pointer
+  table at ``0x0019E260``.
+- The ``"signature.sav"`` string at ``0x0019E290`` is
+  referenced by ``FUN_0005C4B0`` (the recursive tree-walker
+  that updates the HMAC) — that pointed us at the
+  sibling functions starting at ``0x0005C990``.
+- ``verify_save_signature`` at ``0x0005C990`` has the same
+  ``MOV AL, [ECX+0x20A]`` prologue as the sign function, runs
+  the HMAC, and does ``REPE CMPSD`` against the bytes read
+  from ``signature.sav``.  That's the verify callsite.
+- Overwriting the first 3 bytes with ``B0 01 C3``
+  (``MOV AL, 1 ; RET``) always-succeeds the check without
+  touching the write side.
 
 The key-recovery scanner
 (:mod:`azurik_mod.save_format.key_recover`) stays in the
-toolbox for future use: if someone finds the key via gdb-stub
-breakpoint on ``XCalculateSignatureBegin``'s ``MOV EAX, [0x18F4D4]``
-and hands us the 4-byte pointer, dereferencing that into the
-RAM dump may still yield the bytes.  Our dynamic-recovery
-scanner also finds the key in seconds when given a dump that
-*does* contain it (exhaustively tested via the 9 synthetic
-regression fixtures in ``test_save_key_recover.py``).
+toolbox as a second option — useful when you need a save to
+also load on a vanilla (unpatched) build, e.g. for
+distribution.  Dump xemu RAM with the ``pmemsave`` monitor
+command, run the scanner against your own ``.sav`` slots,
+and feed the recovered key to
+``azurik-mod save edit --xbox-signature-key HEX32``.
 
-### Three practical unblockers
+### Two practical unblockers
 
-1. **Round-trip through the game** (zero code, works today).
-   Edit the slot's text saves with
+1. **`qol_skip_save_signature` patch** (shipped; recommended).
+   Tick the pack in the GUI's Patches tab (or pass via
+   ``--packs qol_skip_save_signature`` in the CLI) and rebuild
+   the ISO.  Any edited save loads on the patched XBE.  Write-
+   side signing is unchanged so saves created on the patched
+   XBE also load on vanilla.
+2. **Round-trip through the game** (zero code, works on any
+   build).  Edit the slot's text saves with
    ``azurik-mod save edit``, drop the result back into
    ``UDATA\\4d530007\\<slot>\\``, boot the game, let it
    auto-save once — at that point the game re-signs with the
    correct console key.  Subsequent loads succeed.
-2. **`qol_skip_save_signature` shim** (future work).  NOP the
-   verify callsite so any save loads regardless of signature
-   validity.  The verify site wasn't exposed by the xref scan;
-   the whole ``signature.sav`` read path appears to be invoked
-   via a vtable / method-ptr call.  Requires runtime tracing
-   in xemu to locate.  Tracked in
-   ``docs/TOOLING_ROADMAP.md``.
 3. **Dynamic key recovery** — dump xemu RAM during a save
    operation (via xemu's debug monitor, ``gdb-stub``, or
    ``qemu -monitor``) and feed the dump to the built-in

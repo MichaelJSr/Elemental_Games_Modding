@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import os
 import struct
-import subprocess
 from pathlib import Path
+
+# ``subprocess`` is only used by ``_auto_compile_shim`` below, which
+# fires when a trampoline patch names a shim that hasn't been
+# built.  For the byte-patch-only code path (every ``qol_*``, every
+# ``fps_unlock`` site) we never need subprocess, so defer its import
+# to the callsite.  Skips ~125 ms of stdlib init on cold startup.
 
 from azurik_mod.patching.coff import (
     extract_shim_bytes,
@@ -406,6 +411,7 @@ def _auto_compile(
     expected_out.parent.mkdir(parents=True, exist_ok=True)
     print(f"  {label} — auto-compiling {src.name} "
           f"(AZURIK_SHIM_NO_AUTOCOMPILE=1 to disable)")
+    import subprocess  # deferred — see module header note
     try:
         subprocess.check_call(
             ["bash", str(script), str(src), str(expected_out)],

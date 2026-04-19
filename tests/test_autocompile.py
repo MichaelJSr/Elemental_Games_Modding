@@ -74,10 +74,15 @@ class AutoCompileDelegatesToShellScript(unittest.TestCase):
         self.src.write_text("int c_fake(void) { return 0; }\n")
         self.out = self.tmp / "fake.o"
 
+    # ``subprocess`` is now imported lazily inside ``_auto_compile``
+    # (so ``azurik_mod.patching.apply`` doesn't pay ~125 ms of
+    # stdlib init at module load for the byte-patch-only fast path).
+    # That means the old patch target
+    # ``azurik_mod.patching.apply.subprocess.check_call`` doesn't
+    # exist at patch time — patch the canonical ``subprocess.check_call``
+    # instead.  Same behaviour, works with both eager + deferred imports.
     def test_invokes_compile_sh_with_expected_argv(self):
-        with mock.patch(
-            "azurik_mod.patching.apply.subprocess.check_call"
-        ) as m:
+        with mock.patch("subprocess.check_call") as m:
             ok = _apply_mod._auto_compile(
                 self.src, self.out, _REPO_ROOT, "my-feature")
         self.assertTrue(ok)
@@ -100,7 +105,7 @@ class AutoCompileDelegatesToShellScript(unittest.TestCase):
 
     def test_returns_false_on_nonzero_compile_exit(self):
         with mock.patch(
-            "azurik_mod.patching.apply.subprocess.check_call",
+            "subprocess.check_call",
             side_effect=subprocess.CalledProcessError(1, "bash"),
         ):
             self.assertFalse(_apply_mod._auto_compile(

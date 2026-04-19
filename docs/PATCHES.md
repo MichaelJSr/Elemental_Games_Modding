@@ -47,6 +47,7 @@ register_category(Category(
 | `qol_gem_popups`     | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_gem_popups/](../azurik_mod/patches/qol_gem_popups/) |
 | `qol_other_popups`   | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_other_popups/](../azurik_mod/patches/qol_other_popups/) |
 | `qol_pickup_anims`   | 1     | no         | `qol`          | —             | [azurik_mod/patches/qol_pickup_anims/](../azurik_mod/patches/qol_pickup_anims/) |
+| `qol_skip_save_signature` | 1 | no         | `qol`          | save-edit, signature-bypass | [azurik_mod/patches/qol_skip_save_signature/](../azurik_mod/patches/qol_skip_save_signature/) |
 | `rand_major`         | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_keys`          | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_gems`          | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
@@ -180,6 +181,44 @@ The `NEG AL; SBB EAX, EAX; ADD EAX, 3; MOV [state], EAX` block at `0x05F6EA` is 
 **Escape hatch.**  Set `AZURIK_SKIP_LOGO_LEGACY=1` before applying to use the byte-level `PatchSpec` form instead.  That fallback rewrites the 10 bytes at VA `0x05F6E0` as `ADD ESP, 4; XOR AL, AL; NOP×5` — same semantics as the shim (pop the PUSH EBP leftover, force AL=0) but with no injected code.  Useful if the i386 PE-COFF toolchain (clang + `-target i386-pc-win32`) isn't available on the build host.
 
 The adjacent call to `prophecy.bik` uses the same calling pattern at VA 0x05F73F.  Adding a parallel `qol_skip_prophecy` pack is a trivial follow-up — another 5-byte trampoline with the same shim reused, or its own byte-level `ADD ESP, 4 + XOR AL, AL` patch.
+
+### `qol_skip_save_signature` (opt-in: Patches tab → QoL → `qol_skip_save_signature`)
+
+Bypasses the HMAC-SHA1 signature check the save-file loader runs against every slot — lets `azurik-mod save edit`'s output load without re-signing, and makes save slots portable between consoles.
+
+**Why this matters.**  Azurik signs each save with HMAC-SHA1 keyed by `XboxSignatureKey` — a runtime kernel global that lives in heap memory, is not statically recoverable, and differs per console / firmware.  Without this patch the only ways to produce a loadable edited save are:
+
+1. Recover the key dynamically via `azurik-mod save key-recover` against an xemu RAM dump (per-session chore).
+2. Round-trip through the game (write → let game save → load → write again).
+3. Run on softmodded hardware / modified kernels that skip the check.
+
+With this patch applied, **none of those are needed** — any save loads regardless of signature.
+
+**The patch itself.**  Three bytes at VA `0x0005C990`, the prologue of `verify_save_signature`:
+
+```asm
+; Vanilla (first 3 bytes of a longer prologue):
+0x5C990: 8A 81 0A 02 00 00    MOV AL, [ECX+0x20A]   ; flag byte
+0x5C996: 83 EC 28             SUB ESP, 0x28
+         ...                   ; HMAC compute + REPE CMPSD against signature.sav
+
+; Patched (3-byte overwrite):
+0x5C990: B0 01                MOV AL, 1             ; always report "verified"
+0x5C992: C3                   RET
+0x5C993: 02 00 00 ...          ; dead bytes (never reached)
+```
+
+The vanilla code already contains a `CMP AL, 0x7A` ("skip if first path char is `'z'`") bypass further down — we just force that bypass unconditionally by returning AL=1 before the SUB ESP / stack setup runs.  Zero stack imbalance (no push yet), zero calling-convention risk (`__thiscall` doesn't require callee-preserved EDI/ESI when they weren't pushed).
+
+**What's untouched.**  `calculate_save_signature` (the sibling *write* function at VA `0x0005C920`) is left vanilla.  The game still computes a real signature when saving, so saves created on a patched XBE also load on a vanilla XBE.  The asymmetry is intentional.
+
+**Verify with:**
+
+```bash
+azurik-mod verify-patches --xbe patched.xbe --original stock.xbe --strict
+```
+
+Expected delta: exactly **3 bytes** at file offset `0x0004C990..0x0004C992` (`8A 81 0A` → `B0 01 C3`).  Any other diff means another pack ran.  [`tests/test_qol_skip_save_signature.py`](../tests/test_qol_skip_save_signature.py) pins this end-to-end against the vanilla XBE.
 
 ### Player character swap (`--player-character <name>`)
 

@@ -47,6 +47,12 @@ from azurik_mod.patches.qol_skip_logo import (
     SKIP_LOGO_TRAMPOLINE,
     apply_skip_logo_patch,
 )
+from azurik_mod.patches.qol_skip_save_signature import (
+    ALWAYS_ACCEPT_SIG_SPEC,
+    AZURIK_VERIFY_SAVE_SIG_VA,
+    SKIP_SAVE_SIG_SITES,
+    apply_skip_save_signature_patch,
+)
 from azurik_mod.patches.enable_dev_menu import (
     DEV_MENU_SITES,
     apply_enable_dev_menu_patch,
@@ -91,6 +97,8 @@ if not _os.environ.get("AZURIK_NO_PLUGINS"):
 
 
 __all__ = [
+    "ALWAYS_ACCEPT_SIG_SPEC",
+    "AZURIK_VERIFY_SAVE_SIG_VA",
     "FPS_DATA_PATCHED_VAS",
     "FPS_PATCH_SITES",
     "FPS_SAFETY_CRITICAL_SITES",
@@ -104,6 +112,7 @@ __all__ = [
     "SKIP_LOGO_LEGACY_SPEC",
     "SKIP_LOGO_SPEC",
     "SKIP_LOGO_TRAMPOLINE",
+    "SKIP_SAVE_SIG_SITES",
     "WALK_SPEED_SCALE",
     "apply_fps_patches",
     "apply_gem_popups_patch",
@@ -114,4 +123,5 @@ __all__ = [
     "apply_player_speed",
     "apply_qol_patches",
     "apply_skip_logo_patch",
+    "apply_skip_save_signature_patch",
 ]

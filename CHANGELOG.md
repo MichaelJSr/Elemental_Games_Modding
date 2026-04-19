@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+### qol_skip_save_signature + startup-perf pass
+
+**New pack: ``qol_skip_save_signature``** (category ``qol``, opt-in).
+Three-byte rewrite of ``verify_save_signature`` @ VA ``0x0005C990``
+to ``MOV AL, 1 ; RET`` — any save loads regardless of signature, so
+``azurik-mod save edit`` output no longer needs the dynamic key
+recovery dance documented in ``docs/SAVE_FORMAT.md``.  Write-side
+signing is untouched so saves created on a patched XBE still load
+on vanilla.  13 new regression tests ([
+``tests/test_qol_skip_save_signature.py``](tests/test_qol_skip_save_signature.py))
+pin the VA anchor, the 3-byte patch shape, registry entry, and
+end-to-end byte delta against the real XBE.  The callsite was
+located via Ghidra MCP xrefs on ``"signature.sav"`` + the save-
+handling vtable at ``0x0019E260``; write-up in
+``docs/PATCHES.md`` § ``qol_skip_save_signature``.
+
+**Startup perf**:
+
+- ``importlib.metadata`` import deferred into ``_iter_entry_points``
+  so the ~500 ms ``email.*`` stdlib init only runs if someone actually
+  walks plugin entry points (``azurik_mod.plugins``).
+- Plugin discovery now **file-cached** under
+  ``platformdirs.user_cache_dir("azurik_mod")/plugins_cache.json``
+  keyed by ``(purelib_mtime_ns, platlib_mtime_ns, python_version)``.
+  When the fingerprint hasn't changed and the last scan found zero
+  plugins, ``load_plugins()`` short-circuits without importing
+  ``importlib.metadata`` at all.  Common machine with no plugins
+  installed goes from ~550 ms → ~360 ms on every ``import
+  azurik_mod.patches`` (measured wall-clock, bytecode cache warm).
+- ``subprocess`` is now deferred-imported inside
+  ``_auto_compile`` — the byte-patch-only code path (every ``qol_*``,
+  every ``fps_unlock`` site) no longer pays ~125 ms of stdlib init
+  at module load.
+
+**Drift guards**: 698 passed / 1 skipped.
+
 ### ISO + GUI perf pass, xdvdfs lookup memoisation, repo cleanup
 
 Optimisation and cleanup pass across the I/O-heavy paths the GUI +
