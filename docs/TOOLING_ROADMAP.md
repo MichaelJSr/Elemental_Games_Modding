@@ -305,55 +305,88 @@ nice failure messages.
 
 ---
 
-## Tier 3 — Speculative (moderate or delayed ROI)
+## Tier 3 — Shipped (mostly)
 
 ### 11. RE session recorder
 
-Capture every Ghidra MCP call + response during an exploration
-session to `docs/re-sessions/<date>.md` as an annotated journal.
-Makes "what did we figure out last month?" a grep instead of a
-transcript archaeology expedition.
+Status: **shipped** (see
+`azurik_mod/xbe_tools/re_recorder.py`).
+
+:class:`RecordingGhidraClient` wraps a :class:`GhidraClient`
+and journals every method call to a :class:`SessionLog` as
+Markdown.  `SessionLog.note(text)` inserts free-text
+annotations in-line with the call stream so contextual
+findings sit near the queries that produced them.
+
+Auto-flushes to disk when `log_path=` is supplied; call
+``log.write(path)`` later for in-memory-only sessions.
+Protects the "what did we figure out last month?" workflow
+— transcripts become greppable instead of archaeology.
 
 ### 12. Level XBR diff tool
 
-`azurik-mod xbr diff w1.xbr w1_modded.xbr` — structural diff of
-two level files showing added/removed entities, moved portals,
-changed pickups.  Essential if multi-file mods ever become a
-thing.
+Status: **shipped** (see
+`azurik_mod/xbe_tools/xbr_diff.py`).
+
+``azurik-mod xbr diff A.xbr B.xbr`` — structural diff showing:
+
+- TOC changes (tags added / removed / resized)
+- Per-tag total-byte deltas (quick "what moved" signal)
+- String additions / removals inside each tag (portals,
+  asset paths, texture refs)
+
+Works at structural level — deliberately ignores per-record
+coordinate drift which would drown out meaningful changes.
+Exit code 0 when files match, 1 otherwise — CI-friendly.
 
 ### 13. Bink movie metadata dumper
 
-Parse `movies/*.bik` headers: resolution, frame count, duration,
-audio codec.  Low code cost, occasional RE value when
-rebalancing boot-time cutscenes.
+Status: **shipped** (see
+`azurik_mod/xbe_tools/bink_info.py`).
+
+``azurik-mod movies info PATH`` — parses the first 44 bytes
+of each ``.bik`` file (BIKi / Bink 1.9 header).  Reports
+resolution, frame count, frame rate, duration, audio-track
+count, max-frame size, video flags.  Directory-mode
+aggregates every movie into a formatted table with totals.
+
+Vanilla ISO: 14 Bink files, all 640×480 @ 30 fps, totalling
+~630 MB / 22 min of playback.
 
 ### 14. Audio asset dump (from `wave` tags in `fx.xbr`)
 
-Extract the embedded audio blobs from `fx.xbr`'s `wave` TOC
-entries.  Unlocks sound-replacement mods.  Not useful until
-someone decodes the wave header format.
+Status: **deferred**.  Extracting the embedded audio blobs
+from `fx.xbr`'s ``wave`` TOC entries is straightforward;
+interpreting them is not — no one's decoded Azurik's wave
+header format yet.  Re-open when someone has time to RE the
+header OR when audio replacement becomes a user ask.
 
 ### 15. Ghidra snapshot exporter
 
-Dump every function name / label / comment / struct from the
-open Ghidra project to a JSON file committed in
-`docs/ghidra-snapshot.json`.  Gives us:
+Status: **shipped** (see
+`azurik_mod/xbe_tools/ghidra_snapshot.py`).
 
-- Offline reference when Ghidra isn't running
-- Diff over time (did someone auto-analyze-overwrite my nice
-  names?)
-- Input to the coverage-report tool (#2) when not attached to
-  a live MCP
+``azurik-mod ghidra-snapshot snapshot.json`` — dumps
+function + label state from a live Ghidra instance to a
+JSON file matching the schema ``ghidra_coverage`` already
+loads.  Default-named Ghidra labels (`FUN_*` / `LAB_*` /
+`DAT_*`) are filtered by default to keep snapshot size
+committable (~50 KB filtered vs ~1.2 MB raw).
 
-Risk: snapshot file could become massive (10k+ functions).
-Probably scope to just named + commented symbols.
+Use cases: offline ``ghidra-coverage`` runs, diff-over-time
+audits of hand-assigned names, version-controlled ground
+truth for tests.
 
 ### 16. Plugin-pack distribution
 
-Turn each feature folder into a PyPI-installable plugin (entry-
-point group `azurik_mod.patches`) so third-party modders can
-ship their packs as standalone installables rather than
-upstream PRs.
+Status: **not started**.  Would turn each feature folder into
+a PyPI-installable plugin using entry-point group
+``azurik_mod.patches`` so third-party modders can ship packs
+as standalone installables rather than upstream PRs.
+Requires designing a stable ABI for external packs + wiring
+``pkg_resources`` discovery into the registry.  Scope-heavy;
+defer until there's a concrete third-party pack to validate
+against.
 
 ---
 
@@ -377,12 +410,12 @@ upstream PRs.
 | 8 | Entity diff                 | 4     | 1    | 7   | **shipped** |
 | 9 | Test selector               | 4     | 1    | 7   | **shipped** |
 |10 | VA-drift pin helper         | 3     | 1    | 6   | **shipped** |
-|11 | RE session recorder         | 5     | 4    | 5   | maybe    |
-|12 | Level XBR diff              | 3     | 2    | 5   | maybe    |
-|13 | Bink metadata               | 2     | 1    | 4   | maybe    |
-|14 | Audio asset dump            | 3     | 4    | 3   | speculative |
-|15 | Ghidra snapshot exporter    | 5     | 2    | 6   | maybe    |
-|16 | Plugin pack distribution    | 4     | 3    | 5   | speculative |
+|11 | RE session recorder         | 5     | 4    | 5   | **shipped** |
+|12 | Level XBR diff              | 3     | 2    | 5   | **shipped** |
+|13 | Bink metadata               | 2     | 1    | 4   | **shipped** |
+|14 | Audio asset dump            | 3     | 4    | 3   | deferred |
+|15 | Ghidra snapshot exporter    | 5     | 2    | 6   | **shipped** |
+|16 | Plugin pack distribution    | 4     | 3    | 5   | not started |
 
 The top three shipped today deliver ≥25 minutes of saved time
 per RE session, based on real measurement against the

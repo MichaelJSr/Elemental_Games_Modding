@@ -178,14 +178,24 @@ class ShippedPackCategorisation(unittest.TestCase):
         # Keep the global registry populated (don't clear_registry).
         import azurik_mod.patches  # noqa: F401
 
-    def test_fps_unlock_is_experimental(self):
-        """fps_unlock was moved from ``performance`` → ``experimental``
-        because it can trigger a pre-existing D3D push-buffer BSOD on
-        player death + visual-timing drift in a few subsystems we
-        don't patch.  The dedicated ``experimental`` category
-        signals "opt-in at your own risk" to users."""
+    def test_fps_unlock_is_performance(self):
+        """fps_unlock lives in ``performance`` — it's the flagship
+        performance mod.  The original D3D-BSOD-on-death concern
+        turned out to be a pre-existing engine bug unrelated to
+        the patch (reproducible on vanilla 30 FPS too), so the
+        patch stays in the expected category.  The ``experimental``
+        slot is reserved for patches that fundamentally change
+        game behaviour (e.g. ``enable_dev_menu``)."""
         from azurik_mod.patching.registry import get_pack
-        self.assertEqual(get_pack("fps_unlock").category, "experimental")
+        self.assertEqual(get_pack("fps_unlock").category, "performance")
+
+    def test_enable_dev_menu_is_experimental(self):
+        """``enable_dev_menu`` bypasses the vanilla New Game flow
+        and can corrupt saves — it belongs in the opt-in
+        experimental bucket."""
+        from azurik_mod.patching.registry import get_pack
+        self.assertEqual(
+            get_pack("enable_dev_menu").category, "experimental")
 
     def test_randomizer_pools_are_in_randomize(self):
         """All five shuffle pools live in the ``randomize`` category
@@ -244,27 +254,29 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         self.assertNotIn("other", browser.tabs())
 
     def test_tabs_in_category_order(self):
-        """Shipped packs produce 5 tabs, in the registered
-        Category.order order: player (20) → boot (30) → qol (40)
-        → randomize (50) → experimental (80).  The ``performance``
-        tab is hidden because no packs currently live there."""
+        """Shipped packs produce 6 tabs, in the registered
+        Category.order order: performance (10) → player (20) →
+        boot (30) → qol (40) → randomize (50) → experimental (80).
+        """
         from azurik_mod.patching.registry import all_packs
         from gui.widgets import PackBrowser
         browser = PackBrowser(self._root, all_packs(), {})
         self.assertEqual(
             browser.tabs(),
-            ["player", "boot", "qol", "randomize", "experimental"])
+            ["performance", "player", "boot", "qol",
+             "randomize", "experimental"])
 
     def test_tab_titles_humanised(self):
         from azurik_mod.patching.registry import all_packs
         from gui.widgets import PackBrowser
         browser = PackBrowser(self._root, all_packs(), {})
         titles = browser.tab_titles()
-        self.assertEqual(titles[0], "Player")
-        self.assertIn("Boot", titles[1])
-        self.assertIn("Quality of Life", titles[2])
-        self.assertEqual(titles[3], "Randomize")
-        self.assertEqual(titles[4], "Experimental")
+        self.assertEqual(titles[0], "Performance")
+        self.assertEqual(titles[1], "Player")
+        self.assertIn("Boot", titles[2])
+        self.assertIn("Quality of Life", titles[3])
+        self.assertEqual(titles[4], "Randomize")
+        self.assertEqual(titles[5], "Experimental")
 
     def test_parametric_sliders_rendered_inside_their_tab(self):
         """``player_physics`` lives in the Player tab AND exposes 3

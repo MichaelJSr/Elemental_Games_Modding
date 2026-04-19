@@ -505,11 +505,6 @@ FEATURE = register_feature(Feature(
     apply=apply_fps_patches,
     default_on=False,
     included_in_randomizer_qol=False,
-    # Moved out of ``performance`` into ``experimental`` — the 60 FPS
-    # patch can trigger a pre-existing engine bug on player death that
-    # manifests as a D3D BSOD, plus visual timing drift in a few
-    # subsystems that we don't statically patch (see
-    # docs/LEARNINGS.md § Known limitations).  Opt-in only.
-    category="experimental",
+    category="performance",
     tags=("fps",),
 ))

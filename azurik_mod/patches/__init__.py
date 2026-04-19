@@ -47,6 +47,10 @@ from azurik_mod.patches.qol_skip_logo import (
     SKIP_LOGO_TRAMPOLINE,
     apply_skip_logo_patch,
 )
+from azurik_mod.patches.enable_dev_menu import (
+    DEV_MENU_SITES,
+    apply_enable_dev_menu_patch,
+)
 
 # ``randomize`` has no byte patches — it surfaces the randomizer
 # shuffle pools as ``Feature(category="randomize")`` entries so

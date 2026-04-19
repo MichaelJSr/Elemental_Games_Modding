@@ -656,6 +656,62 @@ def main() -> None:
     p_xbri.add_argument("--json", action="store_true",
         help="Machine-readable output")
 
+    p_xbrd = _xbr_sub.add_parser(
+        "diff",
+        help="Structural diff between two XBR files")
+    p_xbrd.add_argument("path_a", help="First XBR")
+    p_xbrd.add_argument("path_b", help="Second XBR")
+    p_xbrd.add_argument("--min-len", type=int, default=6,
+        help="Minimum ASCII run length for string-diff (default 6)")
+    p_xbrd.add_argument("--max-strings", type=int, default=40,
+        help="Cap on per-tag string changes shown (default 40)")
+    p_xbrd.add_argument("--json", action="store_true")
+
+    # ------------------------------------------------------------------
+    # ghidra-snapshot (tier 3 #15)
+    # ------------------------------------------------------------------
+    p_gsn = sub.add_parser(
+        "ghidra-snapshot",
+        help="Dump Ghidra function + label state to a JSON "
+             "snapshot (consumed by ghidra-coverage offline)",
+        description=(
+            "Pulls every function + symbol from a running Ghidra\n"
+            "instance and writes a JSON file matching the schema\n"
+            "azurik_mod.xbe_tools.ghidra_coverage.load_ghidra_snapshot\n"
+            "expects.  Default-named Ghidra labels (FUN_* / LAB_*\n"
+            "/ DAT_*) are filtered out to keep the snapshot size\n"
+            "reasonable (~50 KB vs ~1.2 MB raw)."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_gsn.add_argument("path",
+        help="Output JSON file path")
+    p_gsn.add_argument("--host", default=None)
+    p_gsn.add_argument("--port", type=int, default=None,
+        help="Ghidra port (default 8193)")
+    p_gsn.add_argument("--keep-default-names", action="store_true",
+        help="Include FUN_* / LAB_* / DAT_* rows (default: drop them)")
+    p_gsn.add_argument("--no-labels", action="store_true",
+        help="Skip the labels section (functions-only snapshot)")
+
+    # ------------------------------------------------------------------
+    # movies info (tier 3 #13)
+    # ------------------------------------------------------------------
+    p_movies = sub.add_parser(
+        "movies",
+        help="Inspect Bink movies",
+        description="Tools for the game's `.bik` cutscene files.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _movies_sub = p_movies.add_subparsers(
+        dest="movies_command", required=True)
+    p_mi = _movies_sub.add_parser(
+        "info",
+        help="Print Bink header metadata")
+    p_mi.add_argument("path",
+        help="Path to a .bik file OR a directory (aggregates)")
+    p_mi.add_argument("--json", action="store_true")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -677,11 +733,13 @@ def main() -> None:
         "xbe": _dispatch_xbe,
         "ghidra-coverage": _dispatch_ghidra_coverage,
         "ghidra-sync": _dispatch_ghidra_sync,
+        "ghidra-snapshot": _dispatch_ghidra_snapshot,
         "shim-inspect": _dispatch_shim_inspect,
         "test-for-va": _dispatch_test_for_va,
         "plan-trampoline": _dispatch_plan_trampoline,
         "entity": _dispatch_entity,
         "xbr": _dispatch_xbr,
+        "movies": _dispatch_movies,
     }
     dispatch[args.command](args)
 
@@ -713,12 +771,28 @@ def _dispatch_entity(args) -> None:
 
 
 def _dispatch_xbr(args) -> None:
-    from azurik_mod.xbe_tools.commands import cmd_xbr_inspect
-    verbs = {"inspect": cmd_xbr_inspect}
+    from azurik_mod.xbe_tools.commands import (
+        cmd_xbr_diff, cmd_xbr_inspect)
+    verbs = {"inspect": cmd_xbr_inspect, "diff": cmd_xbr_diff}
     verb = verbs.get(args.xbr_command)
     if verb is None:
         raise SystemExit(
             f"unknown xbr verb: {args.xbr_command!r}")
+    verb(args)
+
+
+def _dispatch_ghidra_snapshot(args) -> None:
+    from azurik_mod.xbe_tools.commands import cmd_ghidra_snapshot
+    cmd_ghidra_snapshot(args)
+
+
+def _dispatch_movies(args) -> None:
+    from azurik_mod.xbe_tools.commands import cmd_movies_info
+    verbs = {"info": cmd_movies_info}
+    verb = verbs.get(args.movies_command)
+    if verb is None:
+        raise SystemExit(
+            f"unknown movies verb: {args.movies_command!r}")
     verb(args)
 
 

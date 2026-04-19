@@ -41,6 +41,7 @@ register_category(Category(
 
 | Pack                 | Sites | Default-on | Category       | Tags          | Folder |
 |----------------------|-------|------------|----------------|---------------|--------|
+| `fps_unlock`         | 50    | no         | `performance`  | fps           | [azurik_mod/patches/fps_unlock/](../azurik_mod/patches/fps_unlock/) |
 | `player_physics`     | 3     | no         | `player`       | physics       | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
 | `qol_skip_logo`      | 1     | no         | `boot`         | c-shim        | [azurik_mod/patches/qol_skip_logo/](../azurik_mod/patches/qol_skip_logo/) |
 | `qol_gem_popups`     | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_gem_popups/](../azurik_mod/patches/qol_gem_popups/) |
@@ -51,7 +52,7 @@ register_category(Category(
 | `rand_gems`          | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_barriers`      | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_connections`   | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
-| `fps_unlock`         | 50    | no         | `experimental` | fps           | [azurik_mod/patches/fps_unlock/](../azurik_mod/patches/fps_unlock/) |
+| `enable_dev_menu`    | 2     | no         | `experimental` | cheat, dev    | [azurik_mod/patches/enable_dev_menu/](../azurik_mod/patches/enable_dev_menu/) |
 
 ---
 

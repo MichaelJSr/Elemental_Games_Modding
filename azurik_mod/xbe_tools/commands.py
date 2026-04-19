@@ -490,6 +490,77 @@ def cmd_entity_diff(args) -> None:
 # xbr inspect — record-layout classifier
 # ---------------------------------------------------------------------------
 
+def cmd_ghidra_snapshot(args) -> None:
+    """``azurik-mod ghidra-snapshot PATH`` — write a snapshot JSON."""
+    from .ghidra_client import GhidraClient
+    from .ghidra_snapshot import write_snapshot
+
+    client = GhidraClient(
+        host=args.host or "localhost",
+        port=args.port or 8193)
+    if not client.ping():
+        print(f"ghidra-snapshot: no Ghidra on "
+              f"{client.base_url}", file=sys.stderr)
+        sys.exit(2)
+
+    stats = write_snapshot(
+        Path(args.path).expanduser(),
+        client,
+        include_default_names=args.keep_default_names,
+        include_labels=not args.no_labels)
+    print(f"Snapshot written to {args.path}")
+    print(f"  program:         {stats.program_name}")
+    print(f"  functions:       {stats.named_functions} named / "
+          f"{stats.total_functions} total")
+    print(f"  labels:          {stats.named_labels} named / "
+          f"{stats.total_labels} total")
+
+
+def cmd_xbr_diff(args) -> None:
+    """``azurik-mod xbr diff A.xbr B.xbr``"""
+    from .xbr_diff import diff_xbr, format_diff
+
+    try:
+        diff = diff_xbr(args.path_a, args.path_b,
+                        min_len=args.min_len)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"xbr diff: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.json:
+        _emit(diff.to_json_dict(), as_json=True)
+    else:
+        print(format_diff(diff,
+                          max_strings=args.max_strings))
+    sys.exit(0 if not diff.has_changes else 1)
+
+
+def cmd_movies_info(args) -> None:
+    """``azurik-mod movies info PATH``"""
+    from .bink_info import (
+        format_info, format_info_table,
+        inspect_bink_file, inspect_directory)
+
+    p = Path(args.path).expanduser().resolve()
+    try:
+        if p.is_dir():
+            infos = inspect_directory(p)
+            if args.json:
+                _emit([i.to_json_dict() for i in infos], as_json=True)
+            else:
+                print(format_info_table(infos))
+        else:
+            info = inspect_bink_file(p)
+            if args.json:
+                _emit(info.to_json_dict(), as_json=True)
+            else:
+                print(format_info(info))
+    except (FileNotFoundError, ValueError,
+            NotADirectoryError) as exc:
+        print(f"movies info: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_xbr_inspect(args) -> None:
     """``azurik-mod xbr inspect FILE --tag TAG``"""
     from .xbr_inspect import inspect_xbr, format_inspection
@@ -525,7 +596,9 @@ def cmd_xbr_inspect(args) -> None:
 __all__ = [
     "cmd_entity_diff",
     "cmd_ghidra_coverage",
+    "cmd_ghidra_snapshot",
     "cmd_ghidra_sync",
+    "cmd_movies_info",
     "cmd_plan_trampoline",
     "cmd_shim_inspect",
     "cmd_test_for_va",
@@ -535,5 +608,6 @@ __all__ = [
     "cmd_xbe_hexdump",
     "cmd_xbe_sections",
     "cmd_xbe_strings",
+    "cmd_xbr_diff",
     "cmd_xbr_inspect",
 ]
