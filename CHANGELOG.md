@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+### GUI slider wiring fix (round 11.5)
+
+**Bug**: The GUI's `build_randomized_iso` translation layer only
+forwarded 7 of the 8 active `player_physics` sliders from
+`pack_params` into the argparse Namespace that `cmd_randomize_full`
+consumes.  Users who dragged `wing_flap_ceiling_scale` or
+`flap_below_peak_scale` in the Patches GUI would see the
+non-default values in the build log's `# pack_params: {...}`
+header but **the values never reached the apply pipeline** —
+`getattr(args, 'player_wing_flap_ceiling_scale', None) or 1.0`
+short-circuited to the vanilla path and the XBE got built without
+either shim installed.  From the user's perspective the slider
+simply had no effect.
+
+Reported scenario from
+`~/Library/Logs/azurik_mod/build-20260420-025618-seed42.log`:
+`flap_height_scale=2.0, flap_below_peak_scale=100.0,
+wing_flap_ceiling_scale=100.0` all set in the GUI.  Build log
+showed only the flap_height_scale apply line; the other two
+slider installs were silently skipped.
+
+**Fix**: Extracted the translation into the new
+[`physics_params_to_namespace_fields`](gui/backend.py) helper
+driven by `_PHYSICS_PARAM_TO_NAMESPACE`, a single-source-of-truth
+table mapping `ParametricPatch.name` → `argparse` field name +
+vanilla default.  Every active slider on
+`PLAYER_PHYSICS_SITES` appears exactly once; adding a new slider
+is a one-line table edit.  Legacy aliases (`run_speed_scale`,
+`run_scale`, `roll_scale`, `flap_subsequent_scale`) are resolved
+to their canonical form before table lookup so pre-April-2026
+serialised param dicts keep working.
+
+**Regression test**:
+[`tests/test_gui_backend_params.py`](tests/test_gui_backend_params.py)
+pins (a) 100% coverage of `PLAYER_PHYSICS_SITES` entries by the
+translation table with an allowed-exception list for
+retired-but-still-accepted sliders, (b) inverse: no dead
+translation entries, (c) reproduction of the exact bug-report
+scenario, (d) every vanilla-default value round-trips to `None`
+so byte-identity is preserved when sliders haven't moved.  15
+new tests; 810 pass total.
+
 ### Wing-flap altitude-ceiling slider (round 11 cont.)
 
 New `wing_flap_ceiling_scale` slider on `player_physics` that

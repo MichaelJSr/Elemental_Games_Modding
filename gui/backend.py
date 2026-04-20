@@ -60,6 +60,89 @@ def latest_log_file() -> Path | None:
 SCRIPT_DIR = REPO_ROOT
 
 
+# ---------------------------------------------------------------------------
+# pack_params -> argparse Namespace translation
+# ---------------------------------------------------------------------------
+#
+# The GUI stores slider values in ``AppState.pack_params`` keyed by
+# ``(pack_name, param_name)`` — e.g. ``{"player_physics":
+# {"wing_flap_ceiling_scale": 2.5}}``.  ``cmd_randomize_full`` is
+# argparse-driven and reads per-param fields via ``getattr(args,
+# 'player_*_scale', None)`` with a ``None or 1.0`` short-circuit.
+#
+# The translation below is where the two worlds meet; keep it in
+# sync with :data:`azurik_mod.patches.player_physics.PLAYER_PHYSICS_SITES`
+# so new sliders wire through end-to-end.  Missing a key here means
+# the user can drag the slider in the GUI and the value reaches the
+# log line ``# pack_params: {...}``, but NEVER reaches the apply
+# pipeline — the build looks successful but the in-game effect
+# doesn't land.  A regression test
+# (``tests/test_gui_backend_params.py``) pins every slider to its
+# Namespace field name.
+
+# Maps ParametricPatch.name → (argparse Namespace field, vanilla default).
+# Every active slider on PLAYER_PHYSICS_SITES should appear here.
+# `run_speed_scale` / `run_scale` legacy aliases are accepted by the
+# translation as synonyms for `roll_speed_scale`.
+_PHYSICS_PARAM_TO_NAMESPACE: tuple[tuple[str, str, float], ...] = (
+    ("gravity",                  "gravity",                           9.8),
+    ("walk_speed_scale",         "player_walk_scale",                 1.0),
+    ("roll_speed_scale",         "player_roll_scale",                 1.0),
+    ("swim_speed_scale",         "player_swim_scale",                 1.0),
+    ("jump_speed_scale",         "player_jump_scale",                 1.0),
+    ("air_control_scale",        "player_air_control_scale",          1.0),
+    ("flap_height_scale",        "player_flap_scale",                 1.0),
+    ("flap_below_peak_scale",    "player_flap_below_peak_scale",      1.0),
+    ("wing_flap_ceiling_scale",  "player_wing_flap_ceiling_scale",    1.0),
+)
+
+
+def physics_params_to_namespace_fields(
+    physics: dict[str, float] | None,
+) -> dict[str, float | None]:
+    """Translate a ``pack_params["player_physics"]`` dict into the
+    ``player_*_scale`` kwargs :func:`cmd_randomize_full` expects.
+
+    Returns a dict ready to splat into ``argparse.Namespace(**fields)``.
+    Values that match the vanilla default are returned as ``None`` so
+    the downstream ``getattr(args, ..., None) or 1.0`` pattern
+    short-circuits to the vanilla path — preserves byte-identity when
+    no sliders have moved.
+
+    Back-compat: ``run_speed_scale`` / ``run_scale`` / ``roll_scale``
+    / ``flap_subsequent_scale`` are accepted as legacy aliases.
+
+    Used by :func:`build_randomized_iso` and pinned by
+    ``tests/test_gui_backend_params.py``.
+    """
+    physics = physics or {}
+    # Legacy alias resolution — apply BEFORE the main loop so the
+    # main loop sees the canonical ``*_scale`` keys.
+    aliases: dict[str, str] = {
+        "run_speed_scale":     "roll_speed_scale",
+        "run_scale":           "roll_speed_scale",
+        "roll_scale":          "roll_speed_scale",
+        "flap_subsequent_scale": "flap_below_peak_scale",
+    }
+    normalised: dict[str, float] = {}
+    for key, value in physics.items():
+        canonical = aliases.get(key, key)
+        # If BOTH canonical and alias were passed, the canonical wins
+        # (mirrors how _custom_apply resolves them).
+        normalised.setdefault(canonical, value)
+
+    fields: dict[str, float | None] = {}
+    for param_name, namespace_field, vanilla in _PHYSICS_PARAM_TO_NAMESPACE:
+        value = normalised.get(param_name)
+        if value is None:
+            fields[namespace_field] = None
+        elif abs(value - vanilla) < 1e-6:
+            fields[namespace_field] = None
+        else:
+            fields[namespace_field] = float(value)
+    return fields
+
+
 def find_base_iso() -> Path | None:
     """Look for the base game ISO in the iso/ folder."""
     if not ISO_DIR.exists():
@@ -252,44 +335,14 @@ def run_randomizer(
 
         writer = _QueueWriter(msg_queue, on_output, buffer, log_file)
 
-        # Build an argparse-style Namespace the legacy cmd_randomize_full
-        # already knows how to consume.  Any field missing from the
-        # namespace becomes `None` via a default factory since the code
-        # uses getattr(args, 'x', default).
-        # Unpack parametric slider values from pack_params.  The player
-        # physics pack exposes `gravity`, `walk_speed_scale`,
-        # `roll_speed_scale`, and `swim_speed_scale`; we only forward
-        # non-default values so the CLI keeps `--gravity` etc. unset
-        # when the slider is at its default.  Back-compat: still
-        # accepts the old `run_speed_scale` key as an alias for
-        # `roll_speed_scale` so pre-April-2026 serialized param dicts
-        # from older GUI sessions keep working.
-        physics = (pack_params or {}).get("player_physics", {})
-        gravity = physics.get("gravity")
-        walk_scale = physics.get("walk_speed_scale")
-        roll_scale = (physics.get("roll_speed_scale")
-                      if physics.get("roll_speed_scale") is not None
-                      else physics.get("run_speed_scale"))
-        swim_scale = physics.get("swim_speed_scale")
-        jump_scale = physics.get("jump_speed_scale")
-        air_control_scale = physics.get("air_control_scale")
-        flap_scale = physics.get("flap_height_scale")
-        # Only forward when clearly non-default to preserve byte-identity.
-        if gravity is not None and abs(gravity - 9.8) < 1e-6:
-            gravity = None
-        if walk_scale is not None and abs(walk_scale - 1.0) < 1e-6:
-            walk_scale = None
-        if roll_scale is not None and abs(roll_scale - 1.0) < 1e-6:
-            roll_scale = None
-        if swim_scale is not None and abs(swim_scale - 1.0) < 1e-6:
-            swim_scale = None
-        if jump_scale is not None and abs(jump_scale - 1.0) < 1e-6:
-            jump_scale = None
-        if air_control_scale is not None and \
-                abs(air_control_scale - 1.0) < 1e-6:
-            air_control_scale = None
-        if flap_scale is not None and abs(flap_scale - 1.0) < 1e-6:
-            flap_scale = None
+        # Translate the GUI's pack_params dict into the argparse-style
+        # Namespace that cmd_randomize_full knows how to read.  Kept
+        # in a module-level helper so new PLAYER_PHYSICS_SITES sliders
+        # can be wired up via a single table edit in
+        # _PHYSICS_PARAM_TO_NAMESPACE, with the regression test
+        # pinning every entry.
+        physics_fields = physics_params_to_namespace_fields(
+            (pack_params or {}).get("player_physics"))
 
         args = argparse.Namespace(
             command="randomize-full",
@@ -321,17 +374,10 @@ def run_randomizer(
             force=force_unsolvable,
             player_character=None,
             config_mod=json.dumps(config_edits) if config_edits else None,
-            # Parametric slider values for player_physics.  Use the
-            # new (roll) names; cmd_randomize_full still accepts
-            # legacy `player_run_scale` for pinned external callers
-            # but the GUI has no reason to emit both.
-            gravity=gravity,
-            player_walk_scale=walk_scale,
-            player_roll_scale=roll_scale,
-            player_swim_scale=swim_scale,
-            player_jump_scale=jump_scale,
-            player_air_control_scale=air_control_scale,
-            player_flap_scale=flap_scale,
+            # Parametric slider values for player_physics, keyed by
+            # the ``player_*_scale`` (or ``gravity``) fields the
+            # randomizer CLI reads via getattr.
+            **physics_fields,
         )
 
         result: BuildResult
