@@ -1303,6 +1303,15 @@ def cmd_randomize_full(args):
             getattr(args, 'player_slope_slide_scale', None) or 1.0)
         wing_flap_ceiling_scale = float(
             getattr(args, 'player_wing_flap_ceiling_scale', None) or 1.0)
+        # ``or 1.0`` coalesces both None and 0.0 back to vanilla for
+        # most sliders — that's fine because 0.0 has no meaningful
+        # semantic for a scale like walk_speed or flap_height.  The
+        # descent fuel-cost slider is different: 0.0 is the whole
+        # point (no fuel drained).  Use explicit None check.
+        _raw_fdfc = getattr(
+            args, 'player_flap_descent_fuel_cost_scale', None)
+        flap_descent_fuel_cost_scale = (
+            1.0 if _raw_fdfc is None else float(_raw_fdfc))
         player_char = getattr(args, 'player_character', None)
         xbe_path = extract_dir / "default.xbe"
 
@@ -1326,7 +1335,8 @@ def cmd_randomize_full(args):
                                or flap_at_peak_scale != 1.0
                                or climb_scale != 1.0
                                or slope_slide_scale != 1.0
-                               or wing_flap_ceiling_scale != 1.0),
+                               or wing_flap_ceiling_scale != 1.0
+                               or flap_descent_fuel_cost_scale != 1.0),
         }
 
         needs_xbe = any(_FLAG_PACKS.values()) or bool(player_char)
@@ -1374,6 +1384,8 @@ def cmd_randomize_full(args):
                     "climb_speed_scale": climb_scale,
                     "slope_slide_speed_scale": slope_slide_scale,
                     "wing_flap_ceiling_scale": wing_flap_ceiling_scale,
+                    "flap_descent_fuel_cost_scale":
+                        flap_descent_fuel_cost_scale,
                 },
             }
 
@@ -1930,6 +1942,26 @@ def cmd_inspect_physics(args):
         print(f"  {'ceiling (shim)':14s} [DRIFTED]  "
               f"got {pk_bytes.hex()}")
 
+    # flap_descent_fuel_cost: direct 4-byte imm overwrite at
+    # VA 0x893CE (inside the PUSH 100.0f feeding consume_fuel).
+    from azurik_mod.patches.player_physics import (
+        _FLAP_DESCENT_FUEL_COST_VA,
+        _FLAP_DESCENT_FUEL_COST_VANILLA,
+        _VANILLA_FLAP_DESCENT_FUEL_COST,
+    )
+    fdfc_off = va_to_file(_FLAP_DESCENT_FUEL_COST_VA)
+    fdfc_bytes = bytes(xbe_bytes[fdfc_off:fdfc_off + 4])
+    if fdfc_bytes == _FLAP_DESCENT_FUEL_COST_VANILLA:
+        print(f"  {'descent fuel':14s} [VANILLA]  "
+              f"VA 0x{_FLAP_DESCENT_FUEL_COST_VA:X} = "
+              f"{_VANILLA_FLAP_DESCENT_FUEL_COST:.1f}")
+    else:
+        cost = _struct.unpack("<f", fdfc_bytes)[0]
+        ratio = cost / _VANILLA_FLAP_DESCENT_FUEL_COST
+        print(f"  {'descent fuel':14s} [PATCHED]  "
+              f"VA 0x{_FLAP_DESCENT_FUEL_COST_VA:X} = "
+              f"{cost:.4f}  (= {ratio:.3f}× vanilla)")
+
     # Air-control: 5 primary imm32 sites (all vanilla 9.0) + 2
     # secondary imm32 sites inside FUN_00083F90 (12.0 and 9.0).
     print()
@@ -2002,6 +2034,12 @@ def cmd_apply_physics(args):
         getattr(args, "slope_slide_speed", None) or 1.0)
     wing_flap_ceiling_scale = float(
         getattr(args, "wing_flap_ceiling", None) or 1.0)
+    # Explicit None-check: 0.0 is a valid value here (it disables
+    # the vanilla descent fuel drain) and would be silently coerced
+    # back to 1.0 by the ``or 1.0`` shortcut most other sliders use.
+    _raw_fdfc_cli = getattr(args, "flap_descent_fuel_cost", None)
+    flap_descent_fuel_cost_scale = (
+        1.0 if _raw_fdfc_cli is None else float(_raw_fdfc_cli))
 
     if (gravity is None
             and walk_scale == 1.0
@@ -2014,14 +2052,16 @@ def cmd_apply_physics(args):
             and flap_at_peak_scale == 1.0
             and climb_scale == 1.0
             and slope_slide_scale == 1.0
-            and wing_flap_ceiling_scale == 1.0):
+            and wing_flap_ceiling_scale == 1.0
+            and flap_descent_fuel_cost_scale == 1.0):
         print("No physics changes requested.  "
               "Pass --gravity, --walk-speed, --roll-speed (or "
               "legacy --run-speed), --swim-speed, --jump-speed, "
               "--air-control-speed, --flap-height, "
               "--flap-below-peak (or legacy --flap-subsequent), "
               "--flap-at-peak, --climb-speed, "
-              "--slope-slide-speed, and/or --wing-flap-ceiling.")
+              "--slope-slide-speed, --wing-flap-ceiling, and/or "
+              "--flap-descent-fuel-cost.")
         return
 
     def _patch_xbe_in_place(xbe_path: Path) -> None:
@@ -2048,6 +2088,9 @@ def cmd_apply_physics(args):
             wing_flap_ceiling_scale=(wing_flap_ceiling_scale
                                      if wing_flap_ceiling_scale != 1.0
                                      else None),
+            flap_descent_fuel_cost_scale=(
+                flap_descent_fuel_cost_scale
+                if flap_descent_fuel_cost_scale != 1.0 else None),
         )
         xbe_path.write_bytes(data)
 

@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+### Wing-flap descent fuel-cost slider (round 11.7)
+
+Companion to `wing_flap_ceiling_scale`.  User reported that
+raising the ceiling alone isn't sufficient because vanilla
+`wing_flap` has a second, independent anti-recovery mechanic:
+when the player has fallen > 6m below their latched `peak_z`,
+a `consume_fuel(this, 100.0)` call drains the entire air-power
+gauge in a single flap.  After that the next flap's entry
+`consume_fuel(this, 1.0)` returns 0 (refuses) and the flap
+doesn't happen — perceived as "flaps fail when I descend".
+
+The `flap_descent_fuel_cost_scale` slider (default 1.0 vanilla,
+range 0.0–1.0) rewrites the 4-byte `PUSH imm32` (100.0f) at
+VA 0x893CE feeding the consume_fuel call at VA 0x893D4.  Setting
+to 0.0 pushes 0.0f instead; `consume_fuel(this, 0.0)` drains
+nothing but still returns success, so the flap proceeds and the
+gauge stays intact.
+
+Why a PUSH-immediate rewrite instead of overwriting the 6.0
+threshold at VA 0x001A25B8: that shared `.rdata` constant has
+19 unrelated readers across the binary (movement, physics,
+input, audio — not all obviously height-related; likely a
+compiler-deduplicated numeric literal).  Scaling the PUSH
+argument is code-surgical to this one call site; overwriting
+the data constant would corrupt 18 other codepaths.
+
+**Pair with `wing_flap_ceiling_scale`**: set both to unlock
+high-altitude recovery flights (`wing_flap_ceiling_scale = 5`
++ `flap_descent_fuel_cost_scale = 0.0`).  Optionally add
+`flap_below_peak_scale = 2.0` to cancel the v0 halving that
+runs in the same branch.
+
+**Ghidra annotations pushed**: plate comments at VA 0x893CD
+(hook site) and VA 0x893C0 (6.0 threshold branch) documenting
+the full mechanic and the 19-reader threshold constraint.
+
+**Tests** (`tests/test_flap_descent_fuel_cost.py`): 14 new,
+covering descriptor shape, byte landing at zero / fractional /
+vanilla values, drift detection, byte-surgical assertions that
+the surrounding `PUSH` opcode and `MOV ECX, EDI` survive, and
+a crucial guard that the shared 6.0 threshold at 0x001A25B8
+stays untouched.  835 pass total.
+
 ### Generic pack_params wiring + forensic on retired packs (round 11.6)
 
 Follow-up to round 11.5's `wing_flap_ceiling_scale` /

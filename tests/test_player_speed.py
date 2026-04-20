@@ -801,10 +801,12 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         # no-ops.  Remaining static ranges on vanilla:
         #   6 six-byte instr sites (walk/swim/jump/flap/roll/
         #     flap_subsequent)
+        # + 1 six-byte wing_flap_ceiling hook (always whitelisted)
         # + 5 primary air-control + 2 secondary air-control imm32
-        # = 13 on vanilla; after apply, up to 6 injected-float
+        # + 1 four-byte flap_descent_fuel_cost imm (round 11.7)
+        # = 15 on vanilla; after apply, up to 6 injected-float
         # follows land.
-        self.assertIn(len(ranges), range(13, 20),
+        self.assertIn(len(ranges), range(15, 22),
             msg=f"unexpected range count {len(ranges)}: {ranges}")
 
     def test_patched_xbe_adds_injected_float_ranges(self):
@@ -844,14 +846,16 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         # 4-byte ranges:
         #   - 5 primary air-control imm32 sites
         #   - 2 secondary air-control imm32 sites (inside FUN_00083F90)
+        #   - 1 flap_descent_fuel_cost imm32 (round 11.7 — always
+        #     whitelisted regardless of whether it was rewritten)
         #   - 6 injected-float follows (walk base, swim mult,
         #     jump gravity scalar, flap gravity scalar, roll mult,
         #     flap_subsequent halving factor)
-        # = 13 four-byte ranges total (round 10 dropped climb + slope).
-        self.assertEqual(len(four_byte_ranges), 13,
-            msg="5 primary + 2 secondary air-control + 6 injected "
-                "floats "
-                "= 13 four-byte ranges "
+        # = 14 four-byte ranges total.
+        self.assertEqual(len(four_byte_ranges), 14,
+            msg="5 primary + 2 secondary air-control + 1 descent "
+                "fuel + 6 injected floats "
+                "= 14 four-byte ranges "
                 f"(got {len(four_byte_ranges)}: {four_byte_ranges})")
         # Round 10 retired every 2-byte rewrite.
         self.assertEqual(len(two_byte_ranges), 0,

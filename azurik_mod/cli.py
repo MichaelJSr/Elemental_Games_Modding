@@ -326,6 +326,15 @@ def main() -> None:
                              "2*flap_height; K=2 ≈ 1.5× vanilla "
                              "headroom, K=10 ≈ 5.5×.  Orthogonal "
                              "to --player-flap-scale (per-flap v0).")
+    p_full.add_argument("--player-flap-descent-fuel-cost-scale",
+                        type=float, metavar="X",
+                        help="Scales the 100.0 fuel cost drained by "
+                             "wing_flap's descent-penalty branch "
+                             "(default 1.0 vanilla, range 0.0-1.0). "
+                             "Set to 0.0 to stop the gauge from "
+                             "clearing when the player has fallen "
+                             ">6m below peak_z — pairs with "
+                             "--player-wing-flap-ceiling-scale.")
     p_full.add_argument("--player-climb-scale", type=float,
                         metavar="X",
                         help="[RETIRED — no observable effect; "
@@ -414,6 +423,12 @@ def main() -> None:
              "latch.  Ceiling grows to (K+1)*flap_height above "
              "the jump's starting ground (vanilla K=1 -> "
              "2*flap_height).  Orthogonal to --flap-height.")
+    p_physics.add_argument("--flap-descent-fuel-cost", type=float,
+        metavar="X",
+        help="Scales the 100.0 fuel cost drained by wing_flap's "
+             "descent-penalty branch (default 1.0, range 0.0-1.0). "
+             "Set 0.0 to stop the gauge from clearing when the "
+             "player has fallen >6m below peak_z.")
 
     # inspect-physics (diagnostic — read-only dump of patch state)
     p_inspect = sub.add_parser(

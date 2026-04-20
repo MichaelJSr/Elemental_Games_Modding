@@ -458,6 +458,47 @@ WING_FLAP_CEILING_SCALE = ParametricPatch(
     ),
 )
 
+# Companion to wing_flap_ceiling_scale.  Vanilla ``wing_flap`` has
+# a second, independent anti-ground-recovery mechanic: when the
+# player has fallen > 6m below their peak_z envelope, a
+# ``consume_fuel(this, 100.0)`` call at VA 0x893D4 drains the
+# entire air-power gauge in a single flap AND the v0 is halved
+# via the FMUL at 0x893DD.  The fuel drain is what users typically
+# perceive as "flaps fail when I descend too far" — after one
+# below-peak flap the gauge is empty, so the next
+# consume_fuel(this, 1.0) at VA 0x89354 refuses and the flap
+# doesn't happen.
+#
+# This slider scales the 100.0 fuel cost directly by overwriting
+# the PUSH immediate at VA 0x893CE (the bytes feeding the 100.0
+# argument to consume_fuel).  At 0.0 the fuel cost is zero and
+# descent flaps no longer drain the gauge; at 1.0 vanilla behaviour
+# is preserved.  Pair with ``flap_below_peak_scale = 2.0`` to also
+# cancel the v0 halving — the two sliders together turn the
+# descent penalty into a no-op.
+FLAP_DESCENT_FUEL_COST_SCALE = ParametricPatch(
+    name="flap_descent_fuel_cost_scale",
+    label="Wing-flap descent fuel cost",
+    va=0,
+    size=0,
+    original=b"",
+    default=1.0,
+    slider_min=0.0,
+    slider_max=1.0,
+    slider_step=0.01,
+    unit="x",
+    encode=lambda v: struct.pack("<d", float(v)),
+    decode=lambda b: struct.unpack("<d", b)[0],
+    description=(
+        "Scales the 100.0 fuel cost consumed by the descent-"
+        "penalty branch in wing_flap (VA 0x893D4).  Vanilla "
+        "drains the entire air-power gauge in one flap when the "
+        "player has fallen > 6m below their peak — pair a high "
+        "wing_flap_ceiling_scale with this at 0.0 so descent "
+        "flaps stay usable."
+    ),
+)
+
 # Back-compat alias: the old name `RUN_SPEED_SCALE` shipped before we
 # realised the 3.0 multiplier is the roll boost, not a run modifier.
 # Keep as an import alias so any external code still works.
@@ -774,6 +815,27 @@ _PEAK_Z_HOOK_VANILLA = bytes([
 ])
 _PEAK_Z_SHIM_BODY_SIZE = 15
 
+# Wing-flap descent fuel-cost site (round 11.7).
+#
+# Inside ``wing_flap`` at VA 0x893CD vanilla executes
+#   PUSH 0x42C80000   ; 100.0f — cost argument to consume_fuel
+#   MOV  ECX, EDI     ; this-pointer
+#   CALL consume_fuel ; at VA 0x893D4
+# iff the `6.0 < fVar1` branch at VA 0x893C0 was taken (i.e. the
+# player is > 6m below peak_z).  The PUSH immediate lives at
+# VA 0x893CE (the 4 bytes after the 0x68 opcode).  Rewriting those
+# 4 bytes with ``struct.pack("<f", 100.0 * scale)`` — 0.0 kills the
+# fuel cost, 1.0 preserves vanilla.
+#
+# The 6.0 threshold itself lives at VA 0x001A25B8 in .rdata, but
+# that constant has 19 readers across the binary (unrelated
+# subsystems), so overwriting it would cause wide collateral
+# damage.  Scaling the PUSH immediate instead affects ONLY this
+# wing_flap call site.
+_FLAP_DESCENT_FUEL_COST_VA = 0x000893CE
+_FLAP_DESCENT_FUEL_COST_VANILLA = bytes.fromhex("0000c842")   # 100.0f
+_VANILLA_FLAP_DESCENT_FUEL_COST = 100.0
+
 # Vanilla runtime value of CritterData.run_speed (+0x40) for the
 # player entity.  Confirmed via lldb at VA 0x00085F65 — the FLD
 # [EAX+0x40] immediately after MOV EAX, [EBP+0x34] in FUN_00085F50.
@@ -809,6 +871,7 @@ def apply_player_physics(
     climb_scale: float | None = None,
     slope_slide_scale: float | None = None,
     wing_flap_ceiling_scale: float | None = None,
+    flap_descent_fuel_cost_scale: float | None = None,
     # Back-compat alias: callers that still pass run_scale get
     # transparently routed to roll_scale (the new name).
     run_scale: float | None = None,
@@ -869,6 +932,12 @@ def apply_player_physics(
            else float(wing_flap_ceiling_scale))
     if wfc != 1.0:
         apply_wing_flap_ceiling(xbe_data, ceiling_scale=wfc)
+
+    fdfc = (1.0 if flap_descent_fuel_cost_scale is None
+            else float(flap_descent_fuel_cost_scale))
+    if fdfc != 1.0:
+        apply_flap_descent_fuel_cost(
+            xbe_data, fuel_cost_scale=fdfc)
 
 
 def apply_player_speed(
@@ -1308,6 +1377,56 @@ def apply_wing_flap_ceiling(
     return result is not None
 
 
+def apply_flap_descent_fuel_cost(
+    xbe_data: bytearray,
+    *,
+    fuel_cost_scale: float = 1.0,
+) -> bool:
+    """Scale the fuel cost of the wing-flap descent-penalty branch.
+
+    Overwrites the 4-byte ``PUSH 100.0f`` immediate at VA 0x893CE
+    feeding ``consume_fuel(this, cost)`` at VA 0x893D4.  The branch
+    only fires when ``wing_flap``'s ``fVar1 = peak_z + flap_height -
+    current_z`` exceeds 6.0 — i.e. the player has fallen > 6m below
+    their latched peak.  In vanilla that drains the entire air-power
+    gauge in one flap, leaving subsequent flaps unable to start
+    (``consume_fuel(this, 1.0)`` at the flap entry returns 0 when
+    fuel is empty).
+
+    Scaling the PUSH immediate at 0x893CE is surgical: only this
+    one call site is affected.  The shared 6.0 threshold at
+    VA 0x001A25B8 has 19 unrelated readers across the binary, so
+    overwriting that constant is not an option.
+
+    - ``fuel_cost_scale = 1.0`` (default) preserves vanilla drain.
+    - ``fuel_cost_scale = 0.0`` kills the drain entirely — descent
+      flaps no longer clear the gauge.
+    - Partial values scale linearly (``0.5`` → 50.0 fuel drained).
+
+    Pair with ``flap_below_peak_scale = 2.0`` if you also want to
+    cancel the v0 halving that runs in the same branch.
+
+    Returns ``True`` on apply, ``False`` on no-op / drift.
+    """
+    if fuel_cost_scale == 1.0:
+        return False
+
+    off = va_to_file(_FLAP_DESCENT_FUEL_COST_VA)
+    current = bytes(xbe_data[off:off + 4])
+    if current != _FLAP_DESCENT_FUEL_COST_VANILLA:
+        print(f"  WARNING: flap_descent_fuel_cost — site at VA "
+              f"0x{_FLAP_DESCENT_FUEL_COST_VA:X} drifted (got "
+              f"{current.hex()}); skipping.")
+        return False
+
+    new_cost = _VANILLA_FLAP_DESCENT_FUEL_COST * float(fuel_cost_scale)
+    xbe_data[off:off + 4] = struct.pack("<f", new_cost)
+    print(f"  Wing-flap descent fuel cost: {fuel_cost_scale:.3f}x "
+          f"vanilla  ({_VANILLA_FLAP_DESCENT_FUEL_COST:.1f} -> "
+          f"{new_cost:.3f} at VA 0x{_FLAP_DESCENT_FUEL_COST_VA:X})")
+    return True
+
+
 def apply_slope_slide_speed(
     xbe_data: bytearray,
     *,
@@ -1535,6 +1654,16 @@ def _player_speed_dynamic_whitelist(
         # Graceful for pre-apply / non-Azurik buffers.
         pass
 
+    # Wing-flap descent fuel-cost site (round 11.7).  4-byte PUSH
+    # immediate at VA 0x893CE is overwritten in place.  Always on
+    # the whitelist so verify-patches doesn't flag the difference
+    # when flap_descent_fuel_cost_scale != 1.0.
+    try:
+        fdfc_off = va_to_file(_FLAP_DESCENT_FUEL_COST_VA)
+        ranges.append((fdfc_off, fdfc_off + 4))
+    except Exception:  # noqa: BLE001
+        pass
+
     return ranges
 
 
@@ -1551,8 +1680,9 @@ PLAYER_PHYSICS_SITES = [
     FLAP_HEIGHT_SCALE,
     FLAP_BELOW_PEAK_SCALE,
     WING_FLAP_CEILING_SCALE,
+    FLAP_DESCENT_FUEL_COST_SCALE,
 ]
-"""Registered Patches-page sites (8 working sliders).
+"""Registered Patches-page sites (9 working sliders).
 
 Retired sliders (kept as module symbols for back-compat / tests,
 but no longer surfaced in the GUI or randomizer):
@@ -1595,6 +1725,7 @@ def _custom_apply(
     climb_speed_scale: float | None = None,
     slope_slide_speed_scale: float | None = None,
     wing_flap_ceiling_scale: float | None = None,
+    flap_descent_fuel_cost_scale: float | None = None,
     # Back-compat: the old kwarg spellings.  New callers should use
     # the *_speed_scale forms, but CLI / serialized configs that
     # predate the rename still work.
@@ -1646,6 +1777,7 @@ def _custom_apply(
         climb_scale=climb,
         slope_slide_scale=slope_slide_speed_scale,
         wing_flap_ceiling_scale=wing_flap_ceiling_scale,
+        flap_descent_fuel_cost_scale=flap_descent_fuel_cost_scale,
     )
 
 
@@ -1686,9 +1818,11 @@ __all__ = [
     "SWIM_SPEED_SCALE",
     "WALK_SPEED_SCALE",
     "WING_FLAP_CEILING_SCALE",
+    "FLAP_DESCENT_FUEL_COST_SCALE",
     "apply_air_control_speed",
     "apply_climb_speed",
     "apply_flap_at_peak",
+    "apply_flap_descent_fuel_cost",
     "apply_flap_height",
     "apply_flap_subsequent",
     "apply_jump_speed",

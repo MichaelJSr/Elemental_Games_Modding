@@ -42,7 +42,7 @@ register_category(Category(
 | Pack                 | Sites | Default-on | Category       | Tags          | Folder |
 |----------------------|-------|------------|----------------|---------------|--------|
 | `fps_unlock`         | 50    | no         | `performance`  | fps           | [azurik_mod/patches/fps_unlock/](../azurik_mod/patches/fps_unlock/) |
-| `player_physics`     | 8     | no         | `player`       | physics, c-shim | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
+| `player_physics`     | 9     | no         | `player`       | physics, c-shim | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
 | `qol_skip_logo`      | 1     | no         | `boot`         | c-shim        | [azurik_mod/patches/qol_skip_logo/](../azurik_mod/patches/qol_skip_logo/) |
 | `qol_gem_popups`     | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_gem_popups/](../azurik_mod/patches/qol_gem_popups/) |
 | `qol_other_popups`   | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_other_popups/](../azurik_mod/patches/qol_other_popups/) |
@@ -344,7 +344,7 @@ deprecated aliases for `--player-roll-scale` / `--roll-speed`.
 
 ### GUI
 
-The Patches page renders 8 working `ParametricSlider` widgets under `player_physics`: `gravity`, `walk_speed_scale`, `swim_speed_scale`, `jump_speed_scale`, `air_control_scale`, `flap_height_scale` (1st flap), `flap_below_peak_scale` (2nd+ flaps when >6m below peak), and `wing_flap_ceiling_scale` (raises the wing-flap altitude ceiling by shim-scaling the peak_z latch at jump-init).  Slider values live on `AppState.pack_params["player_physics"]` and carry a long-form description rendered under the label; sliders accept out-of-range values via the text box for expert tuning.
+The Patches page renders 9 working `ParametricSlider` widgets under `player_physics`: `gravity`, `walk_speed_scale`, `swim_speed_scale`, `jump_speed_scale`, `air_control_scale`, `flap_height_scale` (1st flap), `flap_below_peak_scale` (2nd+ flaps when >6m below peak), `wing_flap_ceiling_scale` (raises the wing-flap altitude ceiling by shim-scaling the peak_z latch at jump-init), and `flap_descent_fuel_cost_scale` (scales the 100.0 fuel cost drained by `wing_flap`'s descent-penalty branch; pair with `wing_flap_ceiling_scale` so descent flaps actually stay usable).  Slider values live on `AppState.pack_params["player_physics"]` and carry a long-form description rendered under the label; sliders accept out-of-range values via the text box for expert tuning.
 
 **Round 10 purge**: rounds 7–8 attempted to revive `flap_at_peak`, `root_motion_roll`, `root_motion_climb`, and `slope_slide_speed` as hand-assembled shims at code-flow points byte patches couldn't reach.  After user-driven in-game testing confirmed that none of the four produced observable effects, all four packs were deleted.  `no_fall_damage`, `infinite_fuel`, and `wing_flap_count` were also deleted in favour of config-editor workarounds.  See `docs/LEARNINGS.md` § "Retired physics sliders" for the per-hook rationale.
 

@@ -1237,6 +1237,14 @@ enum PlayerPhysicsState {
 #define AZURIK_PATCH_PEAK_Z_FADD_VA             0x00089154
 #define AZURIK_PATCH_FLAP_FLD_VA                0x000893AE
 #define AZURIK_PATCH_FLAP_SUB_FMUL_VA           0x000893DD
+/* 4-byte PUSH immediate (100.0f) inside ``wing_flap`` at VA
+ * 0x893CE, feeding the ``consume_fuel(this, 100.0)`` call at
+ * VA 0x893D4 on the >6m-below-peak branch.  Scaled by the
+ * ``flap_descent_fuel_cost_scale`` slider — rewriting to 0.0
+ * disables the per-flap gauge drain that stops descent flaps
+ * from working in vanilla.  Cannot overwrite the 6.0 threshold
+ * at 0x001A25B8 directly because 19 other functions read it. */
+#define AZURIK_PATCH_FLAP_DESCENT_FUEL_VA       0x000893CE
 /* Historical 2-byte FLD-ST site (the v2 byte-patch attempt
  * at the `fVar2 = min(fVar1, flap_height)` cap).  Retired
  * because user testing showed no observable effect — see

@@ -308,6 +308,58 @@ subsequent-flap altitude on purpose, and scaling the ceiling
 past 5x or so is clearly outside the designer's intent.  The
 slider defaults to 1.0 (vanilla) and is opt-in.
 
+### Wing-flap descent-penalty fuel drain (round 11.7)
+
+A second anti-recovery mechanic lives inside `wing_flap`
+itself, independent of `peak_z`.  From the decompilation:
+
+```c
+if (6.0 < fVar1) {                 // fell > 6m below peak envelope
+    consume_fuel(this, 100.0);     // drain 100 fuel
+    param_1 = param_1 * 0.5;       // halve v0
+}
+```
+
+The 100-fuel call is what clears the air-power gauge in a
+single flap — after that, the next flap's entry
+`consume_fuel(this, 1.0)` at VA 0x89354 returns 0 (refuses to
+start the flap) because there's no fuel left.  Users who pair
+a high `wing_flap_ceiling_scale` with deep descent see this as
+"first descent flap works, second flap fails entirely".
+
+Three sites compose the branch:
+
+| VA | Instruction | Role |
+|---|---|---|
+| 0x893C0 | `FCOMP [0x001A25B8]` | `6.0 < fVar1` test (constant has 19 readers — can't overwrite) |
+| 0x893CD | `PUSH 0x42C80000` | pushes 100.0f as the fuel-cost argument |
+| 0x893DD | `FMUL [0x001A2510]` | ×0.5 halving (targeted by `flap_below_peak_scale`) |
+
+The `flap_descent_fuel_cost_scale` slider rewrites the 4-byte
+PUSH immediate at VA 0x893CE (bytes 1..4 after the 0x68 PUSH
+opcode).  Setting to 0.0 pushes 0.0f instead of 100.0f;
+`consume_fuel(this, 0.0)` is then a legal no-op that drains
+nothing but still returns 1 (success) — so the flap proceeds
+and the gauge stays intact.  Pair with
+`flap_below_peak_scale = 2.0` if you also want to cancel the
+v0 halving that runs in the same branch.
+
+Unlike the `peak_z` latch, the 6.0 threshold constant at VA
+0x001A25B8 is shared across 19 unrelated readers in the binary
+(movement / physics / input / audio — not all of them obvious
+consumers of a height threshold; probably a deduplicated
+numeric literal in the original source).  Overwriting the
+constant would corrupt all 18 unrelated sites.  The
+PUSH-immediate approach is surgical to this one call site.
+
+This patch is CODE-surgical rather than DATA-surgical, which
+generalises: if you ever need to scale a numeric argument
+passed to a callee, and the literal is a `PUSH imm32` sourced
+directly in the caller (not an `FLD [shared_const]`), you can
+rewrite the 4-byte immediate in place without any relocation
+or shim machinery — see `apply_flap_descent_fuel_cost` for the
+2-line apply function.
+
 ### Air-control speed has TWO dominant writer sites — FUN_00083F90 (April 2026)
 
 ``entity[+0x140]`` is the airborne horizontal-control scalar
