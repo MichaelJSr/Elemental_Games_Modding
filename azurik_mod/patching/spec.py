@@ -92,6 +92,10 @@ class ParametricPatch(NamedTuple):
     encode: Callable[[float], bytes]
     decode: Callable[[bytes], float]
     safety_critical: bool = False
+    description: str = ""
+    """Optional long-form explanation of what the slider controls.
+    Rendered below the label in the GUI when non-empty.  Keep to
+    2-4 short sentences — the GUI wraps at ~80 columns."""
 
     @property
     def is_virtual(self) -> bool:

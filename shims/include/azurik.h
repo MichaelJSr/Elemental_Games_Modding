@@ -1167,13 +1167,17 @@ enum PlayerPhysicsState {
 #define AZURIK_PATCH_JUMP_FLD_VA                0x00089160
 #define AZURIK_PATCH_FLAP_FLD_VA                0x000893AE
 #define AZURIK_PATCH_FLAP_SUB_FMUL_VA           0x000893DD
-/* Binary-toggle NOP site (late April 2026): when patched to
- * 3 × NOP, removes the `fVar1 = min(remaining, flap_height)`
- * cap inside `wing_flap` so subsequent flaps near peak get
- * full v0 = sqrt(2g × flap_height) regardless of how far
- * above peak the player has risen.  Target of the
- * `flap_at_peak_scale` slider. */
-#define AZURIK_PATCH_FLAP_AT_PEAK_FSUB_VA       0x00089381
+/* Binary-toggle 2-byte site (late April 2026 v2).  When
+ * patched from `D9 C1` (FLD ST(1)) to `D9 C0` (FLD ST(0)),
+ * the `fVar2 = min(fVar1, flap_height)` cap inside `wing_flap`
+ * collapses to `fVar2 = flap_height` — subsequent flaps near
+ * peak get full v0 = sqrt(2g × flap_height).  `fVar1` is left
+ * untouched so the below-6m halving check at
+ * `AZURIK_PATCH_FLAP_SUB_FMUL_VA` continues to fire correctly.
+ * Target of the `flap_at_peak_scale` slider.  (v1 NOPed
+ * `FSUB [EBX+0x5C]` at 0x89381 instead but caused fuel-drain
+ * side effects; reverted.) */
+#define AZURIK_PATCH_FLAP_AT_PEAK_FLD_ST_VA      0x0008939F
 #define AZURIK_PATCH_SLOPE_SLIDE_FMUL_VA        0x00089B76
 #define AZURIK_PATCH_SWIM_FMUL_VA               0x0008B7BF
 #define AZURIK_PATCH_AIR_CTRL_12_IMM32_VA       0x00083FAC

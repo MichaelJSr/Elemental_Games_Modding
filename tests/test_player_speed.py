@@ -809,8 +809,9 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         self.assertIn((flap_off, flap_off + 6), ranges)
         self.assertIn((roll_off, roll_off + 6), ranges)
         self.assertIn((flap_sub_off, flap_sub_off + 6), ranges)
-        self.assertIn((flap_peak_off, flap_peak_off + 3), ranges,
-            msg="flap-at-peak 3-byte NOP site missing from whitelist")
+        self.assertIn((flap_peak_off, flap_peak_off + 2), ranges,
+            msg="flap-at-peak 2-byte FLD-ST1 rewrite site "
+                "missing from whitelist (v2 April 2026)")
         self.assertIn((climb_off, climb_off + 4), ranges)
         self.assertIn((slope_off, slope_off + 4), ranges)
         for ac_va in _AIR_CONTROL_SITE_VAS:
@@ -872,10 +873,12 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
                 "const (climb + slope_slide) + 6 injected floats "
                 "= 15 four-byte ranges "
                 f"(got {len(four_byte_ranges)}: {four_byte_ranges})")
-        # No two-byte ranges anymore (roll no longer uses edge-lock
-        # or force-on patches).
-        self.assertEqual(len(two_byte_ranges), 0,
-            msg="v3 roll has no 2-byte aux patches")
+        # Historically zero; April 2026 added a single 2-byte
+        # rewrite for flap_at_peak_scale (FLD ST1 -> FLD ST0).
+        # That range is always present (even without apply) in
+        # the whitelist so it won't ever exceed 1.
+        self.assertLessEqual(len(two_byte_ranges), 1,
+            msg="only flap_at_peak may contribute a 2-byte range")
 
     def test_callback_does_not_raise_on_all_zero_buffer(self):
         """Drift-safety: if called on something that isn't an XBE at
@@ -1024,51 +1027,58 @@ class ApplyFlapAtPeakBehaviour(unittest.TestCase):
             apply_flap_at_peak,
         )
         data = bytearray(_XBE_PATH.read_bytes())
+        size = len(_FLAP_PEAK_CAP_SITE_VANILLA)
         self.assertFalse(apply_flap_at_peak(data, at_peak_scale=1.0))
         off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
-        self.assertEqual(bytes(data[off:off + 3]),
+        self.assertEqual(bytes(data[off:off + size]),
                          _FLAP_PEAK_CAP_SITE_VANILLA,
             msg="scale=1.0 must leave bytes vanilla")
 
-    def test_scale_not_one_nops_fsub(self):
+    def test_scale_not_one_rewrites_fld_st1(self):
         from azurik_mod.patches.player_physics import (
             _FLAP_PEAK_CAP_PATCH,
             _FLAP_PEAK_CAP_SITE_VA,
+            _FLAP_PEAK_CAP_SITE_VANILLA,
             apply_flap_at_peak,
         )
+        size = len(_FLAP_PEAK_CAP_SITE_VANILLA)
         for scale in (0.5, 2.0, 5.0):
             with self.subTest(scale=scale):
                 data = bytearray(_XBE_PATH.read_bytes())
                 self.assertTrue(
                     apply_flap_at_peak(data, at_peak_scale=scale))
                 off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
-                self.assertEqual(bytes(data[off:off + 3]),
+                self.assertEqual(bytes(data[off:off + size]),
                                  _FLAP_PEAK_CAP_PATCH,
-                    msg=f"scale={scale} must NOP the FSUB")
+                    msg=f"scale={scale} must rewrite FLD ST1 -> FLD ST0")
 
     def test_patch_does_not_touch_surrounding_bytes(self):
-        """Exactly 3 bytes at 0x89381 flip; the FLD/MOV/FADD/INC
-        before and FCOM/FNSTSW/... after must stay vanilla."""
+        """Exactly 2 bytes at 0x8939F flip; preceding FLD
+        [ESI+0x144] and following FCOMP ST1 stay vanilla."""
         from azurik_mod.patches.player_physics import (
             _FLAP_PEAK_CAP_SITE_VA,
+            _FLAP_PEAK_CAP_SITE_VANILLA,
             apply_flap_at_peak,
         )
         orig = _XBE_PATH.read_bytes()
         data = bytearray(orig)
+        size = len(_FLAP_PEAK_CAP_SITE_VANILLA)
         self.assertTrue(apply_flap_at_peak(data, at_peak_scale=2.0))
         off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
         self.assertEqual(data[:off], orig[:off])
-        self.assertEqual(data[off + 3:], orig[off + 3:])
+        self.assertEqual(data[off + size:], orig[off + size:])
 
     def test_routed_via_apply_player_physics(self):
         from azurik_mod.patches.player_physics import (
             _FLAP_PEAK_CAP_PATCH,
             _FLAP_PEAK_CAP_SITE_VA,
+            _FLAP_PEAK_CAP_SITE_VANILLA,
         )
         data = bytearray(_XBE_PATH.read_bytes())
+        size = len(_FLAP_PEAK_CAP_SITE_VANILLA)
         apply_player_physics(data, flap_at_peak_scale=2.0)
         off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
-        self.assertEqual(bytes(data[off:off + 3]),
+        self.assertEqual(bytes(data[off:off + size]),
                          _FLAP_PEAK_CAP_PATCH)
 
 

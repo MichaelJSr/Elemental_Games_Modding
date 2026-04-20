@@ -311,11 +311,18 @@ FLAP_HEIGHT_SCALE = ParametricPatch(
     unit="x",
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
+    description=(
+        "Scales v0 for the FIRST wing flap after a jump.  Acts "
+        "quadratically on the gravity input to sqrt(2g*h), so "
+        "2.0 makes the flap reach ~2x vanilla height, 4.0 "
+        "reaches ~4x, etc.  Subsequent flaps are controlled "
+        "separately by the two 'Wing-flap (2nd+ flaps)' sliders."
+    ),
 )
 
 FLAP_BELOW_PEAK_SCALE = ParametricPatch(
     name="flap_below_peak_scale",
-    label="Wing-flap height (2nd+ flaps, >6m below peak)",
+    label="Wing-flap height (2nd+ flaps, far below peak)",
     va=0,
     size=0,
     original=b"",
@@ -326,6 +333,14 @@ FLAP_BELOW_PEAK_SCALE = ParametricPatch(
     unit="x",
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
+    description=(
+        "Scales the vanilla 0.5x halving factor that kicks in when "
+        "the player has fallen more than 6 m below their jump peak. "
+        "1.0 = vanilla (halved v0).  2.0 = un-halved (same v0 as "
+        "the 1st flap).  4.0 = 2x the 1st-flap v0.  Does NOT affect "
+        "flaps taken within 6 m of the peak — use "
+        "'Wing-flap height (2nd+ flaps, near peak)' for those."
+    ),
 )
 
 # Back-compat alias — the old name pre-rename (late April 2026).
@@ -344,6 +359,15 @@ FLAP_AT_PEAK_SCALE = ParametricPatch(
     unit="x",
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
+    description=(
+        "Binary toggle — any value other than 1.0 enables the fix. "
+        "Vanilla caps subsequent-flap v0 at sqrt(2g x remaining_height) "
+        "where remaining shrinks as the player rises, so flaps near "
+        "the peak feel weak.  The fix rewrites a single FLD inside "
+        "wing_flap so the cap collapses to 'flap_height', giving "
+        "full first-flap v0 every time.  Slider value itself has "
+        "no effect on magnitude; it's tested only against 1.0."
+    ),
 )
 
 SLOPE_SLIDE_SPEED_SCALE = ParametricPatch(
@@ -621,7 +645,7 @@ _FLAP_SUBSEQUENT_SITE_VANILLA = bytes([
 _VANILLA_FLAP_SUBSEQUENT = 0.5
 
 # -----------------------------------------------------------
-# Wing-flap AT peak cap (late April 2026 user-reported fix).
+# Wing-flap AT-peak cap (late April 2026 user-reported fix, v2).
 #
 # Inside ``wing_flap`` the per-flap v0 is derived from the cap
 #
@@ -630,41 +654,46 @@ _VANILLA_FLAP_SUBSEQUENT = 0.5
 #     fVar2 = min(fVar1, flap_height)
 #     v0 = sqrt(2 * gravity * fVar2)
 #
-# When the player is AT peak (current_z ≈ peak_z), fVar1 ≈
-# flap_height, so v0 is full.  BUT once they've started flapping,
-# each flap RAISES peak_z (the sprite keeps rising), making
-# remaining = peak_z + flap_height - current_z ≈ flap_height.
+# When the player is AT peak (current_z ≈ peak_z), vanilla gives
+# fVar2 ≈ flap_height, so v0 is full.  BUT between flaps the
+# sprite drifts above ``peak_z`` by some tiny delta before the
+# game updates peak_z itself.  So the 2nd+ flap's
+# ``remaining = peak_z + flap_height - current_z`` shrinks to
+# ``flap_height - delta`` (weak v0).  User observation:
+# "subsequent flaps at peak are weak / have no upward velocity."
 #
-# So after the first flap, the player is typically just above
-# peak_z by some delta d < flap_height.  Then:
-#   remaining = peak_z + flap_height - (peak_z + d) = flap_height - d
-# which is SMALLER than flap_height, giving fVar2 < flap_height
-# and thus v0 < full.  User observation: "subsequent flaps at
-# peak are weak."
+# v1 fix (3-byte NOP of FSUB at VA 0x89381) worked for v0 but
+# inadvertently forced ``fVar1`` to be huge, which then tripped
+# the ``fVar1 > 6m`` check at VA 0x893C0 — routing the control
+# flow through the "below peak" halving path that ALSO drains
+# 100 fuel via ``consume_fuel`` at VA 0x893D4.  Result in
+# testing: upward velocity felt absent (halved) and fuel
+# drained to zero within a couple of flaps (leaving subsequent
+# flaps refused).  Reverted.
 #
-# Fix: NOP the ``FSUB [EBX+0x5C]`` at VA 0x89381 (3 bytes) so
-# fVar1 = peak_z + flap_height (the subtract is skipped).  Then:
-#   fVar1 = peak_z + flap_height  (a large positive number)
-#   clamp: fVar1 > 0, no clamp needed
-#   fVar2 = min(large, flap_height) = flap_height
-#   v0 = sqrt(2 * gravity * flap_height)  — FULL V0
-#
-# Every subsequent flap near peak now gives full first-flap v0.
-# Side effect: the "below peak" halving fires more often (since
-# the halving check also compares fVar1 vs 6.0), so combine with
-# ``flap_below_peak_scale = 2.0`` to keep those strong too.
+# v2 fix: patch the ``FLD ST1`` at VA 0x8939F (2 bytes,
+# ``D9 C1``) to ``FLD ST0`` (``D9 C0``).  This duplicates the
+# just-loaded ``flap_height`` instead of ``fVar1``, so the
+# subsequent ``FCOMP ST1`` compares ``fh`` with ``fh`` (equal)
+# and the JP at VA 0x893A8 is always taken — skipping the min
+# selection.  ``fVar2 = flap_height`` every flap, giving full
+# v0, while ``fVar1`` is preserved UNCHANGED for the below-6m
+# halving check at VA 0x893C0.  Stack depth also matches vanilla
+# at the JP-taken branch (verified via trace), so no FP-stack
+# leak propagates downstream.
 #
 # Semantics:
 #   flap_at_peak_scale == 1.0 → vanilla (weak subsequent at peak)
-#   flap_at_peak_scale != 1.0 → NOP the subtract, full cap
-# (binary effect, slider kept for UI consistency with other
-# scales; the actual scale value isn't used for computation,
-# only its not-equal-to-1.0 trips the patch).
-_FLAP_PEAK_CAP_SITE_VA = 0x00089381
+#   flap_at_peak_scale != 1.0 → full-cap fVar2 = flap_height
+# (binary toggle; slider value isn't used for computation, only
+# tested against 1.0).
+_FLAP_PEAK_CAP_SITE_VA = 0x0008939F
 _FLAP_PEAK_CAP_SITE_VANILLA = bytes([
-    0xD8, 0x63, 0x5C,          # FSUB dword [EBX+0x5C] (3 bytes)
+    0xD9, 0xC1,                # FLD ST(1)  — dup fVar1
 ])
-_FLAP_PEAK_CAP_PATCH = bytes([0x90, 0x90, 0x90])   # 3 NOPs
+_FLAP_PEAK_CAP_PATCH = bytes([
+    0xD9, 0xC0,                # FLD ST(0)  — dup fh (just loaded)
+])
 
 # Vanilla runtime value of CritterData.run_speed (+0x40) for the
 # player entity.  Confirmed via lldb at VA 0x00085F65 — the FLD
@@ -1196,47 +1225,46 @@ def apply_flap_at_peak(
     then caps ``fVar2 = min(fVar1, flap_height)``.  The v0 is
     ``sqrt(2 * g * fVar2)``.
 
-    After the first flap, the player is typically just above
-    the peak_z they had pre-flap, so fVar1 = flap_height - delta
-    (small), giving a weak v0.  Hence the "subsequent flaps at
-    peak are weak" user report.
+    After the first flap the sprite drifts above ``peak_z`` by a
+    small delta before ``peak_z`` itself updates, so fVar1 =
+    flap_height - delta (small) → weak v0.  Hence the
+    "subsequent flaps at peak are weak" user report.
 
-    Fix: NOP the 3-byte ``FSUB [EBX+0x5C]`` at VA 0x89381 so
-    fVar1 = peak_z + flap_height (skips the current_z subtract).
-    The clamp "if fVar1 <= 0" never fires.  The cap yields
-    ``fVar2 = min(peak_z + flap_height, flap_height)`` — since
-    peak_z is always >= 0 in gameplay, fVar1 > flap_height, so
-    fVar2 = flap_height, giving FULL v0 every flap.
+    v2 fix (late April 2026): rewrite the 2-byte ``FLD ST(1)``
+    at VA 0x8939F to ``FLD ST(0)`` — duplicating the
+    just-loaded ``flap_height`` instead of ``fVar1``.  The
+    subsequent FCOMP always compares ``fh`` with ``fh`` (equal),
+    so the JP at 0x893A8 is always taken, skipping the min
+    selection.  ``fVar2 = flap_height`` every flap → full v0.
+    ``fVar1`` is preserved untouched for the below-6m halving
+    check at VA 0x893C0, so the ``flap_below_peak_scale`` knob
+    still behaves correctly.
 
-    This binary patch uses the slider in a "not 1.0 = apply"
-    pattern (slider value itself isn't used for computation):
+    v1 NOPed the FSUB at 0x89381 instead, which inadvertently
+    forced ``fVar1`` large and tripped the halving path AND
+    drained 100 fuel per flap via ``consume_fuel`` — user
+    reported "flaps at peak remove upward velocity" because of
+    that fuel drain.  v2 avoids both side effects.
 
-    - ``1.0`` (default): vanilla behavior (weak subsequent near peak)
-    - anything else:     full v0 cap on every subsequent flap
-
-    Side effect: the below-peak halving check (VA 0x893C0,
-    ``fVar1 > 6.0``) fires MORE often because fVar1 is now
-    always peak_z + flap_height (typically > 6m).  Combine with
-    ``flap_below_peak_scale = 2.0`` to cancel the halving
-    entirely; then every subsequent flap near peak gets full v0.
-
+    This is a binary toggle (slider value != 1.0 enables).
     Returns True on apply, False on no-op / drift.
     """
     if at_peak_scale == 1.0:
         return False
 
     off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
-    current = bytes(xbe_data[off:off + 3])
+    size = len(_FLAP_PEAK_CAP_SITE_VANILLA)
+    current = bytes(xbe_data[off:off + size])
     if current != _FLAP_PEAK_CAP_SITE_VANILLA:
         print(f"  WARNING: flap_at_peak — site at VA "
               f"0x{_FLAP_PEAK_CAP_SITE_VA:X} drifted (got "
               f"{current.hex()}); skipping.")
         return False
 
-    xbe_data[off:off + 3] = _FLAP_PEAK_CAP_PATCH
-    print(f"  Wing-flap (at peak) cap: force-full  "
-          f"(NOPed FSUB at VA 0x{_FLAP_PEAK_CAP_SITE_VA:X} — "
-          f"subsequent flaps always get flap_height v0)")
+    xbe_data[off:off + size] = _FLAP_PEAK_CAP_PATCH
+    print(f"  Wing-flap (at peak): full v0 for 2nd+ flaps  "
+          f"(FLD ST(1)→FLD ST(0) at VA "
+          f"0x{_FLAP_PEAK_CAP_SITE_VA:X})")
     return True
 
 
@@ -1369,10 +1397,12 @@ def _player_speed_dynamic_whitelist(
         ranges.append((fls_off, fls_off + 6))
     except Exception:  # noqa: BLE001
         pass
-    # Flap at peak: 3-byte FSUB NOP at VA 0x89381 (late April 2026).
+    # Flap at peak: 2-byte FLD-ST1 rewrite at VA 0x8939F
+    # (late April 2026 v2 — previous 3-byte NOP at 0x89381
+    # caused fuel-drain side effects, reverted).
     try:
         fpc_off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
-        ranges.append((fpc_off, fpc_off + 3))
+        ranges.append((fpc_off, fpc_off + len(_FLAP_PEAK_CAP_SITE_VANILLA)))
     except Exception:  # noqa: BLE001
         pass
 
@@ -1427,7 +1457,16 @@ def _player_speed_dynamic_whitelist(
 PLAYER_PHYSICS_SITES = [
     GRAVITY_PATCH,
     WALK_SPEED_SCALE,
-    ROLL_SPEED_SCALE,
+    # ROLL_SPEED_SCALE retired late April 2026 — the WHITE-button
+    # FMUL at VA 0x849E4 scales the shared ``magnitude`` field,
+    # but the actual roll animation (characters/garret4/
+    # roll_forward) drives position via animation root motion,
+    # which the magnitude multiplier never touches.  Users
+    # consistently reported the slider had no observable effect.
+    # ROLL_SPEED_SCALE is kept as a module-level symbol for
+    # back-compat callers + the ``apply_player_speed`` test suite,
+    # but it's no longer surfaced in the GUI / randomizer.  A
+    # future root-motion shim could revive it.
     SWIM_SPEED_SCALE,
     JUMP_SPEED_SCALE,
     AIR_CONTROL_SCALE,
@@ -1437,11 +1476,10 @@ PLAYER_PHYSICS_SITES = [
     CLIMB_SPEED_SCALE,
     SLOPE_SLIDE_SPEED_SCALE,
 ]
-"""Registered Patches-page sites.  Gravity, roll, and climb
-sliders write to isolated .rdata floats directly; walk, swim,
-and jump use shim-landed FLD/FMUL rewrites; air-control uses
-imm32 overwrites at five call sites; flap uses a single FADD
-rewrite."""
+"""Registered Patches-page sites.  Walk, swim, jump, and flap use
+shim-landed FLD/FMUL rewrites; air-control uses imm32 overwrites
+at seven call sites; climb and slope-slide use direct constant
+overwrites.  Roll was retired — see note inline above."""
 
 
 def _apply_defaults(xbe_data: bytearray) -> None:

@@ -2,6 +2,96 @@
 
 ## Unreleased
 
+### Player packs — round 6 (flap_at_peak v2 + roll retirement + config-editor pointers)
+
+**1. `flap_at_peak_scale` v2 — replaces the buggy v1 FSUB-NOP.**
+
+v1 NOPed `FSUB [EBX+0x5C]` at VA 0x89381, which made
+``fVar1 = peak_z + flap_height`` (always huge) but inadvertently
+tripped the `fVar1 > 6m` halving check AND `consume_fuel` drain
+path at VA 0x893D4.  User reported that flaps at peak "remove
+upward velocity" — because the halving path consumed 100 fuel
+per flap, so after 2 flaps the fuel gate refused further flaps
+entirely.
+
+v2 rewrites the 2-byte `FLD ST(1)` at VA 0x8939F to
+`FLD ST(0)`.  Duplicates the just-loaded `flap_height` instead
+of `fVar1`, so the subsequent FCOMP compares fh with fh (equal)
+and the JP at 0x893A8 is always taken — skipping the min
+selection.  `fVar2 = flap_height` every flap → full v0.  `fVar1`
+is preserved untouched, so the below-6m halving check +
+`flap_below_peak_scale` slider behave normally.
+
+Site moved from `AZURIK_PATCH_FLAP_AT_PEAK_FSUB_VA` (0x89381) to
+`AZURIK_PATCH_FLAP_AT_PEAK_FLD_ST_VA` (0x8939F) in `azurik.h`.
+Ghidra annotated with both VAs + the v1/v2 explanation.
+
+**2. `roll_speed_scale` retired from the GUI / randomizer.**
+
+User testing confirms the WHITE-button roll animation
+(`characters/garret4/roll_forward`) drives position via
+animation root motion — the 3.0 FMUL on `magnitude` at VA
+0x849E4 doesn't feed that pipeline.  The slider scaled a
+magnitude multiplier the animation never consumed, so it had
+no observable in-game effect.
+
+The ParametricPatch + apply function remain defined (test
+coverage unchanged), but the slider no longer appears in
+`PLAYER_PHYSICS_SITES` / the Patches page / the randomizer
+CLI.  A real roll-speed fix would need a C shim that
+intercepts the root-motion application.  See
+`docs/LEARNINGS.md` § "Roll speed is animation-root-motion".
+
+**3. `no_fall_damage` / `infinite_fuel` / `wing_flap_count`
+tagged `broken`, with config-editor pointers in description.**
+
+User testing on 2026-04 confirmed all three are ineffective
+in-game despite the byte patches landing correctly:
+- `no_fall_damage` — a third damage path remains unpinned.
+- `infinite_fuel` — attack-cast fuel drain (from
+  `attacks_anims`'s `Fuel multiplier`) is not patched.
+- `wing_flap_count` — shim applies but the game reads the
+  flap count through a path we haven't traced to override.
+
+The packs stay registered (tests still pass) but each
+description now starts with `[BROKEN — prefer the config
+editor]` and points to the concrete workaround:
+- Fall damage → `damage` section thresholds, or
+  `critters_damage` HP on the player row.
+- Fuel drain → `armor_properties.fuel_max` or zero every
+  `attacks_anims.Fuel multiplier`.
+- Flap count → `armor_properties.Flaps` column per-armor-row.
+
+**4. Better slider descriptions in the GUI.**
+
+Added an optional `description: str` field on
+`ParametricPatch` (backwards-compatible — default is empty).
+When non-empty, the GUI renders it as a wrapped gray caption
+under the bold slider label.  Populated for the three flap
+sliders to clarify which is which:
+- `flap_height_scale` — first flap's v0.
+- `flap_below_peak_scale` — 2nd+ flaps more than 6 m below peak.
+- `flap_at_peak_scale` — 2nd+ flaps near peak (binary toggle).
+
+**5. Critter walk/run/accel/turn — confirmed not dead in the
+config editor.**
+
+User asked whether these are dead data.  Investigation via
+Ghidra (FUN_0003A610 loader for `critters_walking`,
+FUN_00049480 loader for `critters_critter_data`) confirms:
+
+- `critters_walking` has 18 columns, all read at boot.
+  Doesn't contain "walk speed" / "run speed" / "accel" /
+  "turn speed" at all — it's AI behaviour (stalk / ambush /
+  flee / footstep timing).
+- `critters_critter_data` has `walkSpeed`, `runSpeed`,
+  `walkAnimSpeed`, `runAnimSpeed`, all read at boot and
+  consumed by `player_walk_state` / NPC AI routines.
+
+Nothing to retire; the config editor was already pointing at
+live values.  Documented in CHANGELOG here + schema
+descriptions.
+
 ### Shim-header sync + code cleanup (late April 2026)
 
 - Sync'd `azurik.h`, `azurik_vanilla.h`, `vanilla_symbols.py`, and

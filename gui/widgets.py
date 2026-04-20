@@ -635,6 +635,18 @@ class ParametricSlider(ttk.Frame):
             foreground="gray",
         ).pack(side=tk.RIGHT)
 
+        # Optional long-form description (set on the ParametricPatch).
+        description = getattr(patch, "description", "") or ""
+        if description.strip():
+            desc = ttk.Label(
+                self,
+                text=description.strip(),
+                foreground="gray",
+                wraplength=560,
+                justify=tk.LEFT,
+            )
+            desc.pack(fill=tk.X, pady=(1, 2))
+
         # Row 2: slider + numeric entry + reset
         row = ttk.Frame(self)
         row.pack(fill=tk.X, pady=(2, 4))

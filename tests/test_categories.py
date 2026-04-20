@@ -298,12 +298,13 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         browser = PackBrowser(self._root, all_packs(), {},
                               pack_params=params)
         slider_keys = sorted(browser.sliders().keys())
-        # player_physics owns 11 sliders post-late-April-2026:
+        # player_physics owns 10 sliders post-late-April-2026:
         #   flap_below_peak_scale (née flap_subsequent_scale) and the
         #   new flap_at_peak_scale are separate controls for
-        #   below-6m vs at-peak wing-flap height.  wing_flap_count
-        #   contributes 3 more (per-air-power-level flap counts) in
-        #   the same Player tab but as a distinct pack.
+        #   below-6m vs at-peak wing-flap height; roll_speed_scale
+        #   was retired (animation root motion, not magnitude).
+        #   wing_flap_count contributes 3 more in the same Player
+        #   tab but as a distinct pack.
         self.assertEqual(
             slider_keys,
             [("player_physics", "air_control_scale"),
@@ -313,7 +314,6 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
              ("player_physics", "flap_height_scale"),
              ("player_physics", "gravity"),
              ("player_physics", "jump_speed_scale"),
-             ("player_physics", "roll_speed_scale"),
              ("player_physics", "slope_slide_speed_scale"),
              ("player_physics", "swim_speed_scale"),
              ("player_physics", "walk_speed_scale"),
@@ -322,7 +322,7 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
              ("wing_flap_count", "flaps_air_power_3")])
         # Initial values mirrored into pack_params.
         self.assertIn("player_physics", params)
-        self.assertEqual(len(params["player_physics"]), 11)
+        self.assertEqual(len(params["player_physics"]), 10)
         self.assertIn("wing_flap_count", params)
         self.assertEqual(len(params["wing_flap_count"]), 3)
 

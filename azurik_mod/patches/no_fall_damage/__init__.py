@@ -139,18 +139,22 @@ def apply_no_fall_damage_patch(xbe_data: bytearray) -> None:
 FEATURE = register_feature(Feature(
     name="no_fall_damage",
     description=(
-        "Disables fall damage.  Flips the top-level branch in "
-        "FUN_0008AB70 so every landing — no matter the velocity — "
-        "routes to the \"no damage dealt\" return path.  Leaves "
-        "the HP max, damage-multiplier, and other damage systems "
-        "untouched; only fall damage is affected."
+        "[BROKEN — prefer the config editor] Rewrites the "
+        "prologues of both fall-damage dispatchers "
+        "(fall_damage_dispatch at 0x8AB70 and fall_death_dispatch "
+        "at 0x8BE00) to XOR AL,AL ; RET N.  User testing on 2026-04 "
+        "showed damage still fires via a third path we haven't "
+        "pinned down yet.  Workaround: open the config editor, "
+        "section `damage`, and raise the thresholds / reduce the "
+        "multipliers for fall-height 1/2/3; or edit `critters_damage` "
+        "→ hitPoints on the player row so every fall is survivable."
     ),
     sites=NO_FALL_DAMAGE_SITES,
     apply=apply_no_fall_damage_patch,
     default_on=False,
     included_in_randomizer_qol=False,
     category="player",
-    tags=("cheat", "movement"),
+    tags=("cheat", "movement", "broken"),
 ))
 
 

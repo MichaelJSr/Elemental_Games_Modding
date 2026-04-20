@@ -42,7 +42,7 @@ register_category(Category(
 | Pack                 | Sites | Default-on | Category       | Tags          | Folder |
 |----------------------|-------|------------|----------------|---------------|--------|
 | `fps_unlock`         | 50    | no         | `performance`  | fps           | [azurik_mod/patches/fps_unlock/](../azurik_mod/patches/fps_unlock/) |
-| `player_physics`     | 11    | no         | `player`       | physics       | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
+| `player_physics`     | 10    | no         | `player`       | physics       | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
 | `qol_skip_logo`      | 1     | no         | `boot`         | c-shim        | [azurik_mod/patches/qol_skip_logo/](../azurik_mod/patches/qol_skip_logo/) |
 | `qol_gem_popups`     | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_gem_popups/](../azurik_mod/patches/qol_gem_popups/) |
 | `qol_other_popups`   | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_other_popups/](../azurik_mod/patches/qol_other_popups/) |
@@ -347,12 +347,14 @@ deprecated aliases for `--player-roll-scale` / `--roll-speed`.
 
 ### GUI
 
-The Patches page renders 11 `ParametricSlider` widgets under the `player_physics` section (gravity, walk, roll, climb, swim, jump, air-control, flap-height, flap-below-peak, flap-at-peak, slope-slide).  Slider values live on `AppState.pack_params["player_physics"]` and are forwarded to `cmd_randomize_full` / `cmd_apply_physics` by `gui/backend.run_randomizer`.  The sliders support typing values beyond the min/max bounds in the text box (with a `[!]` badge) for expert tuning.
+The Patches page renders 10 `ParametricSlider` widgets under the `player_physics` section (gravity, walk, climb, swim, jump, air-control, flap-height, flap-below-peak, flap-at-peak, slope-slide).  Slider values live on `AppState.pack_params["player_physics"]` and are forwarded to `cmd_randomize_full` / `cmd_apply_physics` by `gui/backend.run_randomizer`.  Sliders support typing values beyond the min/max bounds in the text box (with a `[!]` badge) for expert tuning, and each carries a long-form description rendered under the label.
+
+`roll_speed_scale` was retired in late April 2026 — the WHITE-button boost FMUL does scale the shared `magnitude` field, but the roll animation drives position via animation root motion that doesn't consume `magnitude`, so the slider had no observable in-game effect.  The ParametricPatch remains defined for back-compat but is absent from `PLAYER_PHYSICS_SITES`; see `docs/LEARNINGS.md` § "Roll speed is animation-root-motion".
 
 The wing-flap controls are split across three sliders:
 - `flap_height_scale` — scales the FIRST flap's v0 (VA 0x893AE FLD rewrite).
 - `flap_below_peak_scale` (née `flap_subsequent_scale`) — scales the 0.5-halving factor for 2nd+ flaps more than 6m below peak (VA 0x893DD FMUL rewrite).
-- `flap_at_peak_scale` — binary toggle (any value != 1.0 enables) that NOPs the 3-byte `FSUB [EBX+0x5C]` at VA 0x89381, making `fVar2 = flap_height` always.  Gives full-strength subsequent flaps near peak.  Combine with `flap_below_peak_scale = 2.0` to cancel the halving too.
+- `flap_at_peak_scale` — binary toggle (any value != 1.0 enables) that rewrites the 2-byte `FLD ST(1)` at VA 0x8939F to `FLD ST(0)`, collapsing the `min(remaining, flap_height)` cap to `flap_height` always.  Gives full-strength subsequent flaps near peak without affecting the below-6m halving check.
 
 ### Diagnostics
 

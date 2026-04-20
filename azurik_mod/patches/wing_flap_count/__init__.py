@@ -452,20 +452,24 @@ def _custom_apply(
 FEATURE = register_feature(Feature(
     name="wing_flap_count",
     description=(
-        "Set per-air-power-level wing-flap counts independently: "
-        "Air Power 1 (vanilla: 1 flap), Air Power 2 (vanilla: 2), "
-        "Air Power 3 (vanilla: 5).  Installs a 47-byte dispatch "
-        "shim at the flap-count read site inside FUN_00089300 "
-        "that swaps the vanilla armor.flap_count read for a "
-        "user-provided value selected by the current air-power "
-        "level.  Values at vanilla produce a byte-identity no-op."
+        "[BROKEN — prefer the config editor] Installs a 47-byte "
+        "dispatch shim at the flap-count read site inside "
+        "FUN_00089300 to override per-air-power-level flap "
+        "counts.  User testing on 2026-04 reports no observable "
+        "effect in-game despite the shim applying cleanly; likely "
+        "there's an animation-driven re-check we haven't found "
+        "yet.  Workaround: open the config editor → "
+        "`armor_properties` → `Flaps` column and edit the value "
+        "for each armor row directly (fire1..3 / water1..3 / "
+        "air1..3 / earth1..3).  The game reads that column fresh "
+        "each flap so your change takes effect immediately."
     ),
     sites=WING_FLAP_COUNT_SITES,
     apply=lambda xbe_data: None,   # no-op; custom_apply is used
     default_on=False,
     included_in_randomizer_qol=False,
     category="player",
-    tags=("cheat", "movement", "air-power"),
+    tags=("cheat", "movement", "air-power", "broken"),
     dynamic_whitelist_from_xbe=_wing_flap_count_dynamic_whitelist,
     custom_apply=_custom_apply,
 ))
