@@ -1222,6 +1222,16 @@ enum PlayerPhysicsState {
 #define AZURIK_PATCH_ROLL_FMUL_VA               0x000849E4
 #define AZURIK_PATCH_WALK_FLD_VA                0x00085F62
 #define AZURIK_PATCH_JUMP_FLD_VA                0x00089160
+/* 6-byte ``FADD [ESI+0x144]`` inside ``player_jump_init`` that
+ * feeds the peak_z latch (``FSTP [ESI+0x164]`` at VA 0x8915A).
+ * The ``wing_flap_ceiling_scale`` slider installs a 15-byte
+ * CALL-style shim here: load flap_height, FMUL by user scale,
+ * FADDP the entity.z already on ST(0), RET.  Net effect:
+ * ``peak_z = entity.z + K * flap_height`` instead of
+ * ``entity.z + flap_height`` — raises the wing-flap altitude
+ * ceiling without touching per-flap v0 (orthogonal to
+ * ``flap_height_scale`` / ``flap_below_peak_scale``). */
+#define AZURIK_PATCH_PEAK_Z_FADD_VA             0x00089154
 #define AZURIK_PATCH_FLAP_FLD_VA                0x000893AE
 #define AZURIK_PATCH_FLAP_SUB_FMUL_VA           0x000893DD
 /* Historical 2-byte FLD-ST site (the v2 byte-patch attempt

@@ -414,6 +414,48 @@ CLIMB_SPEED_SCALE = ParametricPatch(
     ),
 )
 
+# Wing-flap altitude ceiling — shim-backed (round 11).
+#
+# Background: `player_jump_init` latches
+# ``peak_z = entity.z + entity.flap_height`` via the FADD/FSTP pair
+# at VA 0x89154 / 0x8915A, and that value is never refreshed during
+# airborne state.  ``wing_flap``'s cap is emergent from this:
+# ``fVar2 = min(peak_z + flap_height - current_z, flap_height)``, so
+# subsequent flaps can't exceed ``initial_flap_z + flap_height``.
+#
+# This slider multiplies the FADD's second operand so the latch
+# becomes ``entity.z + ceiling_scale * entity.flap_height``.  It's
+# ORTHOGONAL to the per-flap impulse sliders: ``flap_height_scale``
+# scales v0 for every flap, ``flap_below_peak_scale`` scales the
+# >6m-below-peak halving, and ``wing_flap_ceiling_scale`` raises
+# the usable altitude envelope.
+#
+# Implementation is a 15-byte hand-assembled trampoline (FLD /
+# FMUL / FADDP / RET) rather than a byte-level operand rewrite
+# because the FADD reads a per-armor field (can't precompute
+# K × flap_height at patch time).
+WING_FLAP_CEILING_SCALE = ParametricPatch(
+    name="wing_flap_ceiling_scale",
+    label="Wing-flap altitude ceiling",
+    va=0,
+    size=0,
+    original=b"",
+    default=1.0,
+    slider_min=0.1,
+    slider_max=20.0,
+    slider_step=0.05,
+    unit="x",
+    encode=lambda v: struct.pack("<d", float(v)),
+    decode=lambda b: struct.unpack("<d", b)[0],
+    description=(
+        "Multiplier on the flap_height term in the peak_z latch "
+        "at jump-init (VA 0x89154).  Raises the altitude ceiling "
+        "that caps subsequent-flap v0 without touching per-flap "
+        "impulse.  At 2x the player can flap up to ~2x higher "
+        "than the first flap; at 10x, effectively uncapped."
+    ),
+)
+
 # Back-compat alias: the old name `RUN_SPEED_SCALE` shipped before we
 # realised the 3.0 multiplier is the roll boost, not a run modifier.
 # Keep as an import alias so any external code still works.
@@ -709,6 +751,27 @@ _FLAP_PEAK_CAP_SITE_VANILLA = bytes([
     0xD9, 0xC1,                # FLD ST(1)  — dup fVar1
 ])
 
+# Wing-flap ceiling shim (round 11).
+#
+# Hooks the ``FADD [ESI+0x144]`` in ``player_jump_init`` that feeds
+# the ``FSTP [ESI+0x164]`` peak_z latch.  We replace the 6-byte
+# FADD with a ``CALL rel32 + NOP`` trampoline; the shim does
+# ``FLD [ESI+0x144] ; FMUL [scale_va] ; FADDP ST1 ; RET``.  Net
+# effect: ``peak_z = entity.z + ceiling_scale * flap_height``.
+#
+# At shim entry the FPU stack has the vanilla-loaded ``entity.z``
+# on top (from ``FLD [EDI+0x5C]`` at VA 0x8914C, which the
+# trampoline leaves untouched).  FADDP ST1 pops the scaled
+# flap_height and adds it into that ``entity.z``, matching the
+# vanilla FADD's semantics exactly — only the magnitude of the
+# added term changes.  After RET, execution resumes at the
+# untouched ``FSTP [ESI+0x164]`` at VA 0x8915A.
+_PEAK_Z_HOOK_VA = 0x00089154
+_PEAK_Z_HOOK_VANILLA = bytes([
+    0xD8, 0x86, 0x44, 0x01, 0x00, 0x00,   # FADD [ESI+0x144]
+])
+_PEAK_Z_SHIM_BODY_SIZE = 15
+
 # Vanilla runtime value of CritterData.run_speed (+0x40) for the
 # player entity.  Confirmed via lldb at VA 0x00085F65 — the FLD
 # [EAX+0x40] immediately after MOV EAX, [EBP+0x34] in FUN_00085F50.
@@ -743,6 +806,7 @@ def apply_player_physics(
     flap_at_peak_scale: float | None = None,
     climb_scale: float | None = None,
     slope_slide_scale: float | None = None,
+    wing_flap_ceiling_scale: float | None = None,
     # Back-compat alias: callers that still pass run_scale get
     # transparently routed to roll_scale (the new name).
     run_scale: float | None = None,
@@ -798,6 +862,11 @@ def apply_player_physics(
     # user reports of no observable change).  See docs/LEARNINGS.md
     # § "Retired physics sliders" for the full RE rationale.
     _ = (flap_at_peak_scale, climb_scale, slope_slide_scale)
+
+    wfc = (1.0 if wing_flap_ceiling_scale is None
+           else float(wing_flap_ceiling_scale))
+    if wfc != 1.0:
+        apply_wing_flap_ceiling(xbe_data, ceiling_scale=wfc)
 
 
 def apply_player_speed(
@@ -1151,6 +1220,79 @@ def apply_flap_height(
     return True
 
 
+def apply_wing_flap_ceiling(
+    xbe_data: bytearray,
+    *,
+    ceiling_scale: float = 1.0,
+) -> bool:
+    """Install the wing-flap altitude-ceiling shim.
+
+    Replaces the 6-byte ``FADD [ESI+0x144]`` at VA 0x89154 (inside
+    ``player_jump_init``, which computes the ``peak_z`` latch used
+    by every subsequent wing flap's altitude cap) with a 5-byte
+    ``CALL rel32`` + 1 ``NOP``.  The 15-byte shim body performs:
+
+    .. code-block:: asm
+
+        FLD   [ESI+0x144]         ; D9 86 44 01 00 00 — flap_height
+        FMUL  [ceiling_scale_va]  ; D8 0D <abs32>     — × user K
+        FADDP ST1                 ; DE C1             — pop, add to ST0
+        RET                       ; C3                — resume at 0x8915A
+
+    Post-RET control returns to the unchanged ``FSTP [ESI+0x164]``
+    at VA 0x8915A, which writes the adjusted sum to ``peak_z``.
+
+    Net effect: ``peak_z = entity.z + ceiling_scale * flap_height``
+    instead of the vanilla ``entity.z + flap_height``.  Orthogonal
+    to ``flap_height_scale`` (per-flap v0) and ``flap_below_peak_scale``
+    (2nd+ flap halving factor) — those three knobs cleanly compose.
+
+    Returns ``True`` on apply, ``False`` on no-op / drift / already-
+    installed.  Idempotent (second apply is a no-op thanks to the
+    trampoline-shape detection in :mod:`shim_builder`).
+    """
+    if ceiling_scale == 1.0:
+        return False
+
+    from azurik_mod.patching.shim_builder import (
+        HandShimSpec,
+        emit_fmul_abs32,
+        install_hand_shim,
+        with_sentinel,
+    )
+
+    spec = HandShimSpec(
+        hook_va=_PEAK_Z_HOOK_VA,
+        hook_vanilla=_PEAK_Z_HOOK_VANILLA,
+        trampoline_mode="call",
+        hook_pad_nops=1,
+        body_size=_PEAK_Z_SHIM_BODY_SIZE,
+    )
+
+    def _build_body(shim_va: int, data_va: int) -> bytes:
+        # ST(0) = entity.z (loaded vanilla at 0x8914C and untouched
+        # by the trampoline call's stack push).  We load
+        # flap_height, scale it, add-pop to ST(0), return.
+        body = (
+            b"\xD9\x86\x44\x01\x00\x00"   # FLD  [ESI+0x144]
+            + emit_fmul_abs32(data_va)     # FMUL [data_va]
+            + b"\xDE\xC1"                 # FADDP ST1
+            + b"\xC3"                      # RET
+        )
+        assert len(body) == _PEAK_Z_SHIM_BODY_SIZE, (
+            f"wing_flap_ceiling body is {len(body)} B, expected "
+            f"{_PEAK_Z_SHIM_BODY_SIZE}")
+        return body
+
+    result = install_hand_shim(
+        xbe_data, spec,
+        data_block=with_sentinel(struct.pack("<f", float(ceiling_scale))),
+        build_body=_build_body,
+        label=f"Wing-flap altitude ceiling: {ceiling_scale:.3f}x",
+    )
+    return result is not None
+
+
 def apply_slope_slide_speed(
     xbe_data: bytearray,
     *,
@@ -1350,6 +1492,34 @@ def _player_speed_dynamic_whitelist(
                 if fo is not None:
                     ranges.append((fo, fo + 4))
 
+    # Wing-flap ceiling shim (round 11).  The shim writes: 6 bytes
+    # at the hook (CALL rel32 + NOP), a 15-byte shim body, and a
+    # 4-byte ``float`` scale block.  Delegate to the shim_builder
+    # helper so the body + data VAs are parsed out of the landed
+    # trampoline automatically.
+    try:
+        from azurik_mod.patching.shim_builder import (
+            HandShimSpec, whitelist_for_hand_shim)
+        spec = HandShimSpec(
+            hook_va=_PEAK_Z_HOOK_VA,
+            hook_vanilla=_PEAK_Z_HOOK_VANILLA,
+            trampoline_mode="call",
+            hook_pad_nops=1,
+            body_size=_PEAK_Z_SHIM_BODY_SIZE,
+        )
+        ranges.extend(whitelist_for_hand_shim(
+            xbe, spec,
+            # Body layout: FLD[ESI+0x144] (6 B) | FMUL[abs32] (6 B)
+            # | FADDP (2 B) | RET (1 B).  The FMUL operand sits at
+            # body offset 6; opcode bytes are D8 0D.
+            data_abs32_offsets=(6,),
+            data_abs32_opcode=b"\xD8\x0D",
+            data_whitelist_size=4,
+        ))
+    except Exception:  # noqa: BLE001
+        # Graceful for pre-apply / non-Azurik buffers.
+        pass
+
     return ranges
 
 
@@ -1365,8 +1535,9 @@ PLAYER_PHYSICS_SITES = [
     AIR_CONTROL_SCALE,
     FLAP_HEIGHT_SCALE,
     FLAP_BELOW_PEAK_SCALE,
+    WING_FLAP_CEILING_SCALE,
 ]
-"""Registered Patches-page sites (7 working sliders).
+"""Registered Patches-page sites (8 working sliders).
 
 Retired sliders (kept as module symbols for back-compat / tests,
 but no longer surfaced in the GUI or randomizer):
@@ -1408,6 +1579,7 @@ def _custom_apply(
     flap_at_peak_scale: float | None = None,
     climb_speed_scale: float | None = None,
     slope_slide_speed_scale: float | None = None,
+    wing_flap_ceiling_scale: float | None = None,
     # Back-compat: the old kwarg spellings.  New callers should use
     # the *_speed_scale forms, but CLI / serialized configs that
     # predate the rename still work.
@@ -1458,6 +1630,7 @@ def _custom_apply(
         flap_at_peak_scale=flap_at_peak_scale,
         climb_scale=climb,
         slope_slide_scale=slope_slide_speed_scale,
+        wing_flap_ceiling_scale=wing_flap_ceiling_scale,
     )
 
 
@@ -1497,6 +1670,7 @@ __all__ = [
     "SLOPE_SLIDE_SPEED_SCALE",
     "SWIM_SPEED_SCALE",
     "WALK_SPEED_SCALE",
+    "WING_FLAP_CEILING_SCALE",
     "apply_air_control_speed",
     "apply_climb_speed",
     "apply_flap_at_peak",
@@ -1507,4 +1681,5 @@ __all__ = [
     "apply_player_speed",
     "apply_slope_slide_speed",
     "apply_swim_speed",
+    "apply_wing_flap_ceiling",
 ]

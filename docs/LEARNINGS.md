@@ -206,10 +206,69 @@ Round 10 deleted the `flap_at_peak` pack and made
   when `fVar2 = 0` (the ceiling case), `v0 = scale * 0 = 0`.
 - Scaling `flap_below_peak_scale` (the halving FMUL at 0x893DD)
   only fires for flaps taken >6 m below peak.
-- So there's no user-facing knob that defeats the ceiling —
-  that's by design.  Pair a higher first-flap `flap_height_scale`
-  with a higher `jump_speed_scale` to make the ceiling itself
-  higher.
+- **Round 11: `wing_flap_ceiling_scale`** — scales the peak_z
+  latch at the source instead of fighting downstream state.
+  See "Wing-flap ceiling — shim at jump_init" below.
+
+### Wing-flap ceiling — shim at jump_init (round 11)
+
+The `peak_z` latch in `player_jump_init` is the **source of
+truth** for the wing-flap altitude cap.  It has exactly one
+writer: the `FSTP [ESI+0x164]` at VA 0x8915A, fed by the
+`FADD [ESI+0x144]` at VA 0x89154 that adds `entity.flap_height`
+to `entity.z` (loaded by the `FLD [EDI+0x5C]` at VA 0x8914C).
+Nothing else in the binary writes `[ESI+0x164]` for a player-
+shaped entity (verified by scanning the full `.text` section
+for FSTP/FST/MOV patterns at that offset; one incidental hit
+at VA 0x026615 writes a different struct's field of the same
+offset, confirmed via absence of `[ESI+0x144]` / `[ESI+0x5C]`
+touches in that function).
+
+Because there's no downstream re-derivation, scaling the
+`flap_height` term at the FADD source propagates cleanly into
+every subsequent `wing_flap` invocation: `fVar1 = peak_z +
+flap_height - current_z` gets the bigger `peak_z`, so `fVar2 =
+min(fVar1, flap_height)` stays positive further above ground,
+and the `sqrt(2g*fVar2)` v0 formula produces a real impulse
+instead of 0 near-peak.
+
+Why rounds 7–10 all failed and this one doesn't: the earlier
+shims hooked **downstream** of the peak_z computation (at the
+min-cap in `wing_flap` itself, or at the final vz FSTP, or at
+animation root-motion commit).  Every one of those sites had a
+consumer that re-clamped or re-computed the value we'd
+written.  Round 11 hooks **upstream** — we change what
+"peak" *means*, not what `wing_flap` *does* with it, so every
+reader downstream observes the new value with vanilla
+semantics unchanged.
+
+**Shim implementation** (15 bytes, hand-assembled via
+`shim_builder`):
+
+```asm
+FLD   [ESI+0x144]     ; D9 86 44 01 00 00 — load flap_height
+FMUL  [scale_va]      ; D8 0D <abs32>     — × ceiling_scale
+FADDP ST1             ; DE C1             — pop, add to z (on ST0)
+RET                   ; C3                — resume at 0x8915A
+```
+
+Installed at VA 0x89154 (the vanilla FADD site) as a 5-byte
+`CALL rel32` + 1-byte NOP.  On shim entry ST(0) = `entity.z`
+(loaded by the vanilla FLD at 0x8914C and preserved across the
+CALL's return-address push).  After RET the shim returns to
+the unchanged `FSTP [ESI+0x164]` at 0x8915A, which writes the
+adjusted sum to `peak_z`.
+
+Net effect: `peak_z = entity.z + ceiling_scale * flap_height`.
+The slider is orthogonal to `flap_height_scale` (per-flap v0)
+and `flap_below_peak_scale` (>6m-below halving) — the three
+compose cleanly.
+
+**Design intent check**: this IS a workaround to vanilla's
+intentional anti-infinite-altitude clamp.  The game caps
+subsequent-flap altitude on purpose, and scaling the ceiling
+past 5x or so is clearly outside the designer's intent.  The
+slider defaults to 1.0 (vanilla) and is opt-in.
 
 ### Air-control speed has TWO dominant writer sites — FUN_00083F90 (April 2026)
 

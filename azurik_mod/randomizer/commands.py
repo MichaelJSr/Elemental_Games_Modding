@@ -1302,6 +1302,8 @@ def cmd_randomize_full(args):
         climb_scale = float(getattr(args, 'player_climb_scale', None) or 1.0)
         slope_slide_scale = float(
             getattr(args, 'player_slope_slide_scale', None) or 1.0)
+        wing_flap_ceiling_scale = float(
+            getattr(args, 'player_wing_flap_ceiling_scale', None) or 1.0)
         player_char = getattr(args, 'player_character', None)
         xbe_path = extract_dir / "default.xbe"
 
@@ -1324,7 +1326,8 @@ def cmd_randomize_full(args):
                                or flap_below_peak_scale != 1.0
                                or flap_at_peak_scale != 1.0
                                or climb_scale != 1.0
-                               or slope_slide_scale != 1.0),
+                               or slope_slide_scale != 1.0
+                               or wing_flap_ceiling_scale != 1.0),
         }
 
         needs_xbe = any(_FLAG_PACKS.values()) or bool(player_char)
@@ -1350,6 +1353,7 @@ def cmd_randomize_full(args):
                     "flap_at_peak_scale": flap_at_peak_scale,
                     "climb_speed_scale": climb_scale,
                     "slope_slide_speed_scale": slope_slide_scale,
+                    "wing_flap_ceiling_scale": wing_flap_ceiling_scale,
                 },
             }
 
@@ -1913,6 +1917,8 @@ def cmd_apply_physics(args):
     climb_scale = float(getattr(args, "climb_speed", None) or 1.0)
     slope_slide_scale = float(
         getattr(args, "slope_slide_speed", None) or 1.0)
+    wing_flap_ceiling_scale = float(
+        getattr(args, "wing_flap_ceiling", None) or 1.0)
 
     if (gravity is None
             and walk_scale == 1.0
@@ -1924,14 +1930,15 @@ def cmd_apply_physics(args):
             and flap_below_peak_scale == 1.0
             and flap_at_peak_scale == 1.0
             and climb_scale == 1.0
-            and slope_slide_scale == 1.0):
+            and slope_slide_scale == 1.0
+            and wing_flap_ceiling_scale == 1.0):
         print("No physics changes requested.  "
               "Pass --gravity, --walk-speed, --roll-speed (or "
               "legacy --run-speed), --swim-speed, --jump-speed, "
               "--air-control-speed, --flap-height, "
               "--flap-below-peak (or legacy --flap-subsequent), "
-              "--flap-at-peak, --climb-speed, and/or "
-              "--slope-slide-speed.")
+              "--flap-at-peak, --climb-speed, "
+              "--slope-slide-speed, and/or --wing-flap-ceiling.")
         return
 
     def _patch_xbe_in_place(xbe_path: Path) -> None:
@@ -1955,6 +1962,9 @@ def cmd_apply_physics(args):
             climb_scale=climb_scale if climb_scale != 1.0 else None,
             slope_slide_scale=(slope_slide_scale
                                if slope_slide_scale != 1.0 else None),
+            wing_flap_ceiling_scale=(wing_flap_ceiling_scale
+                                     if wing_flap_ceiling_scale != 1.0
+                                     else None),
         )
         xbe_path.write_bytes(data)
 

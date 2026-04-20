@@ -316,6 +316,16 @@ def main() -> None:
                         metavar="X",
                         help="[RETIRED — no observable effect; "
                              "engine re-derives v0 downstream]")
+    p_full.add_argument("--player-wing-flap-ceiling-scale", type=float,
+                        metavar="X",
+                        help="Multiplier on the wing-flap altitude "
+                             "ceiling (default 1.0, range 0.1-20.0). "
+                             "Rewrites the FADD at VA 0x89154 in "
+                             "player_jump_init via a shim so "
+                             "peak_z = entity.z + K * flap_height. "
+                             "Orthogonal to --player-flap-scale "
+                             "(per-flap v0).  2x ≈ twice the ceiling; "
+                             "10x ≈ effectively uncapped.")
     p_full.add_argument("--player-climb-scale", type=float,
                         metavar="X",
                         help="[RETIRED — no observable effect; "
@@ -396,6 +406,14 @@ def main() -> None:
     p_physics.add_argument("--slope-slide-speed", type=float,
         metavar="X",
         help="[RETIRED — only covers slow-slide state]")
+    p_physics.add_argument("--wing-flap-ceiling", type=float,
+        metavar="X",
+        help="Wing-flap altitude-ceiling multiplier (default 1.0, "
+             "range 0.1-20.0).  Shim-scales the peak_z latch at "
+             "VA 0x89154 in player_jump_init, so subsequent-flap "
+             "v0 caps activate at K*flap_height above ground "
+             "instead of just flap_height.  Orthogonal to "
+             "--flap-height.")
 
     # inspect-physics (diagnostic — read-only dump of patch state)
     p_inspect = sub.add_parser(

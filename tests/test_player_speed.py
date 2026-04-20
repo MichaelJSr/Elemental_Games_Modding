@@ -833,11 +833,14 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
                            if hi - lo == 6]
         two_byte_ranges = [(lo, hi) for lo, hi in ranges
                            if hi - lo == 2]
-        # 6 six-byte instruction-site rewrites: walk / swim / jump /
-        # flap / roll-FMUL / flap_subsequent-FMUL.
-        self.assertEqual(len(six_byte_ranges), 6,
-            msg="6 instr-site rewrites "
-                "(walk/swim/jump/flap/roll/flap_subsequent)")
+        # 7 six-byte instruction-site rewrites: walk / swim / jump /
+        # flap / roll-FMUL / flap_subsequent-FMUL / wing_flap_ceiling
+        # hook slot (always whitelisted even pre-apply — the shim
+        # trampoline at VA 0x89154 is a 5-byte CALL + 1-byte NOP
+        # covered by a 6-byte range).  Round 11 added the last one.
+        self.assertEqual(len(six_byte_ranges), 7,
+            msg="7 instr-site rewrites (walk/swim/jump/flap/roll/"
+                "flap_subsequent/wing_flap_ceiling-hook)")
         # 4-byte ranges:
         #   - 5 primary air-control imm32 sites
         #   - 2 secondary air-control imm32 sites (inside FUN_00083F90)

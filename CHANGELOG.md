@@ -2,6 +2,61 @@
 
 ## Unreleased
 
+### Wing-flap altitude-ceiling slider (round 11 cont.)
+
+New `wing_flap_ceiling_scale` slider on `player_physics` that
+raises (or lowers) the wing-flap altitude cap independently of
+every other physics knob.  Defaults to 1.0 (vanilla).
+
+**Background**: vanilla `player_jump_init` latches
+`peak_z = entity.z + flap_height` once and never refreshes it,
+making the wing-flap altitude cap equal to `flap_height` above
+the jump's starting ground.  `flap_height_scale` and
+`flap_below_peak_scale` scale the per-flap v0 impulse, but
+neither lifts the ceiling — once the player's above `peak_z`,
+both produce zero v0.  See `docs/LEARNINGS.md` §
+"Wing-flap v0 cap" for the full mechanics.
+
+**Hook**: 6-byte `FADD [ESI+0x144]` at VA 0x89154 (confirmed
+single writer path to player `peak_z`; exhaustive XBE scan for
+FSTP/FST/MOV `[reg+0x164]` ruled out interference).
+
+**Shim**: 15-byte hand-assembled via `shim_builder`:
+
+```asm
+FLD   [ESI+0x144]   ; load flap_height
+FMUL  [scale_va]    ; × ceiling_scale
+FADDP ST1           ; pop, add to entity.z already on ST0
+RET                 ; resume at 0x8915A (vanilla FSTP)
+```
+
+Installed as a 5-byte `CALL rel32` + 1-byte NOP at the vanilla
+FADD.  Net effect:
+`peak_z = entity.z + ceiling_scale * flap_height`.  Orthogonal
+to `flap_height_scale` (per-flap v0) and `flap_below_peak_scale`
+(>6m halving) — the three compose cleanly.
+
+**Why this round works when rounds 7–10 didn't**: the earlier
+`flap_at_peak` shim attempts hooked *downstream* of peak_z (at
+the min-cap in `wing_flap`, the final vz FSTP, or animation
+root-motion).  Every one of those was overridden by a later
+consumer.  Round 11 hooks *upstream* at the peak_z latch
+itself, changing what "peak" means rather than fighting the
+downstream clamp.
+
+Threaded through the full apply surface: `apply_wing_flap_ceiling`
+Python API, `--player-wing-flap-ceiling-scale` on
+`randomize-full`, `--wing-flap-ceiling` on `apply-physics`, and
+GUI slider on the Patches page.  New anchor
+`AZURIK_PATCH_PEAK_Z_FADD_VA = 0x00089154` in `azurik.h`.
+
+**Tests**: 17 new tests in `tests/test_wing_flap_ceiling.py`
+covering descriptor shape, hook byte pinning, apply / reapply
+behaviour, shim body shape, scale-float injection decode,
+end-to-end routing via `apply_player_physics` + `_custom_apply`,
+and dynamic-whitelist coverage for both vanilla and patched
+states.  795 tests pass (+17 over round 11 initial).
+
 ### Per-apply float injection for C shims (round 11)
 
 New capability on the C-shim platform: late-bound float constants

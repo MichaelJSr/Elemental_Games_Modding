@@ -298,10 +298,13 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         browser = PackBrowser(self._root, all_packs(), {},
                               pack_params=params)
         slider_keys = sorted(browser.sliders().keys())
-        # player_physics owns 7 working sliders as of round 10.
-        # The 4 shim-backed packs (flap_at_peak, slope_slide_speed,
-        # root_motion_roll, root_motion_climb) were deleted after
-        # they consistently failed to produce in-game effects.
+        # player_physics owns 8 working sliders as of round 11.
+        # Round 10 deleted the 4 shim-backed "per-flap" attempts
+        # (flap_at_peak, slope_slide_speed, root_motion_roll,
+        # root_motion_climb) after they failed to affect gameplay.
+        # Round 11 added wing_flap_ceiling_scale — a shim-backed
+        # slider that scales the peak_z latch at jump-init and
+        # DOES produce observable effect (orthogonal hook site).
         self.assertEqual(
             slider_keys,
             [("player_physics", "air_control_scale"),
@@ -310,9 +313,10 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
              ("player_physics", "gravity"),
              ("player_physics", "jump_speed_scale"),
              ("player_physics", "swim_speed_scale"),
-             ("player_physics", "walk_speed_scale")])
+             ("player_physics", "walk_speed_scale"),
+             ("player_physics", "wing_flap_ceiling_scale")])
         self.assertIn("player_physics", params)
-        self.assertEqual(len(params["player_physics"]), 7)
+        self.assertEqual(len(params["player_physics"]), 8)
         for pack_name in ("flap_at_peak", "slope_slide_speed",
                           "root_motion_roll", "root_motion_climb",
                           "wing_flap_count", "no_fall_damage",
