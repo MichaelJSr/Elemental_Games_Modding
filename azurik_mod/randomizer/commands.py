@@ -40,10 +40,9 @@ from azurik_mod.patches.player_physics import (
     apply_player_speed,
 )
 from azurik_mod.patches.qol import (
-    apply_gem_popups_patch,
-    apply_other_popups_patch,
-    apply_pickup_anim_patch,
-    apply_skip_logo_patch,
+    # QoL pack apply fns now flow through ``apply_pack`` — only
+    # the player-character helper stays as a direct import because
+    # it's not a pack, just a lightweight string-to-bytes rewrite.
     apply_player_character_patch,
 )
 from azurik_mod.patching import verify_patch_spec
@@ -1336,9 +1335,30 @@ def cmd_randomize_full(args):
             print(f"\n[7/7] Applying XBE patches to default.xbe...")
             xbe_data = bytearray(xbe_path.read_bytes())
 
-            # Collect parameter values each pack might consume.  Only
-            # player_physics uses this surface today — extend as
-            # new parametric packs land.
+            # Collect parameter values each pack might consume.
+            # Two input channels, merged at use time:
+            #
+            #   1. ``_PACK_PARAMS`` — values derived from CLI flags
+            #      (``--player-flap-scale`` etc.).  Dedicated fields
+            #      let CLI users opt in with a single clear flag.
+            #
+            #   2. ``pack_params_json`` — a GUI-origin JSON blob
+            #      passed through the argparse Namespace.  Carries
+            #      ``{pack_name: {param_name: value}}`` for every
+            #      pack the user touched in the Patches UI,
+            #      including packs whose sliders don't have
+            #      dedicated CLI fields.  CLI-origin values in
+            #      ``_PACK_PARAMS`` win on key collisions so
+            #      command-line overrides still apply.
+            #
+            # Without this channel, packs with custom_apply + their
+            # own ParametricPatch sliders received empty ``params``
+            # when driven from the GUI — silently no-op at apply
+            # time.  See docs/LEARNINGS.md § "Round 11.6 GUI slider
+            # wiring" for the forensic on the 4 round-8 shim packs
+            # (flap_at_peak, root_motion_roll, root_motion_climb,
+            # slope_slide_speed) that may have been deleted
+            # prematurely because of this same bug class.
             _PACK_PARAMS: dict[str, dict[str, float]] = {
                 "player_physics": {
                     "gravity": (gravity_val if gravity_val is not None else 9.8),
@@ -1356,6 +1376,27 @@ def cmd_randomize_full(args):
                     "wing_flap_ceiling_scale": wing_flap_ceiling_scale,
                 },
             }
+
+            pack_params_json = getattr(args, 'pack_params_json', None)
+            if pack_params_json:
+                try:
+                    gui_pack_params = json.loads(pack_params_json)
+                except (ValueError, TypeError):
+                    print(f"  WARNING: invalid pack_params_json "
+                          f"({str(pack_params_json)[:80]!r}); "
+                          f"ignoring.")
+                    gui_pack_params = {}
+                for pack_name, params_dict in gui_pack_params.items():
+                    if not isinstance(params_dict, dict):
+                        continue
+                    # GUI values fill gaps in per-pack params.  CLI-
+                    # origin values (populated into _PACK_PARAMS
+                    # above) take precedence on key collisions so an
+                    # explicit ``--player-flap-scale 2`` on the CLI
+                    # always beats whatever the GUI last wrote.
+                    bucket = _PACK_PARAMS.setdefault(pack_name, {})
+                    for k, v in params_dict.items():
+                        bucket.setdefault(k, v)
 
             for pack in all_packs():
                 if not _FLAG_PACKS.get(pack.name, False):
@@ -1660,7 +1701,6 @@ def cmd_verify_patches(args):
         # Trampoline-specific whitelist contributions --------------------
         if trampoline_sites:
             from azurik_mod.patching import (
-                file_to_va,
                 parse_xbe_sections,
                 va_to_file,
             )

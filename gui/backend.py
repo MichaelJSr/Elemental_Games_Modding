@@ -378,6 +378,18 @@ def run_randomizer(
             # the ``player_*_scale`` (or ``gravity``) fields the
             # randomizer CLI reads via getattr.
             **physics_fields,
+            # Generic pack_params forwarding — JSON-serialised
+            # ``{pack_name: {param_name: value}}`` nested dict.
+            # cmd_randomize_full deserialises this and merges into
+            # its per-pack params dict BEFORE apply_pack, so any
+            # new pack with parametric sliders has its GUI slider
+            # values delivered without needing a dedicated argparse
+            # field.  This catches the bug class discovered in
+            # round 11.5: pre-fix, sliders on non-player_physics
+            # packs were silently dropped because the backend only
+            # extracted pack_params["player_physics"].
+            pack_params_json=(
+                json.dumps(pack_params) if pack_params else None),
         )
 
         result: BuildResult

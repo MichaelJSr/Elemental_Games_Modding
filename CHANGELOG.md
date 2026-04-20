@@ -2,6 +2,72 @@
 
 ## Unreleased
 
+### Generic pack_params wiring + forensic on retired packs (round 11.6)
+
+Follow-up to round 11.5's `wing_flap_ceiling_scale` /
+`flap_below_peak_scale` fix.  Investigated whether the same
+wiring-bug class affected earlier "doesn't work in-game" reports.
+
+**Forensic finding**: at least 4 of the 7 patches purged in
+round 10 were probably deleted prematurely:
+
+| Pack | GUI wiring at test time | Likely verdict |
+|---|---|---|
+| `flap_at_peak` (round-8 shim pack) | broken — backend never extracted `pack_params["flap_at_peak"]` | **GUI false-negative** |
+| `root_motion_roll` (round-8 shim pack) | broken — same | **GUI false-negative** |
+| `root_motion_climb` (round-8 shim pack) | broken — same | **GUI false-negative** |
+| `slope_slide_speed` (round-8 shim pack) | broken — same | **GUI false-negative** |
+| `no_fall_damage` | boolean pack, wired via `packs` dict | legit RE failure |
+| `infinite_fuel` | boolean pack, wired via `packs` dict | legit RE failure |
+| `wing_flap_count` | boolean pack, wired via `packs` dict | legit RE failure |
+
+Pre-fix, the GUI backend only extracted
+`pack_params["player_physics"]` out of the whole nested dict;
+slider values for every other pack were silently dropped before
+reaching the apply pipeline.  Users who tested via GUI would see
+the non-default values in the build log's `# pack_params:`
+header, then the randomizer would call `apply_pack(pack,
+xbe_data, {})` with empty params → the slider's apply function
+ran with default 1.0 → no-op → "doesn't work".
+
+The 4 affected round-8 shim packs are NOT being restored (their
+git history carries reasonable apply code, but re-verifying each
+one in-game is a separate workstream the user can drive if
+interested — for now the deletion stands but is documented as
+probably-premature rather than proven-ineffective).
+
+**Fix**: added a generic `pack_params_json` argparse channel.
+`gui/backend.py` now serialises the ENTIRE nested `pack_params`
+dict (all packs, not just `player_physics`) into a single
+JSON field on the randomizer's Namespace.
+`cmd_randomize_full` deserialises + merges it into its local
+`_PACK_PARAMS` before the `apply_pack` loop, with CLI-origin
+values winning on key collisions.  Any future pack with slider
+params automatically gets its GUI values forwarded — no
+per-pack argparse field edits required.
+
+**Regression tests**:
+[`tests/test_gui_randomizer_slider_wiring.py`](tests/test_gui_randomizer_slider_wiring.py)
+pins:
+
+- `pack_params_json` round-trips verbatim for any pack name
+  (including ones not yet registered)
+- Merge semantics: GUI fills gaps in CLI-derived params; CLI
+  wins on key collisions; malformed JSON degrades gracefully
+- **Every `ParametricPatch` on every registered pack**
+  automatically round-trips a non-default value from
+  `pack_params` through to the final `apply_pack` call — this
+  is the belt-and-suspenders guard that catches the bug class
+  for any future slider on any future pack
+
+11 new tests; 821 pass total.
+
+**Cleanup**: removed 5 dead imports from
+`azurik_mod/randomizer/commands.py` (`apply_pickup_anim_patch`,
+`apply_skip_logo_patch`, `apply_gem_popups_patch`,
+`apply_other_popups_patch`, `file_to_va` — all stale after the
+`apply_pack` dispatcher took over).
+
 ### GUI slider wiring fix (round 11.5)
 
 **Bug**: The GUI's `build_randomized_iso` translation layer only
