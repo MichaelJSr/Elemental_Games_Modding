@@ -63,6 +63,52 @@ typedef double         f64;
 
 
 /* ==========================================================================
+ * AZURIK_FLOAT_PARAM — late-bound float constants
+ * ==========================================================================
+ * Declare a 32-bit float constant whose value is patched at apply
+ * time from the Python ``TrampolinePatch.float_params`` channel.  The
+ * shim is compiled once; each apply rewrites the 4 ``.rdata`` bytes
+ * with whatever slider value the user provided (or the default).
+ *
+ * Pairs with :class:`FloatParam` on the Python side — the ``symbol``
+ * the Python ``FloatParam`` names must match ``_`` + this ``name``,
+ * because clang's ``i386-pc-win32`` target prepends a leading
+ * underscore.
+ *
+ * Usage::
+ *
+ *     #include "azurik.h"
+ *
+ *     AZURIK_FLOAT_PARAM(gravity_scale, 1.0f);
+ *
+ *     void __attribute__((used)) c_my_shim(void) {
+ *         // read the late-bound value; ``volatile`` keeps the
+ *         // optimiser from folding 1.0f into an immediate so the
+ *         // apply-time rewrite actually takes effect.
+ *         float s = gravity_scale;
+ *         // ... use `s` in your shim logic ...
+ *     }
+ *
+ * Implementation notes:
+ *
+ * - ``volatile`` defeats constant folding.  Without it clang would
+ *   see ``const float = 1.0f`` and inline the 1.0 everywhere,
+ *   producing zero ``.rdata`` relocations — the apply pipeline would
+ *   patch a slot nothing reads.
+ * - ``__attribute__((used))`` stops dead-code elimination from
+ *   discarding the constant when the shim body is tiny enough for
+ *   clang to fold it away via aggressive DCE.
+ * - ``section(".rdata")`` is the default for ``const`` globals but
+ *   we spell it out so any future MSVC / lld quirk doesn't silently
+ *   relocate the slot into ``.bss`` or ``.data``.
+ */
+#define AZURIK_FLOAT_PARAM(name, default_value)          \
+    volatile const float name                            \
+        __attribute__((used, section(".rdata"))) =       \
+        (default_value)
+
+
+/* ==========================================================================
  * Opaque handle types
  * ==========================================================================
  * Use these when a shim only needs to pass a pointer through to a

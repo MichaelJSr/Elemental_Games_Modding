@@ -14,6 +14,7 @@ from pathlib import Path
 
 from azurik_mod.patching.coff import (
     extract_shim_bytes,
+    find_landed_symbol,
     layout_coff,
     parse_coff,
 )
@@ -428,6 +429,8 @@ def apply_trampoline_patch(
     xbe_data: bytearray,
     patch: TrampolinePatch,
     repo_root: Path | None = None,
+    *,
+    params: dict[str, float] | None = None,
 ) -> bool:
     """Apply a TrampolinePatch to the XBE data.
 
@@ -441,9 +444,18 @@ def apply_trampoline_patch(
        compute the shim's entry-point VA.
     4. Emit the trampoline: opcode + signed rel32 displacement, plus
        any trailing NOP padding up to len(replaced_bytes).
+    5. If ``patch.float_params`` is non-empty, overwrite each named
+       ``.rdata`` constant with ``params[param.name]`` (or
+       ``param.default`` when the caller didn't supply a value).
+       This is the "per-apply float injection" channel — sliders can
+       thread user values into a compiled C shim without a recompile.
 
     ``repo_root`` resolves relative ``shim_object`` paths; defaults to
     the caller's current working directory when ``None``.
+
+    ``params`` is an optional ``{slider_name: float_value}`` dict
+    consumed by :attr:`TrampolinePatch.float_params`.  Shims with no
+    float params ignore it.
     """
     site_offset = patch.file_offset
     replaced_len = len(patch.replaced_bytes)
@@ -625,6 +637,52 @@ def apply_trampoline_patch(
     tail = bytes([_NOP] * (replaced_len - 5))
     xbe_data[site_offset:site_offset + replaced_len] = trampoline + tail
 
+    # --- 4. per-apply float-parameter injection --------------------------
+    # If the trampoline declared `float_params`, overwrite each named
+    # .rdata constant with the caller-supplied slider value (or its
+    # default when absent).  The shim has already been landed + any
+    # relocations applied; we're writing into already-committed bytes
+    # inside the XBE using the section file offsets layout_coff returned.
+    #
+    # Shims that reference `AZURIK_FLOAT_PARAM` constants necessarily
+    # carry a DIR32 relocation from .text -> .rdata, which forces the
+    # has_relocs branch above.  We check for that and report a warning
+    # if a shim author declared float_params on an unexpectedly
+    # zero-reloc shim (their constants weren't actually referenced;
+    # patching would be a no-op but probably signals a bug).
+    if patch.float_params:
+        if not has_relocs:
+            print(f"  WARNING: {patch.label} — float_params declared "
+                  f"but shim has no relocations; the .rdata slots "
+                  f"aren't referenced from .text.  Check that the "
+                  f"shim reads each AZURIK_FLOAT_PARAM name.")
+        else:
+            for param in patch.float_params:
+                resolved = find_landed_symbol(
+                    coff, landed, param.symbol)
+                if resolved is None:
+                    print(f"  WARNING: {patch.label} — float_param "
+                          f"{param.name!r} (symbol {param.symbol!r}) "
+                          f"not found in landed shim sections; "
+                          f"skipping.")
+                    continue
+                section, sym_offset = resolved
+                value = float(
+                    (params or {}).get(param.name, param.default))
+                field_offset = section.file_offset + sym_offset
+                if field_offset + 4 > len(xbe_data):
+                    print(f"  WARNING: {patch.label} — float_param "
+                          f"{param.name!r} file offset "
+                          f"0x{field_offset:X} past end of XBE; "
+                          f"skipping.")
+                    continue
+                xbe_data[field_offset:field_offset + 4] = (
+                    struct.pack("<f", value))
+                display_label = param.label or param.name
+                print(f"    {display_label} = {value:g}  "
+                      f"(float_param {param.symbol} @ "
+                      f"file 0x{field_offset:X})")
+
     # Ledger so verify can re-locate the shim without guessing.
     ledger = _shim_region_ledger(xbe_data)
     ledger[patch.va] = shim_file_offset
@@ -694,7 +752,10 @@ def apply_pack(
            skipped — the pack's ``custom_apply`` owns them.
          - :class:`TrampolinePatch` → :func:`apply_trampoline_patch`
            with ``repo_root`` (defaults to the pack's shim folder's
-           repo root when the pack has a ``ShimSource``).
+           repo root when the pack has a ``ShimSource``) and the
+           full ``params`` dict (consumed by any ``float_params``
+           declared on the trampoline — shims without float params
+           ignore it).
 
     Returns ``None``.  Individual site failures print warnings via
     the underlying primitives but don't raise — keeps batch apply
@@ -759,7 +820,8 @@ def apply_pack(
                     effective_site = site._replace(shim_object=derived)
             apply_trampoline_patch(
                 xbe_data, effective_site,
-                repo_root=effective_repo_root)
+                repo_root=effective_repo_root,
+                params=params)
         else:
             raise TypeError(
                 f"pack {pack.name!r} has site of unsupported type "

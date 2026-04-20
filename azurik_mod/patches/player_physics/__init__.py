@@ -1255,7 +1255,7 @@ def _player_speed_dynamic_whitelist(
     on vanilla XBEs too (the pack may not have been applied) so
     must never raise on unrecognised bytes.
     """
-    from azurik_mod.patching.xbe import parse_xbe_sections, va_to_file
+    from azurik_mod.patching.xbe import va_to_file
 
     try:
         walk_off = va_to_file(_WALK_SITE_VA)

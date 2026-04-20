@@ -51,7 +51,6 @@ from typing import Iterable
 from .ghidra_client import (
     GhidraClient,
     GhidraClientError,
-    GhidraFunction,
 )
 from .ghidra_coverage import (
     KnownSymbol,
@@ -59,7 +58,7 @@ from .ghidra_coverage import (
     harvest_patch_sites,
     harvest_vanilla_symbols,
 )
-from .struct_diff import HeaderStruct, parse_header_structs
+from .struct_diff import parse_header_structs
 
 
 @dataclass

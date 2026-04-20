@@ -356,6 +356,47 @@ class LandedShim:
     entry_va: int
 
 
+def find_landed_symbol(
+    coff: "CoffFile",
+    landed: "LandedShim",
+    symbol_name: str,
+) -> Optional[tuple["LandedSection", int]]:
+    """Return the landed section + intra-section offset for a symbol.
+
+    Given a parsed COFF file and the :class:`LandedShim` record
+    produced by :func:`layout_coff`, resolve ``symbol_name`` to the
+    ``(LandedSection, offset)`` pair the caller needs to patch bytes
+    at the symbol's address.  Returns ``None`` when:
+
+    - ``symbol_name`` is absent from the COFF symbol table.
+    - The symbol isn't defined by this object (``section_number <= 0``).
+    - The symbol's owning section wasn't landed (metadata skip list).
+
+    Used by :mod:`azurik_mod.patching.apply` to resolve :class:`spec.FloatParam`
+    targets — a float parameter's ``symbol`` names a ``.rdata``
+    constant, and the apply pipeline overwrites 4 bytes at the
+    returned ``(section.file_offset + offset)`` with
+    ``struct.pack("<f", value)``.
+
+    The owning section is matched by ``name``; if the COFF contains
+    multiple sections with the same name (rare, but legal for LTO
+    bundles) this helper picks the first match in ``landed.sections``
+    — which is always the one ``layout_coff`` placed for that name
+    in declaration order.
+    """
+    try:
+        sym = coff.symbol(symbol_name)
+    except KeyError:
+        return None
+    if sym.section_number <= 0:
+        return None
+    owning = coff.sections[sym.section_number - 1]
+    for placed in landed.sections:
+        if placed.name == owning.name:
+            return placed, sym.value
+    return None
+
+
 def _is_landable(section: CoffSection) -> bool:
     """Return True if this COFF section should be placed in the XBE."""
     if not section.data:

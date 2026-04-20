@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+### Per-apply float injection for C shims (round 11)
+
+New capability on the C-shim platform: late-bound float constants
+that the apply pipeline rewrites at patch time instead of at
+compile time.  A single compiled `.o` now serves every slider
+value — no recompile when the user drags the slider.
+
+**C side**: new `AZURIK_FLOAT_PARAM(name, default)` macro in
+[`shims/include/azurik.h`](shims/include/azurik.h).  Expands to
+a `volatile const float` in `.rdata` so clang emits a DIR32 load
+instead of folding the value into an immediate.
+
+**Python side**: new [`FloatParam`](azurik_mod/patching/spec.py)
+NamedTuple, threadable as
+`TrampolinePatch(..., float_params=(FloatParam(...),))`.  At
+apply time:
+
+1. [`layout_coff`](azurik_mod/patching/coff.py) places every
+   section as before.
+2. For each declared `FloatParam`, the new
+   [`find_landed_symbol`](azurik_mod/patching/coff.py) helper
+   resolves the COFF symbol to its landed ``.rdata`` section +
+   intra-section offset.
+3. `apply_trampoline_patch` writes
+   ``struct.pack("<f", params[name])`` (or the declared default)
+   at that file offset — after relocations have been applied,
+   so the shim's DIR32 load still targets the right VA.
+
+`apply_pack` forwards its `params` dict through to the
+trampoline apply path automatically; packs with no float_params
+are unaffected.
+
+**Testing**: [`shims/fixtures/_float_param_test.c`](shims/fixtures/_float_param_test.c)
++ [`tests/test_float_param_injection.py`](tests/test_float_param_injection.py).
+11 new tests (778 passing total, +11 over round 10).
+
+**Docs**: new "Per-apply float injection" subsection in
+[`docs/SHIM_AUTHORING.md`](docs/SHIM_AUTHORING.md) § 6.
+
+**Drift sync**: fixed 6 false mangled-name comments in
+[`shims/include/azurik_vanilla.h`](shims/include/azurik_vanilla.h)
+(`player_walk_state`, `player_airborne_tick`, `player_climb_tick`,
+`consume_fuel`, `anim_apply_translation`, `anim_change` — all
+`cdecl` / `thiscall`, neither of which emits an `@N` suffix on
+clang-i386-pe-win32 despite round-9 header comments claiming
+otherwise).  Comments now reflect the actual mangled names.
+
 ### Player-pack triage + shim-revival cleanup (round 10)
 
 User-driven purge after in-game testing confirmed that several

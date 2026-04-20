@@ -56,7 +56,6 @@ from typing import Any, Iterator
 
 from .ghidra_client import (
     GhidraClient,
-    GhidraClientError,
     GhidraFunction,
     GhidraLabel,
     GhidraProgramInfo,

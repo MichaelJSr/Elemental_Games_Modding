@@ -508,6 +508,96 @@ can still ship a patched XBE.
 One env var covers every shim-backed pack.  No per-pack
 `AZURIK_SKIP_LOGO_LEGACY` / `AZURIK_MY_FEATURE_LEGACY` sprawl.
 
+### Per-apply float injection (late-bound slider values)
+
+Every slider that needs to reach inside a compiled C shim does so
+by overwriting 4 bytes of `.rdata` at apply time — the shim's C
+source compiles exactly once, and every apply threads a different
+user value through the same landed `.o`.  No recompile per slider
+change.
+
+**C side** — declare the parameter with `AZURIK_FLOAT_PARAM`:
+
+```c
+#include "azurik.h"
+
+AZURIK_FLOAT_PARAM(gravity_scale, 1.0f);
+AZURIK_FLOAT_PARAM(jump_height, 9.8f);
+
+void __attribute__((used)) c_my_shim(void)
+{
+    // Read both params — `volatile const float` in .rdata, so
+    // clang emits a DIR32 load instead of folding to an immediate.
+    float g = gravity_scale;
+    float h = jump_height;
+    // ... use `g` and `h` in your body ...
+}
+```
+
+The macro expands to a `volatile const float` in `.rdata`:
+`volatile` defeats constant folding, `const` marks the slot
+read-only from the shim's own code (the Python side may still
+rewrite the bytes — that's an external change, which `volatile`
+already tolerates), `__attribute__((used))` keeps DCE off, and
+`section(".rdata")` pins the layout.
+
+**Python side** — attach `FloatParam` entries to the
+`TrampolinePatch`:
+
+```python
+from azurik_mod.patching.spec import FloatParam, TrampolinePatch
+
+MY_SHIM = TrampolinePatch(
+    name="my_shim",
+    label="My shim (with per-apply floats)",
+    va=0x0012_3456,
+    replaced_bytes=bytes([0xE8, ..., ..., ..., ...]),
+    shim_object=_SHIM.object_path("my_shim", _REPO_ROOT),
+    shim_symbol="_c_my_shim",
+    mode="call",
+    float_params=(
+        FloatParam("gravity_scale", "_gravity_scale", 1.0),
+        FloatParam("jump_height",   "_jump_height",   9.8),
+    ),
+)
+```
+
+The `symbol` field follows clang's `i386-pc-win32` mangling —
+`gravity_scale` in C becomes `_gravity_scale` in the COFF symbol
+table.  The `name` field is the slider key your callers thread
+through `apply_pack(params={...})`.
+
+**Apply path** — `apply_trampoline_patch` (and by extension
+`apply_pack`) accepts a `params={name: float}` dict.  For each
+`FloatParam`, the apply pipeline:
+
+1. Parses the shim `.o` and runs `layout_coff` as usual.
+2. Looks up the float's COFF symbol and finds its landed
+   `.rdata` section + intra-section offset
+   (`coff.find_landed_symbol`).
+3. Writes `struct.pack("<f", params[name] or default)` at the
+   landed file offset — after relocations have been applied,
+   so the shim's DIR32 load still targets the right VA.
+
+If the shim body doesn't actually read a declared
+`AZURIK_FLOAT_PARAM`, clang optimises the slot away (zero
+relocations) and the apply pipeline emits a warning — the
+"declared but never used" diagnostic catches silent
+misconfigurations early.
+
+**When to reach for this vs. `ParametricPatch`**:
+
+- `ParametricPatch` rewrites bytes at a *vanilla* VA (typically
+  the operand of a `FLD`/`FMUL` instruction or a `.rdata` float
+  the game itself reads).  No shim involved.
+- `FloatParam` rewrites bytes inside a *shim*'s own `.rdata`
+  section.  Use when the slider's effect needs shim-side logic
+  around the value (conditional, computation, kernel call, etc.)
+  rather than a single operand rewrite.
+
+End-to-end fixture: [`shims/fixtures/_float_param_test.c`](../shims/fixtures/_float_param_test.c)
++ [`tests/test_float_param_injection.py`](../tests/test_float_param_injection.py).
+
 ---
 
 ## 7. File reference
@@ -524,6 +614,7 @@ One env var covers every shim-backed pack.  No per-pack
 | Vanilla function externs      | `shims/include/azurik_vanilla.h`                         |
 | Kernel import externs         | `shims/include/azurik_kernel.h`                          |
 | Test fixture shim sources     | `shims/fixtures/_*.c`                                    |
+| Float-param fixture           | `shims/fixtures/_float_param_test.c`                     |
 | Vanilla-function registry     | `azurik_mod/patching/vanilla_symbols.py`                 |
 | Kernel-import ordinal table   | `azurik_mod/patching/xboxkrnl_ordinals.py`               |
 | Kernel-import runtime parser  | `azurik_mod/patching/kernel_imports.py`                  |
@@ -550,6 +641,9 @@ driven from Python**, centralised in
 - The shim is straightforward C that calls a registered
   vanilla function with normal cdecl / stdcall args (the skip-logo
   pattern).
+- The shim needs per-apply slider values — `AZURIK_FLOAT_PARAM` +
+  `FloatParam` give you late binding without recompile (see
+  § 6 "Per-apply float injection" above).
 - All constants the shim needs are compile-time known.
 - You want the LLVM toolchain to handle register allocation.
 

@@ -1117,7 +1117,8 @@ int _isspace(int ch);
  * to produce horizontal velocity.  The ``FLD [EAX+0x40]`` at
  * VA 0x85F62 is our ``walk_speed_scale`` patch site.
  *
- * Vanilla VA: 0x00085F50  (mangled: _player_walk_state@4) */
+ * Vanilla VA: 0x00085F50  (mangled: _player_walk_state — cdecl has
+ * no @N suffix) */
 __attribute__((cdecl))
 void player_walk_state(int *entity);
 
@@ -1141,7 +1142,8 @@ unsigned char player_jump_init(void);
  * that was formerly (and mistakenly) the ``flap_height_scale``
  * patch target — see docs/LEARNINGS.md.
  *
- * Vanilla VA: 0x00089480  (mangled: _player_airborne_tick@4) */
+ * Vanilla VA: 0x00089480  (mangled: _player_airborne_tick — cdecl
+ * has no @N suffix) */
 __attribute__((cdecl))
 void player_airborne_tick(int *entity);
 
@@ -1210,7 +1212,8 @@ void player_input_tick(int entity_input_state);
  * (our ``climb_speed_scale`` patch target) at VA 0x87FA7 +
  * 0x88357.  Called per frame while climbing a rope/ledge.
  *
- * Vanilla VA: 0x00087F80  (mangled: _player_climb_tick@4) */
+ * Vanilla VA: 0x00087F80  (mangled: _player_climb_tick — cdecl has
+ * no @N suffix) */
 __attribute__((cdecl))
 void player_climb_tick(int *entity);
 
@@ -1316,7 +1319,8 @@ void player_landing(int entity, int landing_ctx);
  * ``MOV AL, 1 ; RET 4`` — always return "consumed" without
  * decrementing.
  *
- * Vanilla VA: 0x000842D0  (mangled: _consume_fuel@4) */
+ * Vanilla VA: 0x000842D0  (mangled: _consume_fuel — thiscall has
+ * no @N suffix on clang-i386-pe-win32) */
 __attribute__((thiscall))
 unsigned char consume_fuel(float cost);
 
@@ -1339,7 +1343,8 @@ void player_armor_state_tick(void);
  * this function and post-scale the written deltas.  Ends with
  * ``RET 0x10`` (callee cleans 16 bytes).
  *
- * Vanilla VA: 0x00042E40  (mangled: _anim_apply_translation@16) */
+ * Vanilla VA: 0x00042E40  (mangled: _anim_apply_translation —
+ * thiscall has no @N suffix on clang-i386-pe-win32) */
 __attribute__((thiscall))
 void anim_apply_translation(int *anim_obj, float blend_time,
                             unsigned char *reference_name,
@@ -1351,7 +1356,8 @@ void anim_apply_translation(int *anim_obj, float blend_time,
  * ``anim_apply_translation`` at 0x42E40).  Called on animation
  * index changes (e.g. walk → roll transition).
  *
- * Vanilla VA: 0x00042910  (mangled: _anim_change@12) */
+ * Vanilla VA: 0x00042910  (mangled: _anim_change — thiscall has
+ * no @N suffix on clang-i386-pe-win32) */
 __attribute__((thiscall))
 void anim_change(int anim_index, int flags, int reserved);
 

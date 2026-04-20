@@ -41,7 +41,6 @@ wrong for every real Azurik save.
 
 from __future__ import annotations
 
-import hashlib
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path

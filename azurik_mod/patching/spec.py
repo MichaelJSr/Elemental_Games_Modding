@@ -109,6 +109,53 @@ class ParametricPatch(NamedTuple):
         return va_to_file(self.va)
 
 
+class FloatParam(NamedTuple):
+    """Late-bound 32-bit float parameter for a C shim.
+
+    A ``FloatParam`` declares that the shim's compiled object file
+    carries a ``float`` constant (in ``.rdata``) whose value should be
+    overwritten at apply time from a user-supplied slider.  The shim
+    itself is compiled exactly once; per-apply tuning happens by
+    patching four bytes of the landed ``.rdata`` section — no
+    recompile round trip.
+
+    The C shim declares the slot with ``AZURIK_FLOAT_PARAM`` from
+    ``shims/include/azurik.h``::
+
+        AZURIK_FLOAT_PARAM(my_scale, 1.0f);
+
+    which desugars to a ``volatile const float`` in ``.rdata`` that
+    clang references through a single ``IMAGE_REL_I386_DIR32``
+    relocation from the shim body.  The ``volatile`` keeps the
+    optimizer from folding the value into an immediate, preserving
+    the late-binding contract.
+
+    Attributes:
+        name:         Stable slider identifier — matches the key in
+                      the ``params`` dict fed to :func:`apply_pack` /
+                      :func:`apply_trampoline_patch`.
+        symbol:       COFF symbol name as it appears in the ``.o``.
+                      clang's ``i386-pc-win32`` target prepends a
+                      leading underscore (``my_scale`` in C becomes
+                      ``"_my_scale"``).
+        default:      Baseline float value to write when the caller
+                      supplies no override.  Usually matches the
+                      literal that appears in the ``AZURIK_FLOAT_PARAM``
+                      declaration — kept in sync on a best-effort
+                      basis (no runtime check).
+        label:        Optional human-readable label (GUI / log lines).
+                      Falls back to ``name`` when empty.
+        description:  Optional long-form explanation.  Rendered under
+                      the slider when the GUI surfaces this param.
+    """
+
+    name: str
+    symbol: str
+    default: float
+    label: str = ""
+    description: str = ""
+
+
 class TrampolinePatch(NamedTuple):
     """Descriptor for a code-injection site backed by a compiled C shim.
 
@@ -124,6 +171,10 @@ class TrampolinePatch(NamedTuple):
        ``JMP rel32`` (mode ``"jmp"``) at ``va`` that jumps to the
        shim's entry point, NOP-padding any leftover bytes of
        ``replaced_bytes``.
+    4. If ``float_params`` is non-empty, the shim's landed ``.rdata``
+       bytes for each named symbol are overwritten with
+       ``struct.pack("<f", value)`` — where ``value`` comes from the
+       ``params`` dict (or the ``FloatParam.default`` if absent).
 
     The shim and its trampoline are reversible: ``verify_trampoline_patch``
     checks both the trampoline instruction shape AND that the shim
@@ -150,6 +201,11 @@ class TrampolinePatch(NamedTuple):
                          shim has to handle its own control flow).
         safety_critical: Mirrors the flag on ``PatchSpec``; pins the
                          site in safety tests.
+        float_params:    Tuple of :class:`FloatParam` entries describing
+                         ``.rdata`` constants that the apply pipeline
+                         should overwrite with user-supplied slider
+                         values.  Empty tuple for shims that bake
+                         every constant at compile time.
     """
 
     name: str
@@ -160,6 +216,7 @@ class TrampolinePatch(NamedTuple):
     shim_symbol: str
     mode: str = "call"
     safety_critical: bool = False
+    float_params: tuple[FloatParam, ...] = ()
 
     @property
     def file_offset(self) -> int:

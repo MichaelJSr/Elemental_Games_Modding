@@ -141,6 +141,14 @@ Target: arm64-apple-darwin25.4.0 (host)  →  i386-pc-win32 (output)
    sliders, set `sites=(...)` to a tuple of `PatchSpec` /
    `ParametricPatch` and `shim=None`.
 
+   If the shim needs per-apply slider values, add
+   `float_params=(FloatParam(...), ...)` to the `TrampolinePatch`.
+   At apply time, each named `.rdata` float is overwritten with
+   the caller's `params[name]` (or the `FloatParam.default` when
+   the caller omits it) — no recompile per slider change.  See
+   [`docs/SHIM_AUTHORING.md`](./SHIM_AUTHORING.md) § 6 "Per-apply
+   float injection" for the full pattern.
+
 5. **Add tests** mirroring
    [`tests/test_qol_skip_logo.py`](../tests/test_qol_skip_logo.py):
 
