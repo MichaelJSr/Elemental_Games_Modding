@@ -2,6 +2,116 @@
 
 ## Unreleased
 
+### Player packs — round 3 (roll retarget / wing-flap-count fix / full fall-damage / flap_subsequent slider)
+
+User feedback on the previous round identified four concrete
+issues and asked for three follow-ups.  All addressed below.
+
+**1. Roll speed — v4: revert target to the WHITE-button FMUL.**
+
+The v3 approach targeted ``VA 0x001AAB68`` (the 4-byte
+``_DAT_001AAB68 = 2.0`` constant used by ``FUN_00089A70``).
+User testing proved that FUN_00089A70 is the **slope-slide**
+physics state — reached when the player lands on a slope >
+45° from upright and the avatar auto-slides.  It is NOT the
+roll animation / WHITE-button dash players trigger
+manually.
+
+v4 reverts the target to the v1 FMUL rewrite at ``VA 0x849E4``
+(inside ``FUN_00084940``) — the 3.0 multiplier gated by
+``PlayerInputState.flags & 0x40`` (WHITE or BACK held).
+No force-always-on (v2's "make it observable without the
+button" trick introduced the airborne-coupling bug).  Now:
+
+- Press WHITE/BACK → magnitude × (3.0 × roll_scale).  Walking
+  with WHITE held scales linearly with roll_scale.
+- No button held → vanilla (magnitude × 1.0).  No coupling.
+- Mid-air WHITE held → same scale as ground (matches vanilla
+  coupling; we just scale vanilla's 3× proportionally).
+
+Users who haven't routed WHITE/BACK in their xemu config will
+see no effect — but that's consistent with vanilla roll
+behaviour and is the correct trade-off vs. fabricating an
+always-on multiplier.
+
+The v3 slope-slide constant at 0x1AAB68 is still exposed by
+``inspect-physics`` as a diagnostic (should always show
+VANILLA on v4-patched ISOs).
+
+**2. Wing-flap-count — dispatcher was reading the wrong variable.**
+
+The previous shim dispatched on ``ds:[0x001A7AE4]``, claiming
+that was the air-power level.  Ghidra-chase of the only writer
+(``FUN_000A2DF0``) reveals that variable is actually the
+**active XInput controller index** (0-3 for port; 4 for
+"disconnected") — not the air-power level.  So the shim
+always fell through to the vanilla fallback branch.
+
+v2 shim reads the air-power level from its true home:
+``[EDX+0x8]`` at the hook site.  At VA 0x89321, EDX already
+holds the ``level_struct`` pointer (set at VA 0x8931E by
+``MOV EDX, [EDI+0x20]``).  ``level_struct + 0x8`` holds the
+level int (1-3 when air power is active, 0/4 otherwise).
+The shim now uses ``MOV EDX, [EDX+0x8]`` (3 bytes) instead
+of ``MOV EDX, ds:[abs32]`` (6 bytes), saving 3 bytes —
+total shim size: 50 → 47 bytes.
+
+**3. No fall damage — full function bypass.**
+
+The JNP→JMP flip at VA 0x8AC77 prevented instant-death falls
+but some light damage still came through (users confirmed).
+v2 rewrites the ``FUN_0008AB70`` prologue (VA 0x8AB70) to
+``XOR AL, AL ; RET 8 ; NOP`` — a 6-byte always-return-0 that
+short-circuits the entire function BEFORE the cvar-cache
+init / tier selector / damage-application branches run.
+Callers see "no damage dealt" regardless of fall velocity
+or height.
+
+**4. New slider: ``flap_subsequent_scale``.**
+
+After the first wing flap, ``FUN_00089300`` halves v0 via
+``FMUL [0x001A2510] = 0.5`` at VA 0x893DD when the player
+has fallen > 6m below their peak.  This is why second+ flaps
+feel weaker than the first.  The new slider rewrites the
+FMUL to reference an injected ``0.5 × subsequent_scale``:
+
+- ``1.0`` (default): vanilla halving (subsequent flaps at 50% v0).
+- ``2.0``:           no halving (subsequent flaps at 100% v0).
+- ``4.0``:           subsequent flaps BOOSTED (200% v0).
+
+Independent of ``flap_height_scale``: set both to 2.0 to get
+"first flap 2× AND subsequent flaps full v0 × 2" (every flap
+consistently strong).
+
+**Investigations that didn't ship:**
+
+- **Camera zoom**: no static float constant in ``default.xbe``,
+  ``characters.xbr``, or ``config.xbr`` cross-references as a
+  camera distance/FOV.  Camera parameters are either per-level
+  (in level ``.xbr`` files) or embedded in camera-data assets
+  that the game script/animation system references.  Would
+  need ``.xbr``-side modding infrastructure to ship.  Left as
+  an open follow-up.
+
+- **Additional movement**: ``max accel up / down / xy``, ``max
+  turn rate``, ``strafe height``, etc. exist in config.xbr as
+  per-character rows (``config/critters_move`` or similar) —
+  not patchable via XBE code changes without an ``.xbr``-side
+  config editor.
+
+**Diagnostic:** ``azurik-mod inspect-physics`` now reports the
+roll FMUL + flap-subsequent FMUL sites separately, plus
+(carried over) primary/secondary air-control and v3 slope-
+slide constants as their own lines.  ``no_fall_damage`` /
+``infinite_fuel`` / ``wing_flap_count`` still show at the
+bottom.
+
+**Tests:** 776 unit tests all pass.  The ``DynamicWhitelistFromXbe``
+test now verifies 6 × 6-byte rewrite sites (walk, swim,
+jump, flap, roll, flap_subsequent) + 8 × 4-byte direct sites
+(5 primary air-control + 2 secondary + climb) + up to 6 extra
+injected-float follows after a full apply.
+
 ### New player packs + player_physics flap/air-control fixes
 
 Five user-driven additions focused on the Air-power / wing-flap

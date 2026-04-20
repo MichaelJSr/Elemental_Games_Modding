@@ -299,16 +299,23 @@ def main() -> None:
                         metavar="X",
                         help="Player wing-flap (Air-power double-"
                              "jump) vertical-velocity multiplier "
+                             "for the FIRST flap per jump "
                              "(default 1.0, range 0.1-10.0).  "
                              "v2: rewrites FLD [0x001980A8] at VA "
-                             "0x893AE inside FUN_00089300 (the "
-                             "real wing-flap function), injecting "
-                             "9.8 * flap_scale² so v0 scales "
-                             "linearly.  Earlier versions targeted "
-                             "VA 0x896EA (airborne FADD) — that "
-                             "site turned out to be a different "
-                             "maneuver and never affected the "
-                             "wing flap.")
+                             "0x893AE inside FUN_00089300, "
+                             "injecting 9.8 * flap_scale² so v0 "
+                             "scales linearly.")
+    p_full.add_argument("--player-flap-subsequent-scale", type=float,
+                        metavar="X",
+                        help="Player wing-flap v0 scale for the "
+                             "SECOND + subsequent flaps per jump "
+                             "(default 1.0, range 0.1-10.0).  "
+                             "After the first flap, Azurik halves "
+                             "v0 via FMUL [0x001A2510]=0.5 at VA "
+                             "0x893DD when the player has fallen "
+                             "> 6m below their peak.  Set to 2.0 "
+                             "to cancel the halving; 4.0 to "
+                             "double it instead.")
     p_full.add_argument("--player-climb-scale", type=float,
                         metavar="X",
                         help="Player climbing-state speed "
@@ -400,12 +407,16 @@ def main() -> None:
              "MOV [reg+0x140], 9.0 imm32 writes feeding "
              "FUN_00089480's per-frame mid-air steering FMUL.")
     p_physics.add_argument("--flap-height", type=float, metavar="X",
-        help="Player wing-flap / Air-power double-jump v0 "
-             "multiplier (default 1.0; range 0.1-10.0).  v2: "
-             "rewrites FLD [0x001980A8] at VA 0x893AE (the real "
-             "wing-flap function inside FUN_00089300) to "
-             "reference an injected 9.8 * flap_scale^2 constant; "
-             "linear v0 × linear flap height.")
+        help="Player wing-flap v0 multiplier for the FIRST "
+             "flap per jump (default 1.0; range 0.1-10.0).  "
+             "Rewrites FLD [0x001980A8] at VA 0x893AE.")
+    p_physics.add_argument("--flap-subsequent", type=float,
+        metavar="X",
+        help="Player wing-flap v0 scale for 2nd+ flaps per "
+             "jump (default 1.0; range 0.1-10.0).  Scales the "
+             "0.5 halving factor at VA 0x893DD.  Set 2.0 to "
+             "cancel the halving, 4.0 to double subsequent "
+             "flap height.")
     p_physics.add_argument("--climb-speed", type=float, metavar="X",
         help="Player climbing-state speed multiplier "
              "(default 1.0; range 0.1-10.0).  Overwrites the "

@@ -313,6 +313,21 @@ FLAP_HEIGHT_SCALE = ParametricPatch(
     decode=lambda b: struct.unpack("<d", b)[0],
 )
 
+FLAP_SUBSEQUENT_SCALE = ParametricPatch(
+    name="flap_subsequent_scale",
+    label="Wing-flap subsequent-flap height",
+    va=0,
+    size=0,
+    original=b"",
+    default=1.0,
+    slider_min=0.1,
+    slider_max=10.0,
+    slider_step=0.05,
+    unit="x",
+    encode=lambda v: struct.pack("<d", float(v)),
+    decode=lambda b: struct.unpack("<d", b)[0],
+)
+
 CLIMB_SPEED_SCALE = ParametricPatch(
     name="climb_speed_scale",
     label="Player climbing speed",
@@ -344,44 +359,74 @@ _WALK_SITE_VANILLA = bytes([
 ])
 
 # -----------------------------------------------------------
-# Rolling / sliding ground-state speed (v3 April 2026).
+# Rolling speed — v4 (April 2026 late).
 #
-# The previous roll slider rewrote the FMUL at VA 0x849E4 (the
-# WHITE-button 3× magnitude boost inside FUN_00084940) and
-# additionally force-always-on'd bit 0x40 of the input flags.
-# That approach had a subtle coupling bug: the boosted magnitude
-# then propagated into FUN_00089480's airborne physics (via
-# ``entity[+0x140] × magnitude``), so cranking roll_scale made
-# mid-air horizontal travel MUCH faster, which users
-# reasonably perceived as "gravity changed / longer air-time".
+# Iteration history:
 #
-# v3 replaces that approach entirely.  ``FUN_00089A70`` is the
-# true rolling/sliding GROUND-state physics function (reached
-# via state machine cases 3 / 4 from FUN_0008CCC0).  Its
-# rolling-velocity FMUL at VA 0x00089B76 reads the constant
-# ``[0x001AAB68]`` (vanilla value: 2.0) — and that constant
-# has EXACTLY ONE reader in the entire binary (the site we
-# want to scale).  Single reader means we can patch the
-# 4-byte float IN PLACE with zero shim overhead and zero
-# collateral damage to other systems.
+#   v1: FMUL rewrite at VA 0x849E4 (the WHITE-button 3×
+#       magnitude boost inside FUN_00084940).  Worked for
+#       rolling but required users to actually press WHITE;
+#       many xemu input configs don't route WHITE so the
+#       slider looked like it did nothing.
 #
-# Semantics under v3:
-#   rolling_ground_velocity = dt × magnitude × (2.0 × roll_scale)
-# Only the rolling/sliding ground state is affected.  Walking,
-# airborne physics, swimming, jumping, and the WHITE button
-# behaviour are left at vanilla.
+#   v2: v1 + force-always-on bit 0x40.  Made the slider
+#       observable without WHITE held, but the boosted
+#       ``magnitude`` (``entity[+0x124]``) leaked into
+#       FUN_00089480's airborne physics (``horizontal_vel
+#       = entity[+0x140] × magnitude``), so jumps covered
+#       3-5× more ground — users described this as "gravity
+#       got weaker".
+#
+#   v3: patched the single-reader constant at VA 0x001AAB68
+#       (vanilla 2.0) used by FUN_00089A70.  Isolated — no
+#       coupling.  BUT: FUN_00089A70 is the **slope-slide**
+#       state (state 3/4 in FUN_0008CCC0), triggered when
+#       the player lands on a slope >45° from upright.  It
+#       is NOT the roll animation / WHITE-button dash the
+#       user wanted to scale.  Result: slider did nothing
+#       observable during player-initiated rolling.
+#
+# v4 reverts to the v1 target (FMUL rewrite at VA 0x849E4)
+# BUT WITHOUT the force-always-on.  Semantics:
+#
+#   - Player presses WHITE or BACK → bit 0x40 of input flags
+#     sets → FMUL scales magnitude by the injected value
+#     (vanilla 3.0, slider-scaled to ``3.0 × roll_scale``).
+#     Walking-speed WITH WHITE held = ``7 × 3 × roll_scale
+#     × stick``.
+#   - Player airborne WITH WHITE held → same magnitude scale
+#     leaks into horizontal air control (matches vanilla —
+#     vanilla ALSO boosts air control 3× when WHITE is held
+#     mid-air).  Slider scales vanilla coupling proportionally.
+#   - Player airborne WITHOUT WHITE held → vanilla (magnitude
+#     × 1.0).  No effect.  The "gravity weakened" v2 bug is
+#     gone because bit 0x40 is no longer force-set.
+#
+# Users who haven't routed WHITE/BACK in their xemu config
+# will see no effect — but that's consistent with vanilla
+# roll behaviour and is the correct trade-off: matching the
+# button-gated coupling vs fabricating a separate
+# "all-the-time" multiplier.
+_ROLL_FMUL_VA = 0x000849E4
+_ROLL_FMUL_VANILLA = bytes([
+    0xD8, 0x0D,                      # FMUL dword [abs32]
+    0xBC, 0x25, 0x1A, 0x00,           # [0x001A25BC] (shared 3.0)
+])
+_VANILLA_ROLL_MULT = 3.0             # the FMUL constant
+
+# Back-compat aliases — pre-v3 public symbols kept alive as
+# aliases on the new target (the FMUL instruction VA, 6 bytes).
+_ROLL_SITE_VA = _ROLL_FMUL_VA
+_ROLL_SITE_VANILLA = _ROLL_FMUL_VANILLA
+_RUN_SITE_VA = _ROLL_FMUL_VA
+_RUN_SITE_VANILLA = _ROLL_FMUL_VANILLA
+
+# Keep the v3 CONST symbols so inspect-physics can still
+# report the slope-slide constant (unchanged in v4 — we just
+# stopped treating it as the "roll" patch target).
 _ROLL_CONST_VA = 0x001AAB68
 _VANILLA_ROLL_SPEED = 2.0
 _ROLL_CONST_VANILLA = struct.pack("<f", _VANILLA_ROLL_SPEED)
-
-# Back-compat aliases — these symbols were public in the pre-v3
-# roll approach.  Keep them pointing at the new target so any
-# pinned external code that imports them keeps working.
-_ROLL_SITE_VA = _ROLL_CONST_VA   # semantic shift: now the CONST,
-                                  # not the FMUL instruction
-_ROLL_SITE_VANILLA = _ROLL_CONST_VANILLA
-_RUN_SITE_VA = _ROLL_CONST_VA
-_RUN_SITE_VANILLA = _ROLL_CONST_VANILLA
 
 
 # -----------------------------------------------------------
@@ -512,6 +557,36 @@ _VANILLA_FLAP_IMPULSE = 8.0   # legacy constant name; retained for
                               # scaling factor used by the math
                               # below is ``_VANILLA_JUMP_GRAVITY``.
 
+# -----------------------------------------------------------
+# Subsequent-flap height (new April 2026 v2).
+#
+# After the first wing flap, ``FUN_00089300`` checks the
+# remaining-height-to-peak (``peak_z + flap_height -
+# current_z``) against a 6.0-metre threshold at VA 0x893C0
+# (``FCOMP [0x001A25B8] = 6.0``).  If the player has fallen
+# more than 6m below their peak (i.e., is continuing to flap
+# DOWNWARD), the subsequent flap v0 is HALVED by
+# ``FMUL [0x001A2510] = 0.5`` at VA 0x893DD.  That's why
+# user reports the first flap gives full boost but subsequent
+# flaps feel weak.
+#
+# We rewrite the 0x893DD FMUL to reference an injected
+# ``0.5 × flap_subsequent_scale`` so users can tune it:
+#
+#   - 1.0 (default): vanilla halving, subsequent flaps at 50% v0.
+#   - 2.0:           subsequent flaps at 100% v0 (no halving).
+#   - 4.0:           subsequent flaps at 200% v0 (boosted).
+#
+# The shared 0x001A2510 = 0.5 constant has 263+ readers in
+# the binary (generic "half"), so we rewrite only the FMUL
+# instruction target — not the constant.
+_FLAP_SUBSEQUENT_SITE_VA = 0x000893DD
+_FLAP_SUBSEQUENT_SITE_VANILLA = bytes([
+    0xD8, 0x0D,
+    0x10, 0x25, 0x1A, 0x00,    # FMUL dword [0x001A2510] (0.5)
+])
+_VANILLA_FLAP_SUBSEQUENT = 0.5
+
 # Vanilla runtime value of CritterData.run_speed (+0x40) for the
 # player entity.  Confirmed via lldb at VA 0x00085F65 — the FLD
 # [EAX+0x40] immediately after MOV EAX, [EBP+0x34] in FUN_00085F50.
@@ -541,6 +616,7 @@ def apply_player_physics(
     jump_scale: float | None = None,
     air_control_scale: float | None = None,
     flap_scale: float | None = None,
+    flap_subsequent_scale: float | None = None,
     climb_scale: float | None = None,
     # Back-compat alias: callers that still pass run_scale get
     # transparently routed to roll_scale (the new name).
@@ -549,7 +625,7 @@ def apply_player_physics(
 ) -> None:
     """Apply the XBE-side portion of the player physics pack.
 
-    All eight adjustments operate on ``default.xbe`` directly.
+    All nine adjustments operate on ``default.xbe`` directly.
     Speed sliders no longer touch ``config.xbr`` — the values
     there turned out to be dead data (see module docstring).
     """
@@ -581,6 +657,11 @@ def apply_player_physics(
     if f != 1.0:
         apply_flap_height(xbe_data, flap_scale=f)
 
+    fsub = (1.0 if flap_subsequent_scale is None
+            else float(flap_subsequent_scale))
+    if fsub != 1.0:
+        apply_flap_subsequent(xbe_data, subsequent_scale=fsub)
+
     c = 1.0 if climb_scale is None else float(climb_scale)
     if c != 1.0:
         apply_climb_speed(xbe_data, climb_scale=c)
@@ -596,22 +677,28 @@ def apply_player_speed(
 ) -> bool:
     """Patch ``default.xbe`` so the player walks / rolls at custom speeds.
 
-    v3 (April 2026) — ``walk_scale`` and ``roll_scale`` are
-    INDEPENDENT, UNCOUPLED multipliers on distinct physics systems:
+    v4 (April 2026 late) — ``walk_scale`` is unchanged.  ``roll_scale``
+    reverts to the v1 target (FMUL rewrite at VA 0x849E4) because
+    v3's VA 0x1AAB68 target turned out to be the SLOPE-SLIDE state
+    (FUN_00089A70, reached when landing on steep terrain), NOT the
+    player-initiated roll / WHITE-button dash the user wanted to
+    scale.  See module docstring for the full iteration history.
 
-    * ``walk_scale`` scales the walking-state velocity via an
-      injected FLD constant (replaces ``CritterData.run_speed`` =
-      7.0 for the player only).
-    * ``roll_scale`` scales the rolling/sliding GROUND-state
-      velocity by overwriting the single-reader constant at VA
-      ``0x001AAB68`` (vanilla 2.0) used by ``FUN_00089A70``.  This
-      targets ONLY the ground-roll physics — walking, airborne
-      flight, jumping, and swimming are completely unaffected.
-      (Prior versions used an FMUL rewrite + force-always-on in
-      ``FUN_00084f90``, which coupled roll_scale to airborne
-      horizontal speed via the shared ``magnitude`` variable.
-      That coupling is what made roll_scale look like "gravity
-      got weaker" to users — it's gone in v3.)
+    * ``walk_scale`` — walking-state velocity multiplier (FLD
+      rewrite at VA 0x85F62).
+    * ``roll_scale`` — scales the 3.0 FMUL at VA 0x849E4 inside
+      FUN_00084940 that triggers when WHITE or BACK is held.
+      Rewrites ``FMUL [0x001A25BC]`` (shared, 45 readers) to
+      ``FMUL [abs <inject_va>]`` where inject_va holds
+      ``3.0 × roll_scale``.  Only the player's FMUL site is
+      redirected; the shared constant stays at 3.0 for the other
+      44 readers.
+
+      Side effect (matches vanilla): when WHITE is held mid-air,
+      magnitude × 3.0 × roll_scale also scales horizontal air
+      control (``entity[+0x140] × magnitude`` inside
+      FUN_00089480).  This is exactly the same coupling vanilla
+      has; we just scale the multiplier proportionally.
 
     Returns True when the patch was applied, False if both scales
     are at the default of 1.0 (no-op) or if the patch sites have
@@ -627,7 +714,7 @@ def apply_player_speed(
         return False
 
     walk_off = va_to_file(_WALK_SITE_VA)
-    roll_off = va_to_file(_ROLL_CONST_VA)
+    roll_off = va_to_file(_ROLL_FMUL_VA)
 
     # --- Safety: ensure vanilla bytes at the sites we plan to touch.
     if walk_scale != 1.0 and (
@@ -639,17 +726,13 @@ def apply_player_speed(
               f"{bytes(xbe_data[walk_off:walk_off + 6]).hex()})")
         return False
     if roll_scale != 1.0 and (
-        bytes(xbe_data[roll_off:roll_off + 4]) != _ROLL_CONST_VANILLA
+        bytes(xbe_data[roll_off:roll_off + 6]) != _ROLL_FMUL_VANILLA
     ):
-        print(f"  WARNING: player_speed — roll constant at VA "
-              f"0x{_ROLL_CONST_VA:X} already patched or drifted, "
+        print(f"  WARNING: player_speed — roll FMUL at VA "
+              f"0x{_ROLL_FMUL_VA:X} already patched or drifted, "
               f"skipping (got "
-              f"{bytes(xbe_data[roll_off:roll_off + 4]).hex()}, "
-              f"expected {_ROLL_CONST_VANILLA.hex()})")
+              f"{bytes(xbe_data[roll_off:roll_off + 6]).hex()})")
         return False
-
-    walk_va = None
-    roll_new_value: float | None = None
 
     if walk_scale != 1.0:
         # Late import to avoid the circular dep at module-load.
@@ -667,17 +750,20 @@ def apply_player_speed(
               f"VA 0x{walk_va:X})")
 
     if roll_scale != 1.0:
-        # Direct constant overwrite — no shim, no trampoline.
-        # VA 0x001AAB68 is a single-reader .rdata float, so we
-        # can swap vanilla 2.0 for 2.0 × roll_scale in-place and
-        # the change takes effect on every frame of ground-roll
-        # physics without any instruction rewriting.
-        roll_new_value = _VANILLA_ROLL_SPEED * float(roll_scale)
-        xbe_data[roll_off:roll_off + 4] = (
-            struct.pack("<f", roll_new_value))
-        print(f"  Player roll (ground) speed: {roll_scale:.3f}x vanilla  "
-              f"(constant {_VANILLA_ROLL_SPEED:.3f} -> "
-              f"{roll_new_value:.3f} at VA 0x{_ROLL_CONST_VA:X})")
+        # Rewrite the FMUL at VA 0x849E4 to reference an injected
+        # ``3.0 × roll_scale`` constant.  The shared 3.0 at
+        # 0x001A25BC is untouched (45 other readers depend on it).
+        from azurik_mod.patching.apply import _carve_shim_landing
+
+        inject_value = _VANILLA_ROLL_MULT * float(roll_scale)
+        roll_value_bytes = struct.pack("<f", inject_value)
+        _, roll_va = _carve_shim_landing(xbe_data, roll_value_bytes)
+        # FMUL dword [abs roll_va]   encoded as D8 0D <va>
+        xbe_data[roll_off:roll_off + 6] = (
+            b"\xD8\x0D" + struct.pack("<I", roll_va))
+        print(f"  Player roll (WHITE/BACK boost): {roll_scale:.3f}x "
+              f"vanilla  (injected mult = {inject_value:.3f} at "
+              f"VA 0x{roll_va:X})")
 
     return True
 
@@ -951,6 +1037,58 @@ def apply_flap_height(
     return True
 
 
+def apply_flap_subsequent(
+    xbe_data: bytearray,
+    *,
+    subsequent_scale: float = 1.0,
+) -> bool:
+    """Patch ``default.xbe`` to scale subsequent-flap v0.
+
+    After the first wing flap, ``FUN_00089300`` halves v0 via
+    ``FMUL [0x001A2510] = 0.5`` at VA 0x893DD when the player
+    has fallen > 6m below their peak.  This is why the second
+    and later flaps feel weaker than the first.
+
+    We rewrite the FMUL to reference an injected ``0.5 ×
+    subsequent_scale``:
+
+    - ``1.0`` (default): vanilla halving (v0 / 2).
+    - ``2.0``:           no halving (full v0).
+    - ``4.0``:           subsequent flaps now BOOST by 2× (v0 × 2).
+
+    This is independent of ``flap_scale``: set both to 2.0 to
+    get "first flap 2× + subsequent flaps also full v0 × 2" —
+    i.e., every flap is consistently strong.
+
+    Returns True on apply, False on no-op / drift.
+    """
+    if subsequent_scale == 1.0:
+        return False
+
+    from azurik_mod.patching.apply import _carve_shim_landing
+
+    off = va_to_file(_FLAP_SUBSEQUENT_SITE_VA)
+    current = bytes(xbe_data[off:off + 6])
+    if current != _FLAP_SUBSEQUENT_SITE_VANILLA:
+        print(f"  WARNING: flap_subsequent — site at VA "
+              f"0x{_FLAP_SUBSEQUENT_SITE_VA:X} drifted (got "
+              f"{current.hex()}); skipping.")
+        return False
+
+    inject_value = _VANILLA_FLAP_SUBSEQUENT * float(subsequent_scale)
+    inject_bytes = struct.pack("<f", inject_value)
+    _, inject_va = _carve_shim_landing(xbe_data, inject_bytes)
+
+    # FMUL dword [abs inject_va]   encoded as D8 0D <va>
+    xbe_data[off:off + 6] = b"\xD8\x0D" + struct.pack("<I", inject_va)
+
+    print(f"  Wing-flap subsequent (2nd+) height: "
+          f"{subsequent_scale:.3f}x vanilla  (halving factor "
+          f"{_VANILLA_FLAP_SUBSEQUENT} -> {inject_value:.3f} at "
+          f"VA 0x{inject_va:X})")
+    return True
+
+
 def _player_speed_dynamic_whitelist(
     xbe: bytes,
 ) -> list[tuple[int, int]]:
@@ -984,9 +1122,12 @@ def _player_speed_dynamic_whitelist(
     except Exception:  # noqa: BLE001
         pass
     try:
-        # Roll now targets a 4-byte constant at VA 0x001AAB68.
-        ranges.append((va_to_file(_ROLL_CONST_VA),
-                       va_to_file(_ROLL_CONST_VA) + 4))
+        # v4: Roll targets the FMUL instruction at VA 0x849E4
+        # (6 bytes — ``FMUL [abs32]``).  The v3 4-byte constant
+        # at 0x1AAB68 (slope-slide) is NOT whitelisted anymore
+        # because v4 doesn't touch it.
+        roll_off = va_to_file(_ROLL_FMUL_VA)
+        ranges.append((roll_off, roll_off + 6))
     except Exception:  # noqa: BLE001
         pass
     try:
@@ -1010,6 +1151,12 @@ def _player_speed_dynamic_whitelist(
         ranges.append((fl_off, fl_off + 6))
     except Exception:  # noqa: BLE001
         pass
+    # Flap-subsequent: 6-byte FMUL rewrite site (v2 April 2026).
+    try:
+        fls_off = va_to_file(_FLAP_SUBSEQUENT_SITE_VA)
+        ranges.append((fls_off, fls_off + 6))
+    except Exception:  # noqa: BLE001
+        pass
 
     # Dynamic: if a site has been rewritten to `FLD/FMUL [abs32]`,
     # follow the abs32 pointer through the section table and whitelist
@@ -1028,6 +1175,10 @@ def _player_speed_dynamic_whitelist(
         (swim_off, b"\xD8\x0D"),   # FMUL [abs32] (swim mult)
     ]
     try:
+        follow_sites.append((va_to_file(_ROLL_FMUL_VA), b"\xD8\x0D"))
+    except Exception:  # noqa: BLE001
+        pass
+    try:
         follow_sites.append((va_to_file(_JUMP_SITE_VA), b"\xD9\x05"))
     except Exception:  # noqa: BLE001
         pass
@@ -1035,6 +1186,13 @@ def _player_speed_dynamic_whitelist(
         # v2: Flap site now uses FLD [abs32] (D9 05) same as the
         # jump site — we rewrote a gravity FLD, not a FADD.
         follow_sites.append((va_to_file(_FLAP_SITE_VA), b"\xD9\x05"))
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        # Flap-subsequent uses FMUL [abs32] (D8 0D) — rewrote the
+        # 0.5 halving factor for 2nd+ flaps.
+        follow_sites.append(
+            (va_to_file(_FLAP_SUBSEQUENT_SITE_VA), b"\xD8\x0D"))
     except Exception:  # noqa: BLE001
         pass
 
@@ -1062,6 +1220,7 @@ PLAYER_PHYSICS_SITES = [
     JUMP_SPEED_SCALE,
     AIR_CONTROL_SCALE,
     FLAP_HEIGHT_SCALE,
+    FLAP_SUBSEQUENT_SCALE,
     CLIMB_SPEED_SCALE,
 ]
 """Registered Patches-page sites.  Gravity, roll, and climb
@@ -1086,6 +1245,7 @@ def _custom_apply(
     jump_speed_scale: float | None = None,
     air_control_scale: float | None = None,
     flap_height_scale: float | None = None,
+    flap_subsequent_scale: float | None = None,
     climb_speed_scale: float | None = None,
     # Back-compat: the old kwarg spellings.  New callers should use
     # the *_speed_scale forms, but CLI / serialized configs that
@@ -1132,6 +1292,7 @@ def _custom_apply(
         jump_scale=jump,
         air_control_scale=air_control_scale,
         flap_scale=flap,
+        flap_subsequent_scale=flap_subsequent_scale,
         climb_scale=climb,
     )
 
@@ -1160,6 +1321,7 @@ __all__ = [
     "AIR_CONTROL_SCALE",
     "CLIMB_SPEED_SCALE",
     "FLAP_HEIGHT_SCALE",
+    "FLAP_SUBSEQUENT_SCALE",
     "GRAVITY_BASELINE",
     "GRAVITY_PATCH",
     "JUMP_SPEED_SCALE",
@@ -1171,6 +1333,7 @@ __all__ = [
     "apply_air_control_speed",
     "apply_climb_speed",
     "apply_flap_height",
+    "apply_flap_subsequent",
     "apply_jump_speed",
     "apply_player_physics",
     "apply_player_speed",

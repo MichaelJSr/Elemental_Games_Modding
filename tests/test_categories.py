@@ -298,14 +298,16 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         browser = PackBrowser(self._root, all_packs(), {},
                               pack_params=params)
         slider_keys = sorted(browser.sliders().keys())
-        # player_physics still owns its 8 sliders; wing_flap_count
-        # contributes 3 more (per-air-power-level flap counts) in
-        # the same Player tab but as a distinct pack.
+        # player_physics owns 9 sliders post-April-2026 (flap_subsequent
+        # added late April); wing_flap_count contributes 3 more
+        # (per-air-power-level flap counts) in the same Player tab
+        # but as a distinct pack.
         self.assertEqual(
             slider_keys,
             [("player_physics", "air_control_scale"),
              ("player_physics", "climb_speed_scale"),
              ("player_physics", "flap_height_scale"),
+             ("player_physics", "flap_subsequent_scale"),
              ("player_physics", "gravity"),
              ("player_physics", "jump_speed_scale"),
              ("player_physics", "roll_speed_scale"),
@@ -316,7 +318,7 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
              ("wing_flap_count", "flaps_air_power_3")])
         # Initial values mirrored into pack_params.
         self.assertIn("player_physics", params)
-        self.assertEqual(len(params["player_physics"]), 8)
+        self.assertEqual(len(params["player_physics"]), 9)
         self.assertIn("wing_flap_count", params)
         self.assertEqual(len(params["wing_flap_count"]), 3)
 

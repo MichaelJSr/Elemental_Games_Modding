@@ -37,7 +37,6 @@ from azurik_mod.patches.wing_flap_count import (  # noqa: E402
     FLAPS_AIR_1,
     FLAPS_AIR_2,
     FLAPS_AIR_3,
-    _AIR_POWER_LEVEL_VA,
     _WING_FLAP_HOOK_RETURN_VA,
     _WING_FLAP_HOOK_VA,
     _WING_FLAP_HOOK_VANILLA,
@@ -61,38 +60,29 @@ _XBE_PATH = next((p for p in _XBE_CANDIDATES if p.exists()), None)
 # ---------------------------------------------------------------------------
 
 class NoFallDamageSpecShape(unittest.TestCase):
+    """v2 (late April 2026) — rewrites FUN_0008AB70 prologue to
+    ``XOR AL, AL ; RET 8 ; NOP`` (6-byte always-return-0).
+    """
+
     def test_spec_bytes_are_correct_lengths(self):
         self.assertEqual(len(NO_FALL_DAMAGE_SPEC.original), 6)
         self.assertEqual(len(NO_FALL_DAMAGE_SPEC.patch), 6)
 
-    def test_vanilla_bytes_are_jnp_rel32(self):
-        # 0F 8B = JNP rel32.
-        self.assertEqual(NO_FALL_DAMAGE_SPEC.original[:2], b"\x0F\x8B")
+    def test_targets_function_prologue(self):
+        """NO_FALL_DAMAGE_VA is FUN_0008AB70's entry, not the
+        branch 0x8AC77 pre-v2 used."""
+        self.assertEqual(NO_FALL_DAMAGE_VA, 0x0008AB70)
 
-    def test_patch_is_jmp_plus_nop(self):
-        # E9 <rel32> = JMP rel32; trailing 90 = NOP.
-        self.assertEqual(NO_FALL_DAMAGE_SPEC.patch[0], 0xE9)
-        self.assertEqual(NO_FALL_DAMAGE_SPEC.patch[-1], 0x90)
+    def test_vanilla_is_push_ecx_mov_eax(self):
+        # 51 A1 = PUSH ECX ; MOV EAX, abs32.
+        self.assertEqual(NO_FALL_DAMAGE_SPEC.original[:2],
+                         b"\x51\xA1")
 
-    def test_both_jumps_target_same_address(self):
-        """The JNP and the JMP must target the same VA
-        (0x0008ADFC — the XOR AL,AL ; RET 8 "no damage" tail)."""
-        jnp_rel = struct.unpack(
-            "<i", NO_FALL_DAMAGE_SPEC.original[2:6])[0]
-        jmp_rel = struct.unpack(
-            "<i", NO_FALL_DAMAGE_SPEC.patch[1:5])[0]
-        # JNP origin-after-instruction: VA + 6.  JMP is 5 bytes so
-        # its origin-after is VA + 5.  For them to hit the same
-        # target, jmp_rel must be jnp_rel + 1.
-        self.assertEqual(jmp_rel, jnp_rel + 1,
-            msg="JMP's rel32 must compensate for its 1-byte-"
-                "shorter length vs JNP")
-        # Compute target explicitly.
-        target_from_jnp = NO_FALL_DAMAGE_VA + 6 + jnp_rel
-        target_from_jmp = NO_FALL_DAMAGE_VA + 5 + jmp_rel
-        self.assertEqual(target_from_jnp, target_from_jmp)
-        self.assertEqual(target_from_jnp, 0x0008ADFC,
-            msg="target must be the XOR AL,AL ; RET 8 tail")
+    def test_patch_is_xor_ret8_nop(self):
+        # 32 C0 = XOR AL, AL ; C2 08 00 = RET 8 ; 90 = NOP.
+        self.assertEqual(
+            NO_FALL_DAMAGE_SPEC.patch,
+            b"\x32\xC0\xC2\x08\x00\x90")
 
 
 @unittest.skipUnless(_XBE_PATH,
@@ -102,13 +92,13 @@ class NoFallDamageApply(unittest.TestCase):
         self.orig = _XBE_PATH.read_bytes()
 
     def test_vanilla_bytes_match_ghidra(self):
-        """Drift-guard: the 6 bytes at VA 0x0008AC77 must match
+        """Drift-guard: the 6 bytes at VA 0x0008AB70 must match
         what NO_FALL_DAMAGE_SPEC.original expects."""
         off = va_to_file(NO_FALL_DAMAGE_VA)
         self.assertEqual(bytes(self.orig[off:off + 6]),
                          NO_FALL_DAMAGE_SPEC.original)
 
-    def test_apply_rewrites_jnp_to_jmp(self):
+    def test_apply_rewrites_prologue(self):
         data = bytearray(self.orig)
         apply_no_fall_damage_patch(data)
         off = va_to_file(NO_FALL_DAMAGE_VA)
@@ -157,52 +147,59 @@ class WingFlapCountShimShape(unittest.TestCase):
     """Validate ``_build_shim_body`` produces the expected 50-byte
     layout regardless of shim_va / flaps_va arguments."""
 
-    def test_shim_is_exactly_50_bytes(self):
+    def test_shim_is_exactly_47_bytes(self):
+        """v2 (late April 2026): shim shrank from 50 → 47 bytes
+        when we switched from ``MOV EDX, ds:[abs32]`` (6B) to
+        ``MOV EDX, [EDX+0x8]`` (3B) — saving 3 bytes."""
         body = _build_shim_body(
             shim_va=0x390000,
             flaps1_va=0x3A0000,
             flaps2_va=0x3A0004,
             flaps3_va=0x3A0008,
         )
-        self.assertEqual(len(body), 50)
+        self.assertEqual(len(body), 47)
 
     def test_shim_starts_with_vanilla_replay(self):
         """Offset 0-2: MOV EAX, [EDX+0x38] = 8B 42 38."""
         body = _build_shim_body(0x390000, 0x3A0000, 0x3A0004, 0x3A0008)
         self.assertEqual(body[0:3], b"\x8B\x42\x38")
 
-    def test_shim_reads_air_power_level(self):
-        """Offset 3-8: MOV EDX, [0x001A7AE4] = 8B 15 + 32-bit abs."""
+    def test_shim_reads_air_power_level_from_edx_indirect(self):
+        """v2: Offset 3-5 is ``MOV EDX, [EDX+0x8]`` = 8B 52 08.
+        EDX at hook entry is the level_struct pointer (set by
+        the preceding ``MOV EDX, [EDI+0x20]`` at VA 0x8931E).
+        level_struct+0x8 holds the air_power_level int.  (Pre-v2
+        we dispatched on DAT_001A7AE4 via ``MOV EDX, ds:[abs32]``
+        — that turned out to be the controller index, NOT the
+        air-power level, so the shim always fell through to the
+        vanilla fallback.)"""
         body = _build_shim_body(0x390000, 0x3A0000, 0x3A0004, 0x3A0008)
-        self.assertEqual(body[3:5], b"\x8B\x15")
-        self.assertEqual(
-            struct.unpack("<I", body[5:9])[0],
-            _AIR_POWER_LEVEL_VA)
+        self.assertEqual(body[3:6], b"\x8B\x52\x08")
 
     def test_shim_references_3_injected_ints_at_expected_offsets(self):
-        """``A1 <abs32>`` sites at offsets 14, 26, 38 should point
+        """``A1 <abs32>`` sites at offsets 11, 23, 35 should point
         at flaps1_va, flaps2_va, flaps3_va respectively."""
         body = _build_shim_body(0x390000, 0xABC000, 0xABC004, 0xABC008)
-        for off, expected_va in ((14, 0xABC000),
-                                 (26, 0xABC004),
-                                 (38, 0xABC008)):
+        for off, expected_va in ((11, 0xABC000),
+                                 (23, 0xABC004),
+                                 (35, 0xABC008)):
             self.assertEqual(body[off], 0xA1,
                 msg=f"expected MOV EAX, abs32 (A1) at offset {off}")
             got_va = struct.unpack("<I", body[off + 1:off + 5])[0]
             self.assertEqual(got_va, expected_va)
 
     def test_shim_replays_test_then_jumps_back(self):
-        """Offsets 43-49: TEST EAX, EAX then JMP back_va."""
+        """Offsets 40-46: TEST EAX, EAX then JMP back_va."""
         shim_va = 0x390000
         body = _build_shim_body(shim_va, 0x3A0000, 0x3A0004, 0x3A0008)
-        self.assertEqual(body[43:45], b"\x85\xC0",
-            msg="TEST EAX, EAX at offset 43")
-        self.assertEqual(body[45], 0xE9,
-            msg="JMP rel32 at offset 45")
-        rel = struct.unpack("<i", body[46:50])[0]
-        # JMP origin-after-inst = shim_va + 50.
+        self.assertEqual(body[40:42], b"\x85\xC0",
+            msg="TEST EAX, EAX at offset 40")
+        self.assertEqual(body[42], 0xE9,
+            msg="JMP rel32 at offset 42")
+        rel = struct.unpack("<i", body[43:47])[0]
+        # JMP origin-after-inst = shim_va + 47.
         self.assertEqual(
-            shim_va + 50 + rel, _WING_FLAP_HOOK_RETURN_VA,
+            shim_va + 47 + rel, _WING_FLAP_HOOK_RETURN_VA,
             msg="back-JMP must target the hook return VA "
                 f"(0x{_WING_FLAP_HOOK_RETURN_VA:X})")
 
@@ -272,15 +269,17 @@ class WingFlapCountApply(unittest.TestCase):
                 "section table")
 
         # Shim body layout sanity.
-        body = bytes(data[shim_fo:shim_fo + 50])
+        body = bytes(data[shim_fo:shim_fo + 47])
         self.assertEqual(body[0:3], b"\x8B\x42\x38",
             msg="shim must replay MOV EAX, [EDX+0x38]")
-        self.assertEqual(body[43:45], b"\x85\xC0",
+        self.assertEqual(body[3:6], b"\x8B\x52\x08",
+            msg="shim must load air_power_level from [EDX+0x8]")
+        self.assertEqual(body[40:42], b"\x85\xC0",
             msg="shim must replay TEST EAX, EAX before JMP")
 
         # Follow each A1 <abs32> site → verify it stores the
         # correct user-provided int value.
-        for off, expected in ((14, 10), (26, 20), (38, 50)):
+        for off, expected in ((11, 10), (23, 20), (35, 50)):
             self.assertEqual(body[off], 0xA1)
             flap_va = struct.unpack("<I", body[off + 1:off + 5])[0]
             flap_fo = None
@@ -323,10 +322,12 @@ class WingFlapCountApply(unittest.TestCase):
             s["raw_addr"] + (shim_va - s["vaddr"])
             for s in secs
             if s["vaddr"] <= shim_va < s["vaddr"] + s["vsize"])
-        body = bytes(data[shim_fo:shim_fo + 50])
-        flaps1_va = struct.unpack("<I", body[15:19])[0]
-        flaps2_va = struct.unpack("<I", body[27:31])[0]
-        flaps3_va = struct.unpack("<I", body[39:43])[0]
+        body = bytes(data[shim_fo:shim_fo + 47])
+        # v2 A1 site offsets: 11 / 23 / 35.  Absolute VA lives at
+        # bytes [off+1 .. off+5].
+        flaps1_va = struct.unpack("<I", body[12:16])[0]
+        flaps2_va = struct.unpack("<I", body[24:28])[0]
+        flaps3_va = struct.unpack("<I", body[36:40])[0]
         self.assertEqual(flaps2_va - flaps1_va, 4)
         self.assertEqual(flaps3_va - flaps2_va, 4)
 

@@ -115,9 +115,21 @@ _WING_FLAP_HOOK_VANILLA = bytes.fromhex("8b423885c0")
 # Return point: just after the TEST EAX, EAX that the shim replays.
 _WING_FLAP_HOOK_RETURN_VA = 0x00089326
 
-# Global int at VA 0x001A7AE4 holding current air-power level
-# (1 / 2 / 3 = granted; 4 or 0 = none).
-_AIR_POWER_LEVEL_VA = 0x001A7AE4
+# The air-power level is NOT at a fixed VA.  It lives in the
+# armor-subsystem struct chain at:
+#
+#     air_power_level = *(armor_mgr + 0x20 + 0x8)
+#
+# When execution reaches our hook at VA 0x89321:
+#     - EDI  = armor_mgr pointer (set at 0x89318 MOV EDI, [ECX+0xCC])
+#     - EDX  = [EDI+0x20] (set at 0x8931E) = level_struct pointer
+# So reading the level is a single ``MOV reg, [EDX+0x8]`` inside
+# our shim.  (Pre-commit 5ebf... we incorrectly dispatched on
+# ``DAT_001A7AE4``, which turned out to be the active XInput
+# *controller* index — not the air-power level.  Shim did fire
+# but always hit the "fallback, use vanilla" branch because the
+# controller index is 0-3 not 1-3 when the game is actually
+# running.)
 
 
 # ---------------------------------------------------------------------------
@@ -181,69 +193,88 @@ def _build_shim_body(
     flaps2_va: int,
     flaps3_va: int,
 ) -> bytes:
-    """Assemble the 50-byte dispatch shim.
+    """Assemble the 47-byte dispatch shim.
 
     Layout (offsets within the shim body):
 
-        0:  MOV EAX, [EDX+0x38]           (8B 42 38)         — replay vanilla
-        3:  MOV EDX, ds:[0x001A7AE4]      (8B 15 <abs>)      — load level
-        9:  CMP EDX, 1                    (83 FA 01)
-       12:  JNE +7                        (75 07)            — skip use_1
-       14:  MOV EAX, ds:[flaps1_va]       (A1 <abs>)
-       19:  JMP +0x16 → done              (EB 16)
-       21:  CMP EDX, 2                    (83 FA 02)
-       24:  JNE +7                        (75 07)            — skip use_2
-       26:  MOV EAX, ds:[flaps2_va]       (A1 <abs>)
-       31:  JMP +0x0A → done              (EB 0A)
-       33:  CMP EDX, 3                    (83 FA 03)
-       36:  JNE +5                        (75 05)            — skip use_3
-       38:  MOV EAX, ds:[flaps3_va]       (A1 <abs>)
-       43:  TEST EAX, EAX                 (85 C0)            — replay clobber
-       45:  JMP back_va                   (E9 <rel32>)
+        0:  MOV EAX, [EDX+0x38]           (8B 42 38)      — replay vanilla
+        3:  MOV EDX, [EDX+0x8]            (8B 52 08)      — load air_power_level
+        6:  CMP EDX, 1                    (83 FA 01)
+        9:  JNE +7                        (75 07)
+       11:  MOV EAX, ds:[flaps1_va]       (A1 <abs>)
+       16:  JMP +0x16 → done              (EB 16)
+       18:  CMP EDX, 2                    (83 FA 02)
+       21:  JNE +7                        (75 07)
+       23:  MOV EAX, ds:[flaps2_va]       (A1 <abs>)
+       28:  JMP +0x0A → done              (EB 0A)
+       30:  CMP EDX, 3                    (83 FA 03)
+       33:  JNE +5                        (75 05)
+       35:  MOV EAX, ds:[flaps3_va]       (A1 <abs>)
+       40:  TEST EAX, EAX                 (85 C0)         — replay clobber
+       42:  JMP back_va                   (E9 <rel32>)
 
-    Total = 50 bytes.
+    Total = 47 bytes.
 
-    ``shim_va`` is the absolute VA where the shim body starts in the
-    patched XBE; used to compute the final JMP's rel32.
+    At the hook point (VA 0x89321), the register state is:
+        - EDI  = armor_mgr pointer
+        - EDX  = *(armor_mgr + 0x20) = level_struct pointer
+        - ESI  = player entity
+
+    The shim:
+        - Reads ``armor.flap_count`` via the replayed
+          ``MOV EAX, [EDX+0x38]`` (vanilla baseline).
+        - Reads ``air_power_level`` via ``MOV EDX, [EDX+0x8]``
+          (level_struct.level, in [1, 3] when a level is active).
+        - Dispatches on EDX ∈ {1, 2, 3}; falls through for any
+          other value (level 0 / 4 / unset) using vanilla EAX.
+        - Replays the ``TEST EAX, EAX`` that our 5-byte
+          trampoline clobbered.
+        - JMPs back to VA 0x89326 (right after the replayed
+          TEST) so the ``JZ 0x89336`` conditional at 0x89326
+          works against the correct flags.
+
+    ``shim_va`` is the absolute VA where the shim body starts in
+    the patched XBE; used to compute the final JMP's rel32.
     """
     parts: list[bytes] = []
 
-    # 0-2: MOV EAX, [EDX+0x38]
+    # 0-2: MOV EAX, [EDX+0x38] — vanilla flap count (replay)
     parts.append(b"\x8B\x42\x38")
-    # 3-8: MOV EDX, ds:[0x001A7AE4]
-    parts.append(b"\x8B\x15" + struct.pack("<I", _AIR_POWER_LEVEL_VA))
-    # 9-11: CMP EDX, 1
+    # 3-5: MOV EDX, [EDX+0x8] — air_power_level (overwrites EDX;
+    # EDX is dead after VA 0x89326 so this is safe).
+    parts.append(b"\x8B\x52\x08")
+    # 6-8: CMP EDX, 1
     parts.append(b"\x83\xFA\x01")
-    # 12-13: JNE +7
+    # 9-10: JNE +7 → skip use_1 load
     parts.append(b"\x75\x07")
-    # 14-18: MOV EAX, ds:[flaps1_va]
+    # 11-15: MOV EAX, ds:[flaps1_va]
     parts.append(b"\xA1" + struct.pack("<I", flaps1_va))
-    # 19-20: JMP +0x16 → done (offset 21 + 0x16 = 43)
+    # 16-17: JMP +0x16 → done (offset 18 + 0x16 = 40)
     parts.append(b"\xEB\x16")
-    # 21-23: CMP EDX, 2
+    # 18-20: CMP EDX, 2
     parts.append(b"\x83\xFA\x02")
-    # 24-25: JNE +7
+    # 21-22: JNE +7
     parts.append(b"\x75\x07")
-    # 26-30: MOV EAX, ds:[flaps2_va]
+    # 23-27: MOV EAX, ds:[flaps2_va]
     parts.append(b"\xA1" + struct.pack("<I", flaps2_va))
-    # 31-32: JMP +0x0A → done (offset 33 + 0x0A = 43)
+    # 28-29: JMP +0x0A → done (offset 30 + 0x0A = 40)
     parts.append(b"\xEB\x0A")
-    # 33-35: CMP EDX, 3
+    # 30-32: CMP EDX, 3
     parts.append(b"\x83\xFA\x03")
-    # 36-37: JNE +5
+    # 33-34: JNE +5 → skip use_3, fall through to done
     parts.append(b"\x75\x05")
-    # 38-42: MOV EAX, ds:[flaps3_va]
+    # 35-39: MOV EAX, ds:[flaps3_va]
     parts.append(b"\xA1" + struct.pack("<I", flaps3_va))
-    # 43-44: TEST EAX, EAX (replay)
+    # 40-41: TEST EAX, EAX (replay clobbered instruction)
     parts.append(b"\x85\xC0")
-    # 45-49: JMP <rel32> back to 0x89326
+    # 42-46: JMP <rel32> back to 0x89326
     back_va = _WING_FLAP_HOOK_RETURN_VA
-    jmp_origin_after = shim_va + 50   # after the 5-byte JMP at end of shim
+    jmp_origin_after = shim_va + 47   # after the 5-byte JMP at end of shim
     rel32 = back_va - jmp_origin_after
     parts.append(b"\xE9" + struct.pack("<i", rel32))
 
     body = b"".join(parts)
-    assert len(body) == 50, f"expected 50-byte shim, got {len(body)}"
+    assert len(body) == 47, f"expected 47-byte shim, got {len(body)}"
     return body
 
 
@@ -310,12 +341,12 @@ def apply_wing_flap_count(
     flaps2_va = ints_va + 4
     flaps3_va = ints_va + 8
 
-    # Carve a 50-byte placeholder for the shim body; we need its
+    # Carve a 47-byte placeholder for the shim body; we need its
     # VA before we can assemble the body (for the back-JMP rel32).
     # The placeholder is all ``0xCC`` (INT 3) so it doesn't look
     # like padding to the allocator AND a mis-directed jump into
     # it would trap immediately instead of corrupting state.
-    placeholder = b"\xCC" * 50
+    placeholder = b"\xCC" * 47
     body_file_off, shim_va = _carve_shim_landing(xbe_data, placeholder)
 
     # Assemble the real shim body now that we know shim_va and
@@ -325,7 +356,7 @@ def apply_wing_flap_count(
     # appended section that the vanilla section map doesn't know
     # about.
     body = _build_shim_body(shim_va, flaps1_va, flaps2_va, flaps3_va)
-    xbe_data[body_file_off:body_file_off + 50] = body
+    xbe_data[body_file_off:body_file_off + 47] = body
 
     # Install the 5-byte trampoline at the hook site.
     rel32 = shim_va - (_WING_FLAP_HOOK_VA + 5)
@@ -334,7 +365,7 @@ def apply_wing_flap_count(
 
     print(f"  Wing flaps per air-power level: "
           f"L1={f1} L2={f2} L3={f3}  "
-          f"(shim @ VA 0x{shim_va:X}, +50 bytes; "
+          f"(shim @ VA 0x{shim_va:X}, +47 bytes; "
           f"flaps VAs 0x{flaps1_va:X}/0x{flaps2_va:X}/"
           f"0x{flaps3_va:X})")
     return True
@@ -381,15 +412,15 @@ def _wing_flap_count_dynamic_whitelist(
             shim_va = _WING_FLAP_HOOK_VA + 5 + rel32
             shim_off = _resolve_va_to_file(shim_va)
             if shim_off is not None:
-                ranges.append((shim_off, shim_off + 50))
+                ranges.append((shim_off, shim_off + 47))
                 # Shim body parse: pull the 3 `A1 <abs32>` sites.
                 # All three point into a single packed 12-byte
                 # int block (flaps1_va, flaps2_va=+4, flaps3_va=+8),
                 # so whitelisting the first VA + 12 covers all
                 # three.  We still emit per-site ranges for
                 # robustness (if future refactors split them).
-                body = xbe[shim_off:shim_off + 50]
-                for a1_offset in (14, 26, 38):
+                body = xbe[shim_off:shim_off + 47]
+                for a1_offset in (11, 23, 35):
                     if (a1_offset + 5 <= len(body)
                             and body[a1_offset] == 0xA1):
                         inj_va = struct.unpack(
@@ -430,7 +461,7 @@ FEATURE = register_feature(Feature(
     description=(
         "Set per-air-power-level wing-flap counts independently: "
         "Air Power 1 (vanilla: 1 flap), Air Power 2 (vanilla: 2), "
-        "Air Power 3 (vanilla: 5).  Installs a 50-byte dispatch "
+        "Air Power 3 (vanilla: 5).  Installs a 47-byte dispatch "
         "shim at the flap-count read site inside FUN_00089300 "
         "that swaps the vanilla armor.flap_count read for a "
         "user-provided value selected by the current air-power "
@@ -452,7 +483,6 @@ __all__ = [
     "FLAPS_AIR_2",
     "FLAPS_AIR_3",
     "WING_FLAP_COUNT_SITES",
-    "_AIR_POWER_LEVEL_VA",
     "_WING_FLAP_HOOK_RETURN_VA",
     "_WING_FLAP_HOOK_VA",
     "_WING_FLAP_HOOK_VANILLA",

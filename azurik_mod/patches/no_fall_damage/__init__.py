@@ -13,57 +13,62 @@ around with my air power" workflows, fall damage is a nuisance.
 This pack disables it without touching HP max or any other
 damage system.
 
-## How it works
+## How it works — v2 (April 2026 late)
 
-The fall-damage dispatcher lives in ``FUN_0008AB70``.  Its
-first gameplay check (after the one-time cvar-cache init
-block at the top) is:
+Pre-v2 this patch flipped the **top-of-function JNP** at VA
+``0x0008AC77`` from ``JNP → JMP`` (rel32 to ``0x0008ADFC``,
+the "no damage dealt" return).  User testing revealed it
+prevented only *some* fall damage — high-velocity falls
+(instant-death) were blocked, but moderate falls still
+applied light damage.
+
+The likely reason: certain callers reach the damage-application
+site in FUN_0008AB70 through execution paths other than the
+one JNP we flipped (there are 9+ conditional branches in the
+function's cvar-cache init chain; not all routes to the
+damage block went through our single flip).
+
+v2 uses the more surgical approach: **rewrite the function
+prologue to return immediately**.  ``FUN_0008AB70`` is
+``__stdcall`` with 2 float parameters (fall_height,
+fall_speed), so its correct early-return is
+``XOR AL, AL ; RET 8``:
 
 .. code-block:: asm
 
-    0008AC66   D9 44 24 14        FLD  [ESP+0x14]       ; fall_speed
-    0008AC6A   D9 E1              FABS
-    0008AC6C   DC 1D 90 02 39 00  FCOMP [0x00390290]    ; vs fall_min_velocity
-    0008AC72   DF E0              FNSTSW AX
-    0008AC74   F6 C4 05           TEST AH, 5
-    0008AC77   0F 8B 7F 01 00 00  JNP 0x0008ADFC        ; ↓ "no damage" return
+    0008AB70  51              PUSH ECX                 <-- before
+    0008AB71  A1 98 02 39 00  MOV  EAX, [0x00390298]
+    0008AB76  53              PUSH EBX                 ...
 
-At VA 0x0008ADFC the function does ``XOR AL, AL; RET 8`` —
-i.e., "return 0 (no damage dealt)".  The ``JNP`` fires when
-``|fall_speed| < fall_min_velocity`` (player landed softly).
-Flipping the conditional to unconditional routes every
-landing — no matter how violent — to the no-damage return.
+becomes:
 
-## Patch
+.. code-block:: asm
 
-6 bytes at VA ``0x0008AC77``:
+    0008AB70  32 C0           XOR  AL, AL              <-- after (return 0)
+    0008AB72  C2 08 00        RET  8                    (pop 2 floats, return)
+    0008AB75  90              NOP                       (pad to 6 bytes)
 
-    Before: 0F 8B 7F 01 00 00    JNP  rel32 → 0x0008ADFC
-    After:  E9 80 01 00 00 90    JMP  rel32 → 0x0008ADFC  +  NOP
+Six bytes patched.  The entire cvar-cache init chain, tier
+selector, FCOMP gauntlet, and damage application (the
+``FUN_00044640`` call at 0x0008AD9B) become unreachable.
 
-``rel32`` is recomputed because a 5-byte near-JMP's origin-
-after-instruction differs from the 6-byte JNP's by one byte:
-
-    JNP:  target = 0x0008AC77 + 6 + 0x0000017F = 0x0008ADFC
-    JMP:  target = 0x0008AC77 + 5 + 0x00000180 = 0x0008ADFC
-
-Trailing NOP (0x90) preserves the 6-byte slot so the
-instruction boundaries of the surrounding code remain
-identical — no fall-through hazards, no disassembler
-confusion.
+Callers that ignore the return value still get the correct
+stack cleanup (``RET 8`` pops the 2 pushed floats).  Callers
+that check the return value always see "no damage" (AL=0),
+which they treat as "the fall was soft enough to skip the
+splat SFX" — matching the intuitive in-game behaviour.
 
 ## Side effects
 
 - The splat SFX and "fall damage" rumble never fire.  Players
   who actually *want* the splat SFX on hard landings can leave
   this patch off.
-- HP is not modified on landing, but also is not *restored*:
-  if the player took damage before falling, they keep that
-  damage.
-- The cvar-cache init block at the top of FUN_0008AB70 (ensures
-  "fall height 1", "fall damage 1" etc. are cached as static
-  doubles) still runs once per boot.  Harmless but visible
-  in a memory-trace.
+- HP is not modified on landing.  HP restoration / other
+  damage paths (combat, traps, lava, drowning) are untouched.
+- The one-time cvar-cache init block at the top of FUN_0008AB70
+  never runs.  The cached globals (DAT_00390228 etc.) remain
+  zero-initialised.  Since nothing else references those
+  specific doubles, this is harmless.
 
 The ``save_editor``, ``qol_skip_save_signature``, and every
 other pack are orthogonal to this one.
@@ -75,17 +80,17 @@ from azurik_mod.patching.registry import Feature, register_feature
 from azurik_mod.patching.spec import PatchSpec
 
 
-# VA of the conditional branch at the top of FUN_0008AB70.
-NO_FALL_DAMAGE_VA = 0x0008AC77
+# VA of the FUN_0008AB70 function prologue (fall damage dispatcher).
+NO_FALL_DAMAGE_VA = 0x0008AB70
 
 
 NO_FALL_DAMAGE_SPEC = PatchSpec(
-    label="Disable fall damage (JNP → JMP at top of FUN_0008AB70)",
+    label="Disable fall damage (XOR AL,AL ; RET 8 at FUN_0008AB70 entry)",
     va=NO_FALL_DAMAGE_VA,
-    # JNP rel32 → 0x0008ADFC (the "return 0 / no damage" tail).
-    original=bytes.fromhex("0f8b7f010000"),
-    # JMP rel32 → 0x0008ADFC + trailing NOP (preserves the 6-byte slot).
-    patch=bytes.fromhex("e980010000") + b"\x90",
+    # Vanilla prologue: PUSH ECX ; MOV EAX, [0x00390298] (first 6 bytes).
+    original=bytes.fromhex("51a198023900"),
+    # XOR AL, AL ; RET 8 ; NOP — 6-byte always-return-0.
+    patch=bytes.fromhex("32c0c2080090"),
     is_data=False,
     safety_critical=False,
 )

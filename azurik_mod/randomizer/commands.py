@@ -1298,6 +1298,8 @@ def cmd_randomize_full(args):
         air_control_scale = float(
             getattr(args, 'player_air_control_scale', None) or 1.0)
         flap_scale = float(getattr(args, 'player_flap_scale', None) or 1.0)
+        flap_subsequent_scale = float(
+            getattr(args, 'player_flap_subsequent_scale', None) or 1.0)
         climb_scale = float(getattr(args, 'player_climb_scale', None) or 1.0)
         want_no_fall_damage = bool(getattr(args, 'no_fall_damage', False))
         want_infinite_fuel = bool(getattr(args, 'infinite_fuel', False))
@@ -1331,6 +1333,7 @@ def cmd_randomize_full(args):
                                or jump_scale != 1.0
                                or air_control_scale != 1.0
                                or flap_scale != 1.0
+                               or flap_subsequent_scale != 1.0
                                or climb_scale != 1.0),
             "no_fall_damage": want_no_fall_damage,
             "infinite_fuel": want_infinite_fuel,
@@ -1355,6 +1358,7 @@ def cmd_randomize_full(args):
                     "jump_speed_scale": jump_scale,
                     "air_control_scale": air_control_scale,
                     "flap_height_scale": flap_scale,
+                    "flap_subsequent_scale": flap_subsequent_scale,
                     "climb_speed_scale": climb_scale,
                 },
                 "wing_flap_count": {
@@ -1782,8 +1786,10 @@ def cmd_inspect_physics(args):
         _AIR_CONTROL_IMM32_VANILLA, _AIR_CONTROL_SITE_VAS,
         _CLIMB_CONST_VA, _CLIMB_CONST_VANILLA,
         _FLAP_SITE_VA, _FLAP_SITE_VANILLA,
+        _FLAP_SUBSEQUENT_SITE_VA, _FLAP_SUBSEQUENT_SITE_VANILLA,
         _JUMP_SITE_VA, _JUMP_SITE_VANILLA,
         _ROLL_CONST_VA, _ROLL_CONST_VANILLA,
+        _ROLL_FMUL_VA, _ROLL_FMUL_VANILLA,
         _SWIM_SITE_VA, _SWIM_SITE_VANILLA,
         _VANILLA_CLIMB_SPEED, _VANILLA_ROLL_SPEED,
         _WALK_SITE_VA, _WALK_SITE_VANILLA,
@@ -1852,6 +1858,11 @@ def cmd_inspect_physics(args):
                 _JUMP_SITE_VA, _JUMP_SITE_VANILLA, b"\xD9\x05")
     _check_site("flap (FLD)",
                 _FLAP_SITE_VA, _FLAP_SITE_VANILLA, b"\xD9\x05")
+    _check_site("roll (FMUL)",
+                _ROLL_FMUL_VA, _ROLL_FMUL_VANILLA, b"\xD8\x0D")
+    _check_site("flap_sub (FMUL)",
+                _FLAP_SUBSEQUENT_SITE_VA,
+                _FLAP_SUBSEQUENT_SITE_VANILLA, b"\xD8\x0D")
 
     # Roll + climb: direct-constant patches (4-byte floats).
     def _check_constant(label, va, vanilla_bytes, vanilla_value):
@@ -1870,7 +1881,11 @@ def cmd_inspect_physics(args):
                 print(f"  {label:14s} [DRIFTED]  "
                       f"bytes = {current.hex()}")
 
-    _check_constant("roll (ground)", _ROLL_CONST_VA,
+    # v4: roll patch is an FMUL rewrite (handled above).  The
+    # v3 slope-slide constant at 0x1AAB68 is still probed here
+    # for transparency — it should always show [VANILLA] on
+    # v4-patched ISOs.
+    _check_constant("slope-slide const", _ROLL_CONST_VA,
                     _ROLL_CONST_VANILLA, _VANILLA_ROLL_SPEED)
     _check_constant("climb", _CLIMB_CONST_VA,
                     _CLIMB_CONST_VANILLA, _VANILLA_CLIMB_SPEED)
@@ -1922,7 +1937,8 @@ def cmd_inspect_physics(args):
               f"VA 0x{NO_FALL_DAMAGE_VA:X} (JNP rel32)")
     elif current == NO_FALL_DAMAGE_SPEC.patch:
         print(f"  no_fall_damage    [PATCHED]  "
-              f"VA 0x{NO_FALL_DAMAGE_VA:X} (JMP rel32 — fall damage disabled)")
+              f"VA 0x{NO_FALL_DAMAGE_VA:X} (XOR AL,AL ; RET 8 — "
+              f"fall damage disabled)")
     else:
         print(f"  no_fall_damage    [DRIFTED]  "
               f"got {current.hex()}")
@@ -2018,6 +2034,8 @@ def cmd_apply_physics(args):
     air_control_scale = float(
         getattr(args, "air_control_speed", None) or 1.0)
     flap_scale = float(getattr(args, "flap_height", None) or 1.0)
+    flap_subsequent_scale = float(
+        getattr(args, "flap_subsequent", None) or 1.0)
     climb_scale = float(getattr(args, "climb_speed", None) or 1.0)
 
     if (gravity is None
@@ -2027,12 +2045,13 @@ def cmd_apply_physics(args):
             and jump_scale == 1.0
             and air_control_scale == 1.0
             and flap_scale == 1.0
+            and flap_subsequent_scale == 1.0
             and climb_scale == 1.0):
         print("No physics changes requested.  "
               "Pass --gravity, --walk-speed, --roll-speed (or "
               "legacy --run-speed), --swim-speed, --jump-speed, "
-              "--air-control-speed, --flap-height, and/or "
-              "--climb-speed.")
+              "--air-control-speed, --flap-height, "
+              "--flap-subsequent, and/or --climb-speed.")
         return
 
     def _patch_xbe_in_place(xbe_path: Path) -> None:
@@ -2047,6 +2066,9 @@ def cmd_apply_physics(args):
             air_control_scale=(air_control_scale
                                if air_control_scale != 1.0 else None),
             flap_scale=flap_scale if flap_scale != 1.0 else None,
+            flap_subsequent_scale=(flap_subsequent_scale
+                                   if flap_subsequent_scale != 1.0
+                                   else None),
             climb_scale=climb_scale if climb_scale != 1.0 else None,
         )
         xbe_path.write_bytes(data)
