@@ -1302,19 +1302,6 @@ def cmd_randomize_full(args):
         climb_scale = float(getattr(args, 'player_climb_scale', None) or 1.0)
         slope_slide_scale = float(
             getattr(args, 'player_slope_slide_scale', None) or 1.0)
-        want_no_fall_damage = bool(getattr(args, 'no_fall_damage', False))
-        want_infinite_fuel = bool(getattr(args, 'infinite_fuel', False))
-        flaps_air_1 = getattr(args, 'flaps_air_1', None)
-        flaps_air_2 = getattr(args, 'flaps_air_2', None)
-        flaps_air_3 = getattr(args, 'flaps_air_3', None)
-        want_wing_flap_count = any(
-            v is not None and int(v) != vanilla
-            for v, vanilla in (
-                (flaps_air_1, 1),
-                (flaps_air_2, 2),
-                (flaps_air_3, 5),
-            )
-        )
         player_char = getattr(args, 'player_character', None)
         xbe_path = extract_dir / "default.xbe"
 
@@ -1338,9 +1325,6 @@ def cmd_randomize_full(args):
                                or flap_at_peak_scale != 1.0
                                or climb_scale != 1.0
                                or slope_slide_scale != 1.0),
-            "no_fall_damage": want_no_fall_damage,
-            "infinite_fuel": want_infinite_fuel,
-            "wing_flap_count": want_wing_flap_count,
         }
 
         needs_xbe = any(_FLAG_PACKS.values()) or bool(player_char)
@@ -1366,14 +1350,6 @@ def cmd_randomize_full(args):
                     "flap_at_peak_scale": flap_at_peak_scale,
                     "climb_speed_scale": climb_scale,
                     "slope_slide_speed_scale": slope_slide_scale,
-                },
-                "wing_flap_count": {
-                    "flaps_air_power_1": (
-                        int(flaps_air_1) if flaps_air_1 is not None else 1),
-                    "flaps_air_power_2": (
-                        int(flaps_air_2) if flaps_air_2 is not None else 2),
-                    "flaps_air_power_3": (
-                        int(flaps_air_3) if flaps_air_3 is not None else 5),
                 },
             }
 
@@ -1790,16 +1766,11 @@ def cmd_inspect_physics(args):
     from azurik_mod.patching.xbe import parse_xbe_sections, va_to_file
     from azurik_mod.patches.player_physics import (
         _AIR_CONTROL_IMM32_VANILLA, _AIR_CONTROL_SITE_VAS,
-        _CLIMB_CONST_VA, _CLIMB_CONST_VANILLA,
-        _FLAP_PEAK_CAP_PATCH, _FLAP_PEAK_CAP_SITE_VA,
-        _FLAP_PEAK_CAP_SITE_VANILLA,
         _FLAP_SITE_VA, _FLAP_SITE_VANILLA,
         _FLAP_SUBSEQUENT_SITE_VA, _FLAP_SUBSEQUENT_SITE_VANILLA,
         _JUMP_SITE_VA, _JUMP_SITE_VANILLA,
-        _ROLL_CONST_VA, _ROLL_CONST_VANILLA,
         _ROLL_FMUL_VA, _ROLL_FMUL_VANILLA,
         _SWIM_SITE_VA, _SWIM_SITE_VANILLA,
-        _VANILLA_CLIMB_SPEED, _VANILLA_ROLL_SPEED,
         _WALK_SITE_VA, _WALK_SITE_VANILLA,
     )
 
@@ -1872,47 +1843,6 @@ def cmd_inspect_physics(args):
                 _FLAP_SUBSEQUENT_SITE_VA,
                 _FLAP_SUBSEQUENT_SITE_VANILLA, b"\xD8\x0D")
 
-    # Flap at peak: 3-byte FSUB NOP at VA 0x89381 (binary toggle).
-    fpc_off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
-    fpc_cur = bytes(xbe_bytes[fpc_off:fpc_off + 3])
-    if fpc_cur == _FLAP_PEAK_CAP_SITE_VANILLA:
-        print(f"  {'flap@peak NOP':14s} [VANILLA]  "
-              f"FSUB present at VA 0x{_FLAP_PEAK_CAP_SITE_VA:X} "
-              f"(weak 2nd+ flaps near peak)")
-    elif fpc_cur == _FLAP_PEAK_CAP_PATCH:
-        print(f"  {'flap@peak NOP':14s} [PATCHED]  "
-              f"FSUB NOPed at VA 0x{_FLAP_PEAK_CAP_SITE_VA:X} "
-              f"(full v0 for 2nd+ flaps near peak)")
-    else:
-        print(f"  {'flap@peak NOP':14s} [DRIFTED]  "
-              f"got {fpc_cur.hex()}")
-
-    # Roll + climb: direct-constant patches (4-byte floats).
-    def _check_constant(label, va, vanilla_bytes, vanilla_value):
-        off = va_to_file(va)
-        current = bytes(xbe_bytes[off:off + 4])
-        if current == vanilla_bytes:
-            print(f"  {label:14s} [VANILLA]  const VA 0x{va:X} = "
-                  f"{vanilla_value:.3f}")
-        else:
-            try:
-                val = _struct.unpack("<f", current)[0]
-                print(f"  {label:14s} [PATCHED]  const VA "
-                      f"0x{va:X} = {val:.4f}  (= "
-                      f"{val / vanilla_value:.3f}× vanilla)")
-            except Exception:  # noqa: BLE001
-                print(f"  {label:14s} [DRIFTED]  "
-                      f"bytes = {current.hex()}")
-
-    # v4: roll patch is an FMUL rewrite (handled above).  The
-    # v3 slope-slide constant at 0x1AAB68 is still probed here
-    # for transparency — it should always show [VANILLA] on
-    # v4-patched ISOs.
-    _check_constant("slope-slide const", _ROLL_CONST_VA,
-                    _ROLL_CONST_VANILLA, _VANILLA_ROLL_SPEED)
-    _check_constant("climb", _CLIMB_CONST_VA,
-                    _CLIMB_CONST_VANILLA, _VANILLA_CLIMB_SPEED)
-
     # Air-control: 5 primary imm32 sites (all vanilla 9.0) + 2
     # secondary imm32 sites inside FUN_00083F90 (12.0 and 9.0).
     print()
@@ -1943,89 +1873,6 @@ def cmd_inspect_physics(args):
             print(f"  VA 0x{site_va:06X} [PATCHED]  "
                   f"imm32 = {val:.4f}  (= "
                   f"{val / vanilla_val:.3f}× vanilla {vanilla_val:.1f})")
-
-    # Other player packs (no_fall_damage, infinite_fuel,
-    # wing_flap_count).  Each is a distinct pack but naturally
-    # belongs in the player-physics inspection.
-    print()
-    print("Other player packs:")
-
-    from azurik_mod.patches.no_fall_damage import (
-        NO_FALL_DAMAGE_SPEC, NO_FALL_DAMAGE_VA,
-    )
-    off = va_to_file(NO_FALL_DAMAGE_VA)
-    current = bytes(xbe_bytes[off:off + 6])
-    if current == NO_FALL_DAMAGE_SPEC.original:
-        print(f"  no_fall_damage    [VANILLA]  "
-              f"VA 0x{NO_FALL_DAMAGE_VA:X} (JNP rel32)")
-    elif current == NO_FALL_DAMAGE_SPEC.patch:
-        print(f"  no_fall_damage    [PATCHED]  "
-              f"VA 0x{NO_FALL_DAMAGE_VA:X} (XOR AL,AL ; RET 8 — "
-              f"fall damage disabled)")
-    else:
-        print(f"  no_fall_damage    [DRIFTED]  "
-              f"got {current.hex()}")
-
-    from azurik_mod.patches.infinite_fuel import (
-        AZURIK_CONSUME_FUEL_VA, INFINITE_FUEL_SPEC,
-    )
-    off = va_to_file(AZURIK_CONSUME_FUEL_VA)
-    current = bytes(xbe_bytes[off:off + 5])
-    if current == INFINITE_FUEL_SPEC.original:
-        print(f"  infinite_fuel     [VANILLA]  "
-              f"VA 0x{AZURIK_CONSUME_FUEL_VA:X}")
-    elif current == INFINITE_FUEL_SPEC.patch:
-        print(f"  infinite_fuel     [PATCHED]  "
-              f"VA 0x{AZURIK_CONSUME_FUEL_VA:X} (MOV AL,1 ; RET 4)")
-    else:
-        print(f"  infinite_fuel     [DRIFTED]  got {current.hex()}")
-
-    from azurik_mod.patches.wing_flap_count import (
-        _WING_FLAP_HOOK_VA, _WING_FLAP_HOOK_VANILLA,
-    )
-    off = va_to_file(_WING_FLAP_HOOK_VA)
-    current = bytes(xbe_bytes[off:off + 5])
-    if current == _WING_FLAP_HOOK_VANILLA:
-        print(f"  wing_flap_count   [VANILLA]  "
-              f"hook VA 0x{_WING_FLAP_HOOK_VA:X}")
-    elif current[:1] == b"\xE9":
-        # Follow the trampoline into the shim and report per-
-        # level flap counts.
-        rel32 = _struct.unpack("<i", current[1:5])[0]
-        shim_va = _WING_FLAP_HOOK_VA + 5 + rel32
-        _, secs = parse_xbe_sections(xbe_bytes)
-        shim_fo = None
-        for s in secs:
-            if s["vaddr"] <= shim_va < s["vaddr"] + s["vsize"]:
-                shim_fo = s["raw_addr"] + (shim_va - s["vaddr"])
-                break
-        if shim_fo is None:
-            print(f"  wing_flap_count   [INSTALLED?] hook bytes "
-                  f"= {current.hex()}, shim VA 0x{shim_va:X} "
-                  f"not in any section")
-        else:
-            body = bytes(xbe_bytes[shim_fo:shim_fo + 50])
-            print(f"  wing_flap_count   [PATCHED]  "
-                  f"shim @ VA 0x{shim_va:X}")
-            for off_idx, level in ((14, 1), (26, 2), (38, 3)):
-                if body[off_idx] == 0xA1:
-                    flap_va = _struct.unpack(
-                        "<I", body[off_idx + 1:off_idx + 5])[0]
-                    fo = None
-                    for s in secs:
-                        if (s["vaddr"] <= flap_va
-                                < s["vaddr"] + s["vsize"]):
-                            fo = s["raw_addr"] + (
-                                flap_va - s["vaddr"])
-                            break
-                    if fo is not None:
-                        val = _struct.unpack(
-                            "<i",
-                            xbe_bytes[fo:fo + 4])[0]
-                        print(f"    air power {level} → {val} "
-                              f"flap(s) (@ VA 0x{flap_va:X})")
-    else:
-        print(f"  wing_flap_count   [DRIFTED]  got {current.hex()}")
 
     print()
 

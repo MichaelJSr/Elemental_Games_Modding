@@ -298,35 +298,27 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         browser = PackBrowser(self._root, all_packs(), {},
                               pack_params=params)
         slider_keys = sorted(browser.sliders().keys())
-        # player_physics owns 7 working sliders as of late April 2026.
-        # Four retired sliders are re-surfaced as their OWN shim-
-        # backed packs (flap_at_peak, slope_slide_speed,
-        # root_motion_roll, root_motion_climb) — so their sliders
-        # show up keyed on the new pack names, not on
-        # ``player_physics``.
+        # player_physics owns 7 working sliders as of round 10.
+        # The 4 shim-backed packs (flap_at_peak, slope_slide_speed,
+        # root_motion_roll, root_motion_climb) were deleted after
+        # they consistently failed to produce in-game effects.
         self.assertEqual(
             slider_keys,
-            [("flap_at_peak", "flap_at_peak_scale"),
-             ("player_physics", "air_control_scale"),
+            [("player_physics", "air_control_scale"),
              ("player_physics", "flap_below_peak_scale"),
              ("player_physics", "flap_height_scale"),
              ("player_physics", "gravity"),
              ("player_physics", "jump_speed_scale"),
              ("player_physics", "swim_speed_scale"),
-             ("player_physics", "walk_speed_scale"),
-             ("root_motion_climb", "climb_speed_scale"),
-             ("root_motion_roll", "roll_speed_scale"),
-             ("slope_slide_speed", "slope_slide_speed_scale")])
-        # Initial values mirrored into pack_params.
+             ("player_physics", "walk_speed_scale")])
         self.assertIn("player_physics", params)
         self.assertEqual(len(params["player_physics"]), 7)
         for pack_name in ("flap_at_peak", "slope_slide_speed",
-                          "root_motion_roll", "root_motion_climb"):
-            self.assertIn(pack_name, params)
-            self.assertEqual(len(params[pack_name]), 1,
-                msg=f"{pack_name} should expose exactly 1 slider")
-        # wing_flap_count retired; no longer in pack_params.
-        self.assertNotIn("wing_flap_count", params)
+                          "root_motion_roll", "root_motion_climb",
+                          "wing_flap_count", "no_fall_damage",
+                          "infinite_fuel"):
+            self.assertNotIn(pack_name, params,
+                msg=f"{pack_name} was deleted in round 10")
 
     def test_plugin_category_gets_its_own_tab(self):
         """Simulate a plugin: register a category + a pack referencing

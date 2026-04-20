@@ -240,7 +240,7 @@ WALK_SPEED_SCALE = ParametricPatch(
 
 ROLL_SPEED_SCALE = ParametricPatch(
     name="roll_speed_scale",
-    label="Player roll speed",
+    label="Player roll speed (RETIRED)",
     va=0,
     size=0,
     original=b"",
@@ -251,6 +251,12 @@ ROLL_SPEED_SCALE = ParametricPatch(
     unit="x",
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
+    description=(
+        "RETIRED — roll is animation root-motion driven (the "
+        "magnitude field at 0x1A25BC is unused by the roll state). "
+        "A shim at 0x866D9 landed bytes but produced no in-game "
+        "effect; pack removed."
+    ),
 )
 
 SWIM_SPEED_SCALE = ParametricPatch(
@@ -338,14 +344,14 @@ FLAP_BELOW_PEAK_SCALE = ParametricPatch(
 # Back-compat alias — the old name pre-rename (late April 2026).
 FLAP_SUBSEQUENT_SCALE = FLAP_BELOW_PEAK_SCALE
 
-# FLAP_AT_PEAK_SCALE kept as a module-level symbol for back-compat
-# callers and tests, but retired from PLAYER_PHYSICS_SITES below
-# — two byte-patch attempts (FSUB-NOP at 0x89381, FLD-ST1 rewrite at
-# 0x8939F) landed cleanly but produced no in-game effect.  The peak
-# that wing_flap tracks is latched to the first-flap z, and fVar2
-# caps every subsequent flap at (initial_flap_z + flap_height) −
-# current_z even after our FLD rewrite.  Needs a shim.  See
-# docs/LEARNINGS.md § "Wing-flap v0 cap".
+# FLAP_AT_PEAK_SCALE / SLOPE_SLIDE_SPEED_SCALE / CLIMB_SPEED_SCALE
+# are kept as back-compat module-level symbols for any external
+# callers or tests, but retired from PLAYER_PHYSICS_SITES below.
+# Each had byte-patch attempts (and for the first three, also shim
+# attempts) that landed cleanly but produced no in-game effect;
+# the underlying game logic (peak latch, dynamic state-4 multiplier,
+# animation root motion) bypasses every hook site we identified.
+# See docs/LEARNINGS.md § "Retired physics sliders" for details.
 FLAP_AT_PEAK_SCALE = ParametricPatch(
     name="flap_at_peak_scale",
     label="Wing-flap height (near peak, RETIRED)",
@@ -360,15 +366,17 @@ FLAP_AT_PEAK_SCALE = ParametricPatch(
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
     description=(
-        "RETIRED — see docs/LEARNINGS.md. Byte patches at 0x89381 "
-        "and 0x8939F landed cleanly but gave no in-game effect. "
-        "Workaround: use a higher 1st-flap height + higher jump."
+        "RETIRED — no hook site we tried (including a final-FSTP "
+        "shim at 0x89409) produces observable effect. The "
+        "near-peak v0=0 behaviour is what bounds every subsequent "
+        "flap; raising `flap_height_scale` helps far-below-peak "
+        "flaps instead."
     ),
 )
 
 SLOPE_SLIDE_SPEED_SCALE = ParametricPatch(
     name="slope_slide_speed_scale",
-    label="Slope-slide speed (steep-terrain auto-slide)",
+    label="Slope-slide speed (RETIRED)",
     va=0,
     size=0,
     original=b"",
@@ -379,11 +387,16 @@ SLOPE_SLIDE_SPEED_SCALE = ParametricPatch(
     unit="x",
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
+    description=(
+        "RETIRED — state-4 fast slide uses a dynamic 500x multiplier "
+        "computed from surface normal; static FLD rewrite at 0x8A095 "
+        "had no in-game effect."
+    ),
 )
 
 CLIMB_SPEED_SCALE = ParametricPatch(
     name="climb_speed_scale",
-    label="Player climbing speed",
+    label="Player climbing speed (RETIRED)",
     va=0,
     size=0,
     original=b"",
@@ -394,6 +407,11 @@ CLIMB_SPEED_SCALE = ParametricPatch(
     unit="x",
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
+    description=(
+        "RETIRED — climb is animation root-motion driven. Shim at "
+        "0x883FF (wrapping anim_apply_translation CALL) landed "
+        "bytes but gave no in-game effect."
+    ),
 )
 
 # Back-compat alias: the old name `RUN_SPEED_SCALE` shipped before we
@@ -683,12 +701,12 @@ _VANILLA_FLAP_SUBSEQUENT = 0.5
 #   flap_at_peak_scale != 1.0 → full-cap fVar2 = flap_height
 # (binary toggle; slider value isn't used for computation, only
 # tested against 1.0).
+# Historical v2 byte-patch site (retired round 10 — no in-game
+# effect observed despite clean byte landing).  Kept as a drift
+# anchor for inspect/verify.
 _FLAP_PEAK_CAP_SITE_VA = 0x0008939F
 _FLAP_PEAK_CAP_SITE_VANILLA = bytes([
     0xD9, 0xC1,                # FLD ST(1)  — dup fVar1
-])
-_FLAP_PEAK_CAP_PATCH = bytes([
-    0xD9, 0xC0,                # FLD ST(0)  — dup fh (just loaded)
 ])
 
 # Vanilla runtime value of CritterData.run_speed (+0x40) for the
@@ -774,19 +792,12 @@ def apply_player_physics(
     if fsub != 1.0:
         apply_flap_subsequent(xbe_data, subsequent_scale=fsub)
 
-    fatp = (1.0 if flap_at_peak_scale is None
-            else float(flap_at_peak_scale))
-    if fatp != 1.0:
-        apply_flap_at_peak(xbe_data, at_peak_scale=fatp)
-
-    c = 1.0 if climb_scale is None else float(climb_scale)
-    if c != 1.0:
-        apply_climb_speed(xbe_data, climb_scale=c)
-
-    ss = (1.0 if slope_slide_scale is None
-          else float(slope_slide_scale))
-    if ss != 1.0:
-        apply_slope_slide_speed(xbe_data, slope_slide_scale=ss)
+    # flap_at_peak_scale / climb_scale / slope_slide_scale are
+    # accepted for back-compat but produce no in-game effect (the
+    # underlying patches were removed in round 10 after consistent
+    # user reports of no observable change).  See docs/LEARNINGS.md
+    # § "Retired physics sliders" for the full RE rationale.
+    _ = (flap_at_peak_scale, climb_scale, slope_slide_scale)
 
 
 def apply_player_speed(
@@ -895,35 +906,16 @@ def apply_climb_speed(
     *,
     climb_scale: float = 1.0,
 ) -> bool:
-    """Patch ``default.xbe`` so the player climbs at a custom speed.
+    """Retired no-op (round 10).
 
-    Scales the climbing-velocity baseline constant at VA
-    ``0x001980E4`` (vanilla 2.0).  The constant has EXACTLY TWO
-    readers, both in ``FUN_00087F80`` (the climbing/hanging-ledge
-    state), so a direct 4-byte float overwrite affects ONLY
-    climbing motion — every other physics state is untouched.
-
-    Returns True when the patch was applied, False if ``climb_scale``
-    is 1.0 (no-op) or if the constant has drifted from vanilla.
+    The climbing constant at VA 0x1980E4 IS the reference baseline,
+    but climb motion is animation root-motion driven — scaling the
+    constant had no observable gameplay effect.  A shim wrapping
+    ``anim_apply_translation`` inside ``player_climb_tick`` also
+    failed.  Kept as a stable entry point.
     """
-    if climb_scale == 1.0:
-        return False
-
-    off = va_to_file(_CLIMB_CONST_VA)
-    current = bytes(xbe_data[off:off + 4])
-    if current != _CLIMB_CONST_VANILLA:
-        print(f"  WARNING: climb_speed — constant at VA "
-              f"0x{_CLIMB_CONST_VA:X} already patched or drifted, "
-              f"skipping (got {current.hex()}, "
-              f"expected {_CLIMB_CONST_VANILLA.hex()})")
-        return False
-
-    new_value = _VANILLA_CLIMB_SPEED * float(climb_scale)
-    xbe_data[off:off + 4] = struct.pack("<f", new_value)
-    print(f"  Player climbing speed: {climb_scale:.3f}x vanilla  "
-          f"(constant {_VANILLA_CLIMB_SPEED:.3f} -> {new_value:.3f} "
-          f"at VA 0x{_CLIMB_CONST_VA:X})")
-    return True
+    del xbe_data, climb_scale  # unused
+    return False
 
 
 def apply_swim_speed(
@@ -1164,48 +1156,16 @@ def apply_slope_slide_speed(
     *,
     slope_slide_scale: float = 1.0,
 ) -> bool:
-    """Patch ``default.xbe`` to scale slope-slide velocity.
+    """Retired no-op (round 10).
 
-    When the player lands on a slope steeper than 45° from
-    upright, the engine transitions to state 3 (slow slope
-    slide) inside ``player_slope_slide_tick`` (FUN_00089A70).
-    That function's velocity scalar reads ``[0x001AAB68]=2.0``
-    at VA 0x89B76 — the ONE and ONLY reader of that constant
-    in the binary.
-
-    We overwrite the 4-byte float in-place (2.0 → 2.0 ×
-    slope_slide_scale) — zero collateral, zero shim required.
-
-    Only affects:
-      * State 3 slow slope slide (e.g., sliding down moderately
-        steep terrain when walking over it)
-      * Subsequent-transition state 4 fast slide (reads the
-        same constant indirectly via dt scaling)
-
-    Does NOT affect:
-      * Player-initiated roll / dash (that's
-        ``roll_speed_scale``, the WHITE/BACK boost).
-      * Walking, airborne, climbing, swimming — all independent.
-
-    Returns True on apply, False on no-op or drift.
+    Rewriting [0x1AAB68] only covers state 3 (slow slide); state 4
+    (fast slide) uses a dynamic 500x multiplier from surface normal
+    that we never successfully intercepted (neither the 4-byte
+    constant overwrite nor a FLD shim at 0x8A095 produced in-game
+    effect).  Kept as a stable entry point.
     """
-    if slope_slide_scale == 1.0:
-        return False
-
-    off = va_to_file(_ROLL_CONST_VA)   # 0x001AAB68
-    current = bytes(xbe_data[off:off + 4])
-    if current != _ROLL_CONST_VANILLA:
-        print(f"  WARNING: slope_slide_speed — constant at VA "
-              f"0x{_ROLL_CONST_VA:X} drifted (got "
-              f"{current.hex()}); skipping.")
-        return False
-
-    new_value = _VANILLA_ROLL_SPEED * float(slope_slide_scale)
-    xbe_data[off:off + 4] = struct.pack("<f", new_value)
-    print(f"  Slope-slide speed: {slope_slide_scale:.3f}x vanilla  "
-          f"(constant {_VANILLA_ROLL_SPEED:.3f} -> {new_value:.3f} "
-          f"at VA 0x{_ROLL_CONST_VA:X})")
-    return True
+    del xbe_data, slope_slide_scale  # unused
+    return False
 
 
 def apply_flap_at_peak(
@@ -1213,55 +1173,17 @@ def apply_flap_at_peak(
     *,
     at_peak_scale: float = 1.0,
 ) -> bool:
-    """Patch ``default.xbe`` to give subsequent wing flaps FULL
-    v0 when the player is near their jump peak.
+    """Retired no-op (round 10).
 
-    Vanilla behaviour: each subsequent wing flap computes
-    ``fVar1 = peak_z + flap_height - current_z``, clamps to >=0,
-    then caps ``fVar2 = min(fVar1, flap_height)``.  The v0 is
-    ``sqrt(2 * g * fVar2)``.
-
-    After the first flap the sprite drifts above ``peak_z`` by a
-    small delta before ``peak_z`` itself updates, so fVar1 =
-    flap_height - delta (small) → weak v0.  Hence the
-    "subsequent flaps at peak are weak" user report.
-
-    v2 fix (late April 2026): rewrite the 2-byte ``FLD ST(1)``
-    at VA 0x8939F to ``FLD ST(0)`` — duplicating the
-    just-loaded ``flap_height`` instead of ``fVar1``.  The
-    subsequent FCOMP always compares ``fh`` with ``fh`` (equal),
-    so the JP at 0x893A8 is always taken, skipping the min
-    selection.  ``fVar2 = flap_height`` every flap → full v0.
-    ``fVar1`` is preserved untouched for the below-6m halving
-    check at VA 0x893C0, so the ``flap_below_peak_scale`` knob
-    still behaves correctly.
-
-    v1 NOPed the FSUB at 0x89381 instead, which inadvertently
-    forced ``fVar1`` large and tripped the halving path AND
-    drained 100 fuel per flap via ``consume_fuel`` — user
-    reported "flaps at peak remove upward velocity" because of
-    that fuel drain.  v2 avoids both side effects.
-
-    This is a binary toggle (slider value != 1.0 enables).
-    Returns True on apply, False on no-op / drift.
+    Previous v1/v2/v3 attempts (FSUB-NOP at 0x89381, FLD-ST1
+    rewrite at 0x8939F, and a final-FSTP shim at 0x89409) all
+    landed bytes cleanly but produced no in-game effect.  The
+    near-peak weak-v0 ceiling is governed by state we never
+    successfully hooked.  Kept as a stable entry point so external
+    callers (older scripts, randomizer) don't break.
     """
-    if at_peak_scale == 1.0:
-        return False
-
-    off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
-    size = len(_FLAP_PEAK_CAP_SITE_VANILLA)
-    current = bytes(xbe_data[off:off + size])
-    if current != _FLAP_PEAK_CAP_SITE_VANILLA:
-        print(f"  WARNING: flap_at_peak — site at VA "
-              f"0x{_FLAP_PEAK_CAP_SITE_VA:X} drifted (got "
-              f"{current.hex()}); skipping.")
-        return False
-
-    xbe_data[off:off + size] = _FLAP_PEAK_CAP_PATCH
-    print(f"  Wing-flap (at peak): full v0 for 2nd+ flaps  "
-          f"(FLD ST(1)→FLD ST(0) at VA "
-          f"0x{_FLAP_PEAK_CAP_SITE_VA:X})")
-    return True
+    del xbe_data, at_peak_scale  # unused
+    return False
 
 
 def apply_flap_subsequent(
@@ -1358,20 +1280,10 @@ def _player_speed_dynamic_whitelist(
         ranges.append((roll_off, roll_off + 6))
     except Exception:  # noqa: BLE001
         pass
-    try:
-        # Slope-slide speed: 4-byte constant at VA 0x1AAB68.
-        # Back on the whitelist (late April 2026) because the
-        # dedicated ``slope_slide_speed_scale`` slider targets it.
-        slope_off = va_to_file(_ROLL_CONST_VA)
-        ranges.append((slope_off, slope_off + 4))
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        # Climb targets a 4-byte constant at VA 0x001980E4.
-        ranges.append((va_to_file(_CLIMB_CONST_VA),
-                       va_to_file(_CLIMB_CONST_VA) + 4))
-    except Exception:  # noqa: BLE001
-        pass
+    # Slope-slide / climb 4-byte constants used to be on the
+    # whitelist (round 9) but the apply_* functions that wrote
+    # them were retired in round 10 as no-ops — whitelist entries
+    # dropped to match.
     # Air-control: 5 static imm32 sites + 2 dominant secondary
     # sites in FUN_00083F90 (4 bytes each).
     for site_va in (list(_AIR_CONTROL_SITE_VAS)
@@ -1393,14 +1305,9 @@ def _player_speed_dynamic_whitelist(
         ranges.append((fls_off, fls_off + 6))
     except Exception:  # noqa: BLE001
         pass
-    # Flap at peak: 2-byte FLD-ST1 rewrite at VA 0x8939F
-    # (late April 2026 v2 — previous 3-byte NOP at 0x89381
-    # caused fuel-drain side effects, reverted).
-    try:
-        fpc_off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
-        ranges.append((fpc_off, fpc_off + len(_FLAP_PEAK_CAP_SITE_VANILLA)))
-    except Exception:  # noqa: BLE001
-        pass
+    # Flap-at-peak 2-byte rewrite used to be here (round 9) — the
+    # apply_flap_at_peak byte patch was retired in round 10 as a
+    # no-op, so the range is gone.
 
     # Dynamic: if a site has been rewritten to `FLD/FMUL [abs32]`,
     # follow the abs32 pointer through the section table and whitelist

@@ -121,112 +121,85 @@ class HandShimSpecValidation(unittest.TestCase):
 # install_hand_shim / whitelist_for_hand_shim on vanilla XBE
 # ---------------------------------------------------------------------------
 
+# Smoke-test hook: the state-4 fast-slide FLD at VA 0x8A095 — a
+# plain ``D9 05 A0 02 39 00`` (FLD [0x003902A0]) in vanilla. The
+# former ``slope_slide_speed`` pack used this site but was removed
+# in round 10; we reference the raw bytes directly here so the
+# shim_builder surface remains exercised end-to-end.
+_SMOKE_HOOK_VA = 0x0008A095
+_SMOKE_HOOK_VANILLA = b"\xD9\x05\xA0\x02\x39\x00"
+_SMOKE_HOOK_RETURN_VA = _SMOKE_HOOK_VA + 6
+_SMOKE_BODY_SIZE = 17
+
+
+def _smoke_build_body(data_va: int, shim_va: int) -> bytes:
+    """Return a 17-byte body: FLD [0x003902A0]; FMUL [data_va];
+    JMP back to hook+6 (return VA)."""
+    body = bytearray(b"\xD9\x05\xA0\x02\x39\x00")        # FLD [abs]
+    body += emit_fmul_abs32(data_va)                      # FMUL [data_va]
+    return_origin_after = shim_va + len(body) + 5
+    body += emit_jmp_rel32(return_origin_after,
+                           _SMOKE_HOOK_RETURN_VA)
+    assert len(body) == _SMOKE_BODY_SIZE
+    return bytes(body)
+
+
 @require_xbe
 class InstallHandShimSmoke(unittest.TestCase):
-    """Smoke-test against ``slope_slide_speed``'s hook site —
-    simplest live site we have (single FLD, 17-byte body)."""
+    """Smoke-test against a raw hook site (state-4 fast-slide FLD).
+    Uses the shim_builder surface directly; no pack module dep."""
 
     def setUp(self):
-        from azurik_mod.patches.slope_slide_speed import (
-            _HOOK_VA, _HOOK_VANILLA, _HOOK_RETURN_VA,
-            _SHIM_BODY_SIZE, _build_shim_body,
-        )
-        self.hook_va = _HOOK_VA
-        self.hook_vanilla = _HOOK_VANILLA
-        self.hook_return_va = _HOOK_RETURN_VA
-        self.body_size = _SHIM_BODY_SIZE
-        self.build_body = _build_shim_body
         self.orig = XBE_PATH.read_bytes()
-
-    def test_install_lands_trampoline(self):
-        spec = HandShimSpec(
-            hook_va=self.hook_va,
-            hook_vanilla=self.hook_vanilla,
+        self.spec = HandShimSpec(
+            hook_va=_SMOKE_HOOK_VA,
+            hook_vanilla=_SMOKE_HOOK_VANILLA,
             trampoline_mode="jmp",
             hook_pad_nops=1,
-            hook_return_va=self.hook_return_va,
-            body_size=self.body_size,
+            hook_return_va=_SMOKE_HOOK_RETURN_VA,
+            body_size=_SMOKE_BODY_SIZE,
         )
-        data = bytearray(self.orig)
-        result = install_hand_shim(
-            data, spec,
+
+    def _install(self, data):
+        return install_hand_shim(
+            data, self.spec,
             data_block=with_sentinel(struct.pack("<f", 2.0)),
-            build_body=lambda shim_va, data_va: self.build_body(
-                data_va, shim_va),
+            build_body=_smoke_build_body,
             label="smoke_test",
             verbose=False)
-        self.assertIsNotNone(result)
-        # Trampoline bytes at hook.
+
+    def test_install_lands_trampoline(self):
+        data = bytearray(self.orig)
+        self.assertIsNotNone(self._install(data))
         from azurik_mod.patching.xbe import va_to_file
-        off = va_to_file(self.hook_va)
+        off = va_to_file(_SMOKE_HOOK_VA)
         self.assertEqual(data[off], 0xE9)
         self.assertEqual(data[off + 5], 0x90)
 
     def test_reapply_detects_trampoline(self):
-        spec = HandShimSpec(
-            hook_va=self.hook_va,
-            hook_vanilla=self.hook_vanilla,
-            trampoline_mode="jmp",
-            hook_pad_nops=1,
-            hook_return_va=self.hook_return_va,
-            body_size=self.body_size,
-        )
         data = bytearray(self.orig)
-        r1 = install_hand_shim(
-            data, spec,
-            data_block=with_sentinel(struct.pack("<f", 2.0)),
-            build_body=lambda shim_va, data_va: self.build_body(
-                data_va, shim_va),
-            label="smoke_test", verbose=False)
-        self.assertIsNotNone(r1)
-
-        r2 = install_hand_shim(
-            data, spec,
-            data_block=with_sentinel(struct.pack("<f", 2.0)),
-            build_body=lambda shim_va, data_va: self.build_body(
-                data_va, shim_va),
-            label="smoke_test", verbose=False)
-        # Second call should detect the trampoline and return None.
-        self.assertIsNone(r2)
+        self.assertIsNotNone(self._install(data))
+        self.assertIsNone(self._install(data),
+            msg="second install must detect existing trampoline")
 
     def test_drift_returns_none(self):
-        spec = HandShimSpec(
-            hook_va=self.hook_va,
-            hook_vanilla=self.hook_vanilla,
-            trampoline_mode="jmp",
-            hook_pad_nops=1,
-            hook_return_va=self.hook_return_va,
-            body_size=self.body_size,
-        )
         data = bytearray(self.orig)
         from azurik_mod.patching.xbe import va_to_file
-        off = va_to_file(self.hook_va)
-        data[off] = 0xAA   # corrupt
-        result = install_hand_shim(
-            data, spec,
-            data_block=with_sentinel(struct.pack("<f", 2.0)),
-            build_body=lambda s, d: self.build_body(d, s),
-            label="drift_test", verbose=False)
-        self.assertIsNone(result)
+        off = va_to_file(_SMOKE_HOOK_VA)
+        data[off] = 0xAA
+        self.assertIsNone(self._install(data))
 
 
 @require_xbe
 class WhitelistForHandShim(unittest.TestCase):
     def test_vanilla_returns_hook_only(self):
-        """Before apply, whitelist must return just the hook
-        trampoline slot (since the trampoline bytes aren't present
-        yet — just vanilla code)."""
-        from azurik_mod.patches.slope_slide_speed import (
-            _HOOK_VA, _HOOK_VANILLA, _HOOK_RETURN_VA,
-            _SHIM_BODY_SIZE,
-        )
         spec = HandShimSpec(
-            hook_va=_HOOK_VA,
-            hook_vanilla=_HOOK_VANILLA,
+            hook_va=_SMOKE_HOOK_VA,
+            hook_vanilla=_SMOKE_HOOK_VANILLA,
             trampoline_mode="jmp",
             hook_pad_nops=1,
-            hook_return_va=_HOOK_RETURN_VA,
-            body_size=_SHIM_BODY_SIZE,
+            hook_return_va=_SMOKE_HOOK_RETURN_VA,
+            body_size=_SMOKE_BODY_SIZE,
         )
         data = XBE_PATH.read_bytes()
         ranges = whitelist_for_hand_shim(data, spec)

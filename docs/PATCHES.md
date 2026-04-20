@@ -43,10 +43,6 @@ register_category(Category(
 |----------------------|-------|------------|----------------|---------------|--------|
 | `fps_unlock`         | 50    | no         | `performance`  | fps           | [azurik_mod/patches/fps_unlock/](../azurik_mod/patches/fps_unlock/) |
 | `player_physics`     | 7     | no         | `player`       | physics       | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
-| `flap_at_peak`       | 1     | no         | `player`       | c-shim, root-motion | [azurik_mod/patches/flap_at_peak/](../azurik_mod/patches/flap_at_peak/) |
-| `slope_slide_speed`  | 1     | no         | `player`       | c-shim        | [azurik_mod/patches/slope_slide_speed/](../azurik_mod/patches/slope_slide_speed/) |
-| `root_motion_roll`   | 1     | no         | `player`       | c-shim, root-motion | [azurik_mod/patches/root_motion_roll/](../azurik_mod/patches/root_motion_roll/) |
-| `root_motion_climb`  | 1     | no         | `player`       | c-shim, root-motion | [azurik_mod/patches/root_motion_climb/](../azurik_mod/patches/root_motion_climb/) |
 | `qol_skip_logo`      | 1     | no         | `boot`         | c-shim        | [azurik_mod/patches/qol_skip_logo/](../azurik_mod/patches/qol_skip_logo/) |
 | `qol_gem_popups`     | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_gem_popups/](../azurik_mod/patches/qol_gem_popups/) |
 | `qol_other_popups`   | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_other_popups/](../azurik_mod/patches/qol_other_popups/) |
@@ -57,9 +53,6 @@ register_category(Category(
 | `rand_gems`          | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_barriers`      | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_connections`   | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
-| `no_fall_damage`     | 2     | no         | *retired*      | cheat, retired | [azurik_mod/patches/no_fall_damage/](../azurik_mod/patches/no_fall_damage/) |
-| `infinite_fuel`      | 2     | no         | *retired*      | cheat, retired | [azurik_mod/patches/infinite_fuel/](../azurik_mod/patches/infinite_fuel/) |
-| `wing_flap_count`    | 1+3   | no         | *retired*      | cheat, retired | [azurik_mod/patches/wing_flap_count/](../azurik_mod/patches/wing_flap_count/) |
 
 ---
 
@@ -353,9 +346,9 @@ deprecated aliases for `--player-roll-scale` / `--roll-speed`.
 
 The Patches page renders 7 working `ParametricSlider` widgets under `player_physics`: `gravity`, `walk_speed_scale`, `swim_speed_scale`, `jump_speed_scale`, `air_control_scale`, `flap_height_scale` (1st flap), `flap_below_peak_scale` (2nd+ flaps when >6m below peak).  Slider values live on `AppState.pack_params["player_physics"]` and carry a long-form description rendered under the label; sliders accept out-of-range values via the text box for expert tuning.
 
-**Revived via shim (round 8)**: four sliders that were previously byte-patch-retired now ship as their own shim-backed packs: `flap_at_peak`, `slope_slide_speed`, `root_motion_roll`, `root_motion_climb`.  Each hand-assembles a trampoline at a code-flow point byte patches couldn't reach (see `docs/LEARNINGS.md` § "Revived via shim" for the table).
+**Round 10 purge**: rounds 7–8 attempted to revive `flap_at_peak`, `root_motion_roll`, `root_motion_climb`, and `slope_slide_speed` as hand-assembled shims at code-flow points byte patches couldn't reach.  After user-driven in-game testing confirmed that none of the four produced observable effects, all four packs were deleted.  `no_fall_damage`, `infinite_fuel`, and `wing_flap_count` were also deleted in favour of config-editor workarounds.  See `docs/LEARNINGS.md` § "Retired physics sliders" for the per-hook rationale.
 
-**Retired packs** (byte patches land but gameplay-side evidence suggests other paths dominate — use the config editor): `no_fall_damage`, `infinite_fuel`, `wing_flap_count`.  Concrete workarounds:
+**Config-editor workarounds for the deleted cheat packs**:
 - **No fall damage** → `config.xbr` / `damage` section: raise fall-height thresholds.  Or `critters_damage` → bump player row's `hitPoints`.
 - **Infinite fuel** → `config.xbr` / `armor_properties`: set `fuel_max` to a large number; or `attacks_anims`: zero every `Fuel multiplier`.
 - **Wing-flap count** → `config.xbr` / `armor_properties`: edit the `Flaps` column per armor row (fire1..3 / water1..3 / air1..3 / earth1..3) — read fresh each flap so changes land immediately.

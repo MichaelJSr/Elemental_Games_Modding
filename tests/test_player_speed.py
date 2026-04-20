@@ -335,33 +335,19 @@ class ApplyPlayerSpeedBehaviour(unittest.TestCase):
 
 @unittest.skipUnless(_XBE_PATH,
     "vanilla default.xbe fixture not available")
-class ApplyClimbSpeedBehaviour(unittest.TestCase):
-    """Climbing-state speed patch: direct overwrite of the 4-byte
-    float at VA 0x001980E4 (vanilla 2.0).  Used only by
-    FUN_00087F80."""
+class ApplyClimbSpeedRetired(unittest.TestCase):
+    """``apply_climb_speed`` was retired in round 10 — every value
+    is a no-op because the 4-byte constant overwrite produced no
+    observable in-game effect."""
 
-    def setUp(self):
-        self.orig = _XBE_PATH.read_bytes()
-
-    def test_default_is_noop(self):
-        data = bytearray(self.orig)
-        self.assertFalse(apply_climb_speed(data))
-        self.assertEqual(bytes(data), self.orig)
-
-    def test_nondefault_overwrites_constant(self):
-        data = bytearray(self.orig)
-        self.assertTrue(apply_climb_speed(data, climb_scale=2.5))
-        off = va_to_file(_CLIMB_CONST_VA)
-        value = struct.unpack("<f", bytes(data[off:off + 4]))[0]
-        self.assertAlmostEqual(
-            value, _VANILLA_CLIMB_SPEED * 2.5, places=5,
-            msg="climb constant must equal 2.0 × climb_scale = 5.0")
-
-    def test_reapply_to_drifted_buffer_is_rejected(self):
-        data = bytearray(self.orig)
-        self.assertTrue(apply_climb_speed(data, climb_scale=2.0))
-        self.assertFalse(apply_climb_speed(data, climb_scale=3.0),
-            msg="drifted constant must not be re-patched silently")
+    def test_every_scale_is_noop(self):
+        orig = _XBE_PATH.read_bytes()
+        for scale in (1.0, 0.5, 2.0, 5.0):
+            with self.subTest(scale=scale):
+                data = bytearray(orig)
+                self.assertFalse(apply_climb_speed(data, climb_scale=scale))
+                self.assertEqual(bytes(data), orig,
+                    msg=f"climb_scale={scale} must leave XBE byte-identical")
 
 
 @unittest.skipUnless(_XBE_PATH,
@@ -787,7 +773,6 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
 
     def test_vanilla_xbe_includes_all_static_sites(self):
         from azurik_mod.patches.player_physics import (
-            _FLAP_PEAK_CAP_SITE_VA,
             _FLAP_SUBSEQUENT_SITE_VA,
             _ROLL_FMUL_VA,
             _player_speed_dynamic_whitelist,
@@ -796,37 +781,30 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         ranges = _player_speed_dynamic_whitelist(xbe)
         walk_off = va_to_file(_WALK_SITE_VA)
         roll_off = va_to_file(_ROLL_FMUL_VA)
-        climb_off = va_to_file(_CLIMB_CONST_VA)
-        slope_off = va_to_file(_ROLL_CONST_VA)
         swim_off = va_to_file(_SWIM_SITE_VA)
         jump_off = va_to_file(_JUMP_SITE_VA)
         flap_off = va_to_file(_FLAP_SITE_VA)
         flap_sub_off = va_to_file(_FLAP_SUBSEQUENT_SITE_VA)
-        flap_peak_off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
         self.assertIn((walk_off, walk_off + 6), ranges)
         self.assertIn((swim_off, swim_off + 6), ranges)
         self.assertIn((jump_off, jump_off + 6), ranges)
         self.assertIn((flap_off, flap_off + 6), ranges)
         self.assertIn((roll_off, roll_off + 6), ranges)
         self.assertIn((flap_sub_off, flap_sub_off + 6), ranges)
-        self.assertIn((flap_peak_off, flap_peak_off + 2), ranges,
-            msg="flap-at-peak 2-byte FLD-ST1 rewrite site "
-                "missing from whitelist (v2 April 2026)")
-        self.assertIn((climb_off, climb_off + 4), ranges)
-        self.assertIn((slope_off, slope_off + 4), ranges)
         for ac_va in _AIR_CONTROL_SITE_VAS:
             ac_off = va_to_file(ac_va)
             self.assertIn((ac_off, ac_off + 4), ranges,
                 msg=f"air-control site 0x{ac_va:X} missing "
                     f"from whitelist")
-        # 6 instr sites (walk/swim/jump/flap/roll-FMUL/
-        #                flap_subsequent-FMUL)
-        # + 5 primary air-control imm32 + 2 secondary air-control imm32
-        # + 2 direct-const (climb, slope_slide)
-        # + 1 three-byte NOP site (flap-at-peak) = 16 on vanilla.
-        # After apply, up to 6 extra 4-byte follows for injected
-        # floats land.
-        self.assertIn(len(ranges), (16, 17, 18, 19, 20, 21, 22),
+        # Round 10: climb / slope_slide / flap-at-peak whitelist
+        # entries were dropped when their apply_* functions became
+        # no-ops.  Remaining static ranges on vanilla:
+        #   6 six-byte instr sites (walk/swim/jump/flap/roll/
+        #     flap_subsequent)
+        # + 5 primary air-control + 2 secondary air-control imm32
+        # = 13 on vanilla; after apply, up to 6 injected-float
+        # follows land.
+        self.assertIn(len(ranges), range(13, 20),
             msg=f"unexpected range count {len(ranges)}: {ranges}")
 
     def test_patched_xbe_adds_injected_float_ranges(self):
@@ -840,7 +818,7 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         data = bytearray(_XBE_PATH.read_bytes())
         self.assertTrue(apply_player_speed(
             data, walk_scale=2.0, roll_scale=1.5))
-        self.assertTrue(apply_climb_speed(data, climb_scale=2.0))
+        # climb is retired no-op (returns False).  Omit from apply set.
         self.assertTrue(apply_swim_speed(data, swim_scale=2.0))
         self.assertTrue(apply_jump_speed(data, jump_scale=1.5))
         self.assertTrue(apply_air_control_speed(data,
@@ -863,22 +841,18 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         # 4-byte ranges:
         #   - 5 primary air-control imm32 sites
         #   - 2 secondary air-control imm32 sites (inside FUN_00083F90)
-        #   - 2 direct-constant sites (climb + slope_slide)
         #   - 6 injected-float follows (walk base, swim mult,
         #     jump gravity scalar, flap gravity scalar, roll mult,
         #     flap_subsequent halving factor)
-        # = 15 four-byte ranges total.
-        self.assertEqual(len(four_byte_ranges), 15,
-            msg="5 primary + 2 secondary air-control + 2 direct-"
-                "const (climb + slope_slide) + 6 injected floats "
-                "= 15 four-byte ranges "
+        # = 13 four-byte ranges total (round 10 dropped climb + slope).
+        self.assertEqual(len(four_byte_ranges), 13,
+            msg="5 primary + 2 secondary air-control + 6 injected "
+                "floats "
+                "= 13 four-byte ranges "
                 f"(got {len(four_byte_ranges)}: {four_byte_ranges})")
-        # Historically zero; April 2026 added a single 2-byte
-        # rewrite for flap_at_peak_scale (FLD ST1 -> FLD ST0).
-        # That range is always present (even without apply) in
-        # the whitelist so it won't ever exceed 1.
-        self.assertLessEqual(len(two_byte_ranges), 1,
-            msg="only flap_at_peak may contribute a 2-byte range")
+        # Round 10 retired every 2-byte rewrite.
+        self.assertEqual(len(two_byte_ranges), 0,
+            msg="no 2-byte rewrites expected after round 10 cleanup")
 
     def test_callback_does_not_raise_on_all_zero_buffer(self):
         """Drift-safety: if called on something that isn't an XBE at
@@ -939,17 +913,18 @@ class SliderSemantics(unittest.TestCase):
                 self.assertAlmostEqual(
                     value, _VANILLA_ROLL_MULT * roll, places=3)
 
-    def test_climb_slider_scales_constant(self):
+    def test_climb_slider_is_retired_noop(self):
+        """Round 10: apply_climb_speed always returns False and
+        leaves bytes unchanged — scaling the constant at 0x1980E4
+        had no observable in-game effect."""
         for climb in (0.5, 2.0, 5.0):
             with self.subTest(climb=climb):
                 data = bytearray(_XBE_PATH.read_bytes())
-                self.assertTrue(apply_climb_speed(data,
-                                                  climb_scale=climb))
+                self.assertFalse(apply_climb_speed(data,
+                                                   climb_scale=climb))
                 off = va_to_file(_CLIMB_CONST_VA)
-                value = struct.unpack(
-                    "<f", bytes(data[off:off + 4]))[0]
-                self.assertAlmostEqual(
-                    value, _VANILLA_CLIMB_SPEED * climb, places=3)
+                self.assertEqual(bytes(data[off:off + 4]),
+                                 _CLIMB_CONST_VANILLA)
 
     def test_walk_scale_alone_leaves_roll_constant_at_vanilla(self):
         """walk_scale=3, roll_scale=1 must leave roll constant
@@ -1013,73 +988,35 @@ class SliderSemantics(unittest.TestCase):
 
 @unittest.skipUnless(_XBE_PATH,
     "vanilla default.xbe fixture not available")
-class ApplyFlapAtPeakBehaviour(unittest.TestCase):
-    """``apply_flap_at_peak`` is a binary toggle — any value !=
-    1.0 NOPs the 3-byte FSUB [EBX+0x5C] at VA 0x89381 so that
-    2nd+ wing flaps near peak get FULL v0 = sqrt(2g * flap_height)
-    regardless of how far above peak the player has risen.
-    """
+class ApplyFlapAtPeakRetired(unittest.TestCase):
+    """``apply_flap_at_peak`` was retired in round 10.  Every
+    scale (including != 1.0) is a no-op and leaves the vanilla
+    FLD ST(1) bytes at VA 0x8939F untouched."""
 
-    def test_scale_1_is_noop(self):
-        from azurik_mod.patches.player_physics import (
-            _FLAP_PEAK_CAP_SITE_VA,
-            _FLAP_PEAK_CAP_SITE_VANILLA,
-            apply_flap_at_peak,
-        )
-        data = bytearray(_XBE_PATH.read_bytes())
-        size = len(_FLAP_PEAK_CAP_SITE_VANILLA)
-        self.assertFalse(apply_flap_at_peak(data, at_peak_scale=1.0))
-        off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
-        self.assertEqual(bytes(data[off:off + size]),
-                         _FLAP_PEAK_CAP_SITE_VANILLA,
-            msg="scale=1.0 must leave bytes vanilla")
-
-    def test_scale_not_one_rewrites_fld_st1(self):
-        from azurik_mod.patches.player_physics import (
-            _FLAP_PEAK_CAP_PATCH,
-            _FLAP_PEAK_CAP_SITE_VA,
-            _FLAP_PEAK_CAP_SITE_VANILLA,
-            apply_flap_at_peak,
-        )
-        size = len(_FLAP_PEAK_CAP_SITE_VANILLA)
-        for scale in (0.5, 2.0, 5.0):
-            with self.subTest(scale=scale):
-                data = bytearray(_XBE_PATH.read_bytes())
-                self.assertTrue(
-                    apply_flap_at_peak(data, at_peak_scale=scale))
-                off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
-                self.assertEqual(bytes(data[off:off + size]),
-                                 _FLAP_PEAK_CAP_PATCH,
-                    msg=f"scale={scale} must rewrite FLD ST1 -> FLD ST0")
-
-    def test_patch_does_not_touch_surrounding_bytes(self):
-        """Exactly 2 bytes at 0x8939F flip; preceding FLD
-        [ESI+0x144] and following FCOMP ST1 stay vanilla."""
+    def test_every_scale_is_noop(self):
         from azurik_mod.patches.player_physics import (
             _FLAP_PEAK_CAP_SITE_VA,
             _FLAP_PEAK_CAP_SITE_VANILLA,
             apply_flap_at_peak,
         )
         orig = _XBE_PATH.read_bytes()
-        data = bytearray(orig)
-        size = len(_FLAP_PEAK_CAP_SITE_VANILLA)
-        self.assertTrue(apply_flap_at_peak(data, at_peak_scale=2.0))
         off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
-        self.assertEqual(data[:off], orig[:off])
-        self.assertEqual(data[off + size:], orig[off + size:])
+        size = len(_FLAP_PEAK_CAP_SITE_VANILLA)
+        for scale in (1.0, 0.5, 2.0, 5.0):
+            with self.subTest(scale=scale):
+                data = bytearray(orig)
+                self.assertFalse(
+                    apply_flap_at_peak(data, at_peak_scale=scale))
+                self.assertEqual(bytes(data[off:off + size]),
+                                 _FLAP_PEAK_CAP_SITE_VANILLA)
 
-    def test_routed_via_apply_player_physics(self):
-        from azurik_mod.patches.player_physics import (
-            _FLAP_PEAK_CAP_PATCH,
-            _FLAP_PEAK_CAP_SITE_VA,
-            _FLAP_PEAK_CAP_SITE_VANILLA,
-        )
-        data = bytearray(_XBE_PATH.read_bytes())
-        size = len(_FLAP_PEAK_CAP_SITE_VANILLA)
+    def test_routed_via_apply_player_physics_is_noop(self):
+        orig = _XBE_PATH.read_bytes()
+        data = bytearray(orig)
         apply_player_physics(data, flap_at_peak_scale=2.0)
-        off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
-        self.assertEqual(bytes(data[off:off + size]),
-                         _FLAP_PEAK_CAP_PATCH)
+        self.assertEqual(bytes(data), orig,
+            msg="flap_at_peak_scale routing is retired; must not "
+                "touch any bytes")
 
 
 if __name__ == "__main__":

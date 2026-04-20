@@ -1184,35 +1184,23 @@ enum PlayerPhysicsState {
  * docs/LEARNINGS.md.  Kept as an anchor for RE agents. */
 #define AZURIK_PATCH_FLAP_AT_PEAK_FLD_ST_VA      0x0008939F
 
-/* Shim hook sites introduced in the late-April 2026 shim-
- * revival round.  Each is the entry of a C-shim trampoline;
- * see the corresponding pack folder for the shim body.
+/* Shim-revival round (late April 2026) was attempted at five hook
+ * sites listed below, but the resulting four packs (flap_at_peak,
+ * slope_slide_speed, root_motion_roll, root_motion_climb) all
+ * landed bytes cleanly yet produced no in-game effect and were
+ * deleted in round 10.  Hook VAs kept here purely as RE anchors
+ * for any future attempt:
  *
- * FLAP_V0_FINAL_FSTP:  ``D9 5E 2C`` — final z-velocity write
- *   inside ``wing_flap``; ``flap_at_peak`` shim overrides with
- *   max(vanilla_v0, sqrt(2g * flap_height) * scale).
- * WALK_ANIM_APPLY:     5-byte CALL to anim_apply_translation
- *   from ``player_walk_state``; ``root_motion_roll`` shim
- *   post-scales translation deltas when WHITE/BACK is held.
- * CLIMB_ANIM_APPLY:    5-byte CALL from ``player_climb_tick``;
- *   ``root_motion_climb`` shim post-scales unconditionally.
- * SLOPE_VEL_FLD:       ``D9 05 A0 02 39 00`` — state-4
- *   fast-slide velocity load; ``slope_slide_speed`` shim
- *   pre-multiplies by user scale.
- * PEAK_Z_WRITE:        ``FSTP [ESI+0x164]`` inside
- *   ``player_jump_init`` — where peak-z gets latched.  Read
- *   anchor only (not patched). */
-#define AZURIK_PATCH_FLAP_V0_FINAL_FSTP_VA       0x00089409
-#define AZURIK_PATCH_PEAK_Z_WRITE_VA             0x0008915A
-#define AZURIK_SHIM_HOOK_WALK_ANIM_APPLY_VA      0x000866D9
-#define AZURIK_SHIM_HOOK_CLIMB_ANIM_APPLY_VA     0x000883FF
-#define AZURIK_SHIM_HOOK_SLOPE_VEL_FLD_VA        0x0008A095
+ *   0x00089409 — final z-velocity FSTP in wing_flap
+ *   0x0008915A — peak-z write in player_jump_init
+ *   0x000866D9 — CALL anim_apply_translation in player_walk_state
+ *   0x000883FF — CALL anim_apply_translation in player_climb_tick
+ *   0x0008A095 — state-4 fast-slide velocity FLD
+ */
 #define AZURIK_PATCH_SLOPE_SLIDE_FMUL_VA        0x00089B76
 #define AZURIK_PATCH_SWIM_FMUL_VA               0x0008B7BF
 #define AZURIK_PATCH_AIR_CTRL_12_IMM32_VA       0x00083FAC
 #define AZURIK_PATCH_AIR_CTRL_9_IMM32_VA        0x00083FCE
-#define AZURIK_PATCH_PER_FRAME_DRAIN_VA         0x00083DE3
-#define AZURIK_PATCH_WING_FLAP_COUNT_HOOK_VA    0x00089321
 #define AZURIK_PATCH_CLIMB_FLD_PRIMARY_VA       0x00087FA7
 #define AZURIK_PATCH_CLIMB_FLD_SECONDARY_VA     0x00088357
 

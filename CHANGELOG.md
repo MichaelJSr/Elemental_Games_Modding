@@ -2,6 +2,81 @@
 
 ## Unreleased
 
+### Player-pack triage + shim-revival cleanup (round 10)
+
+User-driven purge after in-game testing confirmed that several
+byte-patch and shim-backed attempts from rounds 8–9 were
+ineffective.  When a mechanic has a cleaner config-editor or
+unreachable alternative, we delete rather than keep dead code.
+
+**Deleted packs (config-editor alternatives exist)**:
+
+- `no_fall_damage` — use config-editor damage thresholds or
+  `critters_damage` hitPoints.
+- `infinite_fuel` — use config-editor
+  `armor_properties.fuel_max` or zero `attacks_anims` Fuel
+  multipliers.
+- `wing_flap_count` — use config-editor `armor_properties`
+  Flaps column.
+
+**Deleted packs (no working hook found)**:
+
+- `flap_at_peak` — three hook attempts (FSUB NOP at 0x89381,
+  FLD-ST1 rewrite at 0x8939F, final-FSTP shim at 0x89409) all
+  landed bytes cleanly but produced no in-game effect.  The
+  near-peak weak-v0 behaviour is governed by state we never
+  successfully intercepted.
+- `root_motion_roll` — roll is animation root-motion driven.
+  Shim at 0x866D9 wrapping `anim_apply_translation` landed
+  bytes but gave no in-game effect (post-CALL param scaling
+  happens after the vtable commit has already consumed the
+  deltas).
+- `root_motion_climb` — same story at 0x883FF in
+  `player_climb_tick`.
+- `slope_slide_speed` — state-4 fast slide uses a dynamic 500x
+  multiplier from surface normal; neither the 4-byte constant
+  overwrite at 0x1AAB68 nor the FLD shim at 0x8A095 moved the
+  needle.
+
+**`player_physics` back-compat surface kept; apply functions
+retired as no-ops**:
+
+- `apply_flap_at_peak` / `apply_climb_speed` /
+  `apply_slope_slide_speed` now always return `False` and leave
+  bytes untouched.  Their corresponding slider kwargs on
+  `apply_player_physics` (`flap_at_peak_scale`, `climb_scale`,
+  `slope_slide_scale`) are accepted for back-compat but do
+  nothing.  GUI sliders and CLI flags for these were removed in
+  the same pass.
+
+**Wing-flap behaviour clarified (user theory, confirmed by RE)**:
+
+The "wing-flap height (subsequent flaps)" slider can look like
+it doesn't work.  The root cause is subtle:
+
+- Vanilla wing-flap v0 = `sqrt(2g * fVar2)` where
+  `fVar2 = min(peak_z + flap_height - current_z, flap_height)`.
+- `flap_height_scale` rewrites the FLD inside `wing_flap` at
+  0x893AE; that scales `g` *for every flap* (not just the
+  first).  However, at peak the altitude-remaining term clamps
+  `fVar2` to zero — and scaling `g` by anything still gives
+  `v0 = 0`.
+- `flap_below_peak_scale` only changes v0 for flaps taken
+  >6 m below peak (the halving path at 0x893DD).
+
+So the player's observation "subsequent flaps depend heavily on
+where I am relative to peak" is exactly what vanilla computes
+(intentional anti-infinite-altitude design).  Our sliders apply
+to every flap, but zero-times-anything is still zero near peak.
+
+**Docs**: `docs/LEARNINGS.md` § "Retired physics sliders" has
+the per-hook rationale.
+
+**Tests**: 767 pass (was 831 after the round-10 deletions;
+earlier rounds had transient test growth).  Test surface shrank
+by ~65 tests when the four shim-backed packs + three
+config-editor-alternative packs were removed.
+
 ### Shim infrastructure + cleanup pass (round 9)
 
 Follow-up to the round-8 shim revival: extract the boilerplate

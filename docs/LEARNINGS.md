@@ -179,7 +179,8 @@ vanilla constant.  At-or-above-peak flaps are **intentional
 anti-infinite-altitude design**: once the player has recovered
 their altitude budget, further flaps produce zero v0.
 
-Two byte-patch attempts at the cap formula, both abandoned:
+**Three separate patch attempts have been abandoned** (rounds
+7–10); no above-peak v0 injection currently ships:
 
 - **v1** NOPed `FSUB [EBX+0x5C]` at 0x89381 so `fVar1 = peak+fh`
   (always large).  Landed cleanly but `fVar1 > 6m` tripped the
@@ -190,17 +191,25 @@ Two byte-patch attempts at the cap formula, both abandoned:
   verification showed the patch landed; in-game testing
   reported no observable effect.  The engine re-derives the
   cap downstream.
+- **v3** (round 8) shipped a hand-assembled shim at 0x89409
+  (the final `FSTP [ESI+0x2C]`) that enforced
+  `max(vanilla_v0, sqrt(2g*fh)*scale)`.  Also ineffective
+  in-game — `player_airborne_tick` or subsequent physics
+  integration re-clamps vz before it manifests as motion.
 
-**Shipped fix (round 8)**: `flap_at_peak` **shim** at VA
-0x89409 (the final `FSTP [ESI+0x2C]` that writes
-``entity.z_velocity``).  43-byte hand-assembled trampoline
-wraps the write with
-``max(vanilla_v0, sqrt(2g * flap_height) * scale)``.  The cap
-still computes as vanilla; the shim merely *enforces a
-minimum* so every 2nd+ flap reaches at least the user-scaled
-first-flap v0.  This is a **workaround**, not a bug fix —
-above-ceiling flight is not a vanilla-supported mode.  See
-``azurik_mod/patches/flap_at_peak/`` for the implementation.
+Round 10 deleted the `flap_at_peak` pack and made
+`apply_flap_at_peak` a no-op.  What works instead:
+
+- Scaling `flap_height_scale` (the gravity FLD inside
+  `wing_flap` at 0x893AE) affects EVERY flap's v0 because
+  `wing_flap` runs for first + subsequent flaps alike.  But
+  when `fVar2 = 0` (the ceiling case), `v0 = scale * 0 = 0`.
+- Scaling `flap_below_peak_scale` (the halving FMUL at 0x893DD)
+  only fires for flaps taken >6 m below peak.
+- So there's no user-facing knob that defeats the ceiling —
+  that's by design.  Pair a higher first-flap `flap_height_scale`
+  with a higher `jump_speed_scale` to make the ceiling itself
+  higher.
 
 ### Air-control speed has TWO dominant writer sites — FUN_00083F90 (April 2026)
 
@@ -433,40 +442,43 @@ The old `run_*` kwargs / attr names remain as transparent
 aliases so pinned callers don't break, but all documentation
 and tests use the new name.
 
-### Revived via shim (late April 2026 round 8)
+### Retired physics sliders (round-10 purge, late April 2026)
 
-Four of the previously-retired patches are now shipping as
-shim-backed packs — hand-assembled trampolines that hook at
-code-flow points byte patches couldn't reach:
+After in-game testing confirmed that the round-8 shim-revival
+attempts and several round-1..round-7 byte patches all produced
+zero observable effect, the following packs/sliders were
+deleted entirely.  They're documented here so future RE work
+doesn't repeat the same hook attempts.
 
-| Pack | Hook VA | Shim strategy |
+**Deleted: config-editor alternatives exist**
+
+| Pack | Attempted hooks | Use instead |
 |---|---|---|
-| `flap_at_peak` | `0x89409` (FSTP [ESI+0x2C]) | 6-byte JMP trampoline; shim wraps the final z-velocity write with `max(vanilla_v0, sqrt(2g*fh)*scale)` then replays MOV EAX, [ESI+0x20]. |
-| `root_motion_roll` | `0x866D9` (CALL anim_apply_translation) | 5-byte CALL trampoline; shim wraps the vanilla call, post-scales param_1[0x6C..0x71] deltas while PlayerInputState.flags & 0x40 (WHITE/BACK) is set. |
-| `root_motion_climb` | `0x883FF` (CALL anim_apply_translation) | Same pattern as roll but no gate — entire function is climb-state. |
-| `slope_slide_speed` | `0x8A095` (FLD [0x003902A0]) | 6-byte JMP trampoline; shim replays the FLD then FMULs by user scale before the downstream velocity integration consumes the value. |
+| `no_fall_damage` | prologue RET at 0x8AB70, JNP rewrite at 0x8BE00 | Config editor: `damage` section (raise fall-height thresholds) or `critters_damage` hitPoints. |
+| `infinite_fuel` | prologue RET at 0x842D0, NOP at 0x83DE3 | Config editor: `armor_properties.fuel_max` very large, or zero every `attacks_anims` Fuel multiplier. |
+| `wing_flap_count` | 47-byte dispatch shim at 0x89321 | Config editor: `armor_properties.Flaps` column. |
 
-The flap_at_peak shim is a **workaround**, not a bug fix —
-vanilla deliberately caps subsequent-flap altitude at
-``initial_flap_z + flap_height`` (peak_z is latched in
-``player_jump_init`` @ 0x8915A and never refreshed).  See
-"Wing-flap v0 cap" below for the full design-intent framing.
+**Deleted: no working hook found**
 
-### Retired (config-editor workarounds)
-
-Three packs stay retired because their byte patches land but
-gameplay-side evidence suggests other code paths dominate:
-
-| Pack | Byte patch | Config-editor workaround |
+| Pack | Hooks tried | Why they didn't work |
 |---|---|---|
-| `no_fall_damage` | prologue RET at 0x8AB70 + 0x8BE00 | `damage` section → raise fall-height thresholds, or `critters_damage` → bump player hitPoints. |
-| `infinite_fuel` | prologue RET at 0x842D0, NOP at 0x83DE3 | `armor_properties` → fuel_max very large, **or** zero every `Fuel multiplier` in `attacks_anims`. |
-| `wing_flap_count` | 47-byte dispatch shim at 0x89321 | `armor_properties` → `Flaps` column per armor row; read fresh each flap. |
+| `flap_at_peak` | FSUB NOP @ 0x89381 · FLD-ST1 rewrite @ 0x8939F · final-FSTP shim @ 0x89409 | Near-peak v0 = 0 is latched by `peak_z` in `player_jump_init` @ 0x8915A and every attempted intercept downstream gets re-clamped by the state machine / airborne tick. |
+| `root_motion_roll` | CALL-wrap shim @ 0x866D9 | `anim_apply_translation` commits deltas via vtable+0xC0 **inside** the call; scaling param_1 after the call is too late. |
+| `root_motion_climb` | CALL-wrap shim @ 0x883FF | Same story as roll. |
+| `slope_slide_speed` | constant overwrite @ 0x1AAB68 · FLD shim @ 0x8A095 | State-4 fast slide uses a dynamic 500x multiplier computed from surface normal, not the static FLD we patched. |
 
-The common pattern for ALL of these: **player state driven by
-the animation system or by separate state-specific code paths
-isn't cleanly byte-patchable** — interception at the animation
-or state-machine layer (via shim) is required.
+`player_physics` keeps stub `apply_flap_at_peak` /
+`apply_climb_speed` / `apply_slope_slide_speed` entry points
+for back-compat, but they always return `False` and never
+mutate bytes.
+
+**The common pattern**: player state driven by the animation
+system or by per-frame state-machine code paths isn't cleanly
+byte-patchable.  A correct shim would need to hook *inside*
+`anim_apply_translation` (before the vtable+0xC0 commit) or
+intercept the state machine's root-motion integration at
+`FUN_00085700` / `player_physics_state_machine` — both of
+which we did not attempt.  Future work.
 
 ### Airborne horizontal-control speed (new April 2026)
 

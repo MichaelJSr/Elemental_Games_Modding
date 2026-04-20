@@ -38,10 +38,6 @@ from azurik_mod.patches.player_physics import (
     WALK_SPEED_SCALE,
     apply_air_control_speed,
     apply_climb_speed,
-    # Retired byte-patch attempts at FLAP_AT_PEAK's former sites
-    # (0x89381 and 0x8939F) — kept importable for test continuity
-    # but no longer re-exported here.  The working shim lives in
-    # the ``flap_at_peak`` pack below.
     apply_flap_height,
     apply_flap_subsequent,
     apply_jump_speed,
@@ -74,50 +70,6 @@ from azurik_mod.patches.qol_skip_save_signature import (
     SKIP_SAVE_SIG_SITES,
     apply_skip_save_signature_patch,
 )
-from azurik_mod.patches.no_fall_damage import (
-    AZURIK_FALL_DEATH_VA,
-    FALL_DEATH_SPEC,
-    NO_FALL_DAMAGE_SITES,
-    NO_FALL_DAMAGE_SPEC,
-    NO_FALL_DAMAGE_VA,
-    apply_no_fall_damage_patch,
-)
-from azurik_mod.patches.infinite_fuel import (
-    AZURIK_CONSUME_FUEL_VA,
-    AZURIK_PER_FRAME_DRAIN_VA,
-    INFINITE_FUEL_SITES,
-    INFINITE_FUEL_SPEC,
-    PER_FRAME_DRAIN_SPEC,
-    apply_infinite_fuel_patch,
-)
-from azurik_mod.patches.wing_flap_count import (
-    FLAPS_AIR_1,
-    FLAPS_AIR_2,
-    FLAPS_AIR_3,
-    WING_FLAP_COUNT_SITES,
-    apply_wing_flap_count,
-)
-from azurik_mod.patches.flap_at_peak import (
-    FLAP_AT_PEAK_SHIM_SLIDER,
-    FLAP_AT_PEAK_SITES,
-    apply_flap_at_peak,
-)
-from azurik_mod.patches.slope_slide_speed import (
-    SLOPE_SLIDE_SHIM_SLIDER,
-    SLOPE_SLIDE_SITES,
-    apply_slope_slide_speed_shim,
-)
-from azurik_mod.patches.root_motion_roll import (
-    ROLL_SPEED_SHIM_SLIDER,
-    ROLL_SPEED_SITES,
-    apply_root_motion_roll,
-)
-from azurik_mod.patches.root_motion_climb import (
-    CLIMB_SPEED_SHIM_SLIDER,
-    CLIMB_SPEED_SITES,
-    apply_root_motion_climb,
-)
-
 # ``randomize`` has no byte patches — it surfaces the randomizer
 # shuffle pools as ``Feature(category="randomize")`` entries so
 # the category-aware GUI + CLI can treat them uniformly with the
@@ -167,23 +119,12 @@ __all__ = [
     "OTHER_POPUP_OFFSETS",
     "PICKUP_ANIM_SPEC",
     "AIR_CONTROL_SCALE",
-    "AZURIK_CONSUME_FUEL_VA",
-    "AZURIK_FALL_DEATH_VA",
     "CLIMB_SPEED_SCALE",
     "FLAP_AT_PEAK_SCALE",
     "FLAP_BELOW_PEAK_SCALE",
     "FLAP_HEIGHT_SCALE",
     "FLAP_SUBSEQUENT_SCALE",
-    "FLAPS_AIR_1",
-    "FLAPS_AIR_2",
-    "FLAPS_AIR_3",
-    "INFINITE_FUEL_SITES",
-    "INFINITE_FUEL_SPEC",
     "JUMP_SPEED_SCALE",
-    "FALL_DEATH_SPEC",
-    "NO_FALL_DAMAGE_SITES",
-    "NO_FALL_DAMAGE_SPEC",
-    "NO_FALL_DAMAGE_VA",
     "PLAYER_PHYSICS_SITES",
     "QOL_PATCH_SITES",
     "ROLL_SPEED_SCALE",
@@ -195,17 +136,13 @@ __all__ = [
     "SKIP_SAVE_SIG_SITES",
     "SWIM_SPEED_SCALE",
     "WALK_SPEED_SCALE",
-    "WING_FLAP_COUNT_SITES",
     "apply_air_control_speed",
     "apply_climb_speed",
-    "apply_flap_at_peak",
     "apply_flap_height",
     "apply_flap_subsequent",
     "apply_fps_patches",
     "apply_gem_popups_patch",
-    "apply_infinite_fuel_patch",
     "apply_jump_speed",
-    "apply_no_fall_damage_patch",
     "apply_other_popups_patch",
     "apply_pickup_anim_patch",
     "apply_player_character_patch",
@@ -216,5 +153,4 @@ __all__ = [
     "apply_slope_slide_speed",
     "apply_skip_save_signature_patch",
     "apply_swim_speed",
-    "apply_wing_flap_count",
 ]

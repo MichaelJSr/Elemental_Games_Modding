@@ -555,13 +555,26 @@ driven from Python**, centralised in
 
 **Choose a hand-assembled shim when**:
 - The hook interrupts an x87 FPU compute and you must preserve /
-  consume ST(0..n) precisely (e.g. `flap_at_peak` comparing
-  floors to vanilla v0 on the FP stack).
+  consume ST(0..n) precisely (e.g. comparing floors to vanilla v0
+  on the FP stack).
 - The shim must invoke a `__thiscall` vanilla function with stack
   args that are already pushed on the caller's frame (e.g.
-  `root_motion_roll` / `_climb` wrapping `anim_apply_translation`).
+  wrapping `anim_apply_translation` from inside a state-tick
+  routine).
 - Per-apply slider values need to be baked into a carved data
-  slot (e.g. `scale * scale * 2g` for flap_at_peak).
+  slot (e.g. `scale * scale * 2g` for a physics injection).
+
+> **Warning — cautionary tales from round 10**: rounds 7–8
+> shipped four hand-assembled shims (`flap_at_peak`,
+> `root_motion_roll`, `root_motion_climb`, `slope_slide_speed`)
+> that all landed bytes cleanly but produced **no observable
+> in-game effect**.  Byte-correctness at the hook isn't enough
+> — you also need to verify the hook is semantically upstream
+> of the state that drives the visible mechanic.  For animation
+> root-motion, scaling the output of `anim_apply_translation`
+> *after* the call is too late because its vtable+0xC0 already
+> committed the deltas.  See `docs/LEARNINGS.md` §
+> "Retired physics sliders" for the full postmortem.
 
 ### Blessed pattern
 
@@ -619,15 +632,21 @@ needs to define the hook spec and the body builder.
 
 ### Worked examples
 
-Four packs use the hand-assembled pattern — read them alongside
-this doc for end-to-end context:
+The four round-8 hand-assembled packs were deleted in round 10
+(they landed bytes but produced no in-game effect — see warning
+above).  Patterns they explored remain valid as archaeology via
+git history:
 
-| Pack | Hook | Shim size | Notes |
-|------|------|-----------|-------|
-| [`azurik_mod/patches/slope_slide_speed`](../azurik_mod/patches/slope_slide_speed/__init__.py) | VA 0x8A095 (FLD) | 17 B | Simplest: FLD→FMUL→JMP. |
-| [`azurik_mod/patches/flap_at_peak`](../azurik_mod/patches/flap_at_peak/__init__.py) | VA 0x89409 (FSTP) | 43 B | x87 compare-max + instruction replay. |
-| [`azurik_mod/patches/root_motion_roll`](../azurik_mod/patches/root_motion_roll/__init__.py) | VA 0x866D9 (CALL) | 134 B | Wraps `__thiscall` vanilla with flag-gated post-scale. |
-| [`azurik_mod/patches/root_motion_climb`](../azurik_mod/patches/root_motion_climb/__init__.py) | VA 0x883FF (CALL) | 128 B | Same as roll, no gate. |
+| Pattern | Deleted pack (git only) | Hook | Shim size |
+|---|---|---|---|
+| FLD → FMUL → JMP (simplest) | `slope_slide_speed` | 0x8A095 (FLD) | 17 B |
+| x87 compare-max + instruction replay | `flap_at_peak` | 0x89409 (FSTP) | 43 B |
+| `__thiscall` wrap, flag-gated post-scale | `root_motion_roll` | 0x866D9 (CALL) | 134 B |
+| `__thiscall` wrap, no gate | `root_motion_climb` | 0x883FF (CALL) | 128 B |
+
+The `qol_skip_save_signature` pack ships today as a live
+hand-assembled shim using `shim_builder`; start there for a
+working reference.
 
 ### `__thiscall` detour pattern
 
@@ -663,8 +682,9 @@ stack args onto the shim's frame for an inner `__thiscall`
 without needing to know exact offsets after each `push` shifts
 ESP.  Every copy reads the same (shifting) source slot, which
 because of the shift ends up pulling the next argument in
-sequence — see `root_motion_roll/_build_shim_body` for a
-tested implementation.
+sequence.  For a tested implementation of this detour pattern,
+see the deleted `root_motion_roll` / `root_motion_climb` packs
+in git history (commit ccf1998 and neighbours).
 
 ## 9. See also
 

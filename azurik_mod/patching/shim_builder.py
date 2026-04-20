@@ -1,9 +1,7 @@
 """Hand-assembled shim authoring primitives.
 
-A growing family of feature packs ships machine-code shims
-assembled directly in Python (``wing_flap_count``,
-``flap_at_peak``, ``slope_slide_speed``, ``root_motion_roll``,
-``root_motion_climb``).  They all share the same pipeline:
+Feature packs that need to ship machine-code shims assembled
+directly in Python share a common pipeline:
 
     1. Verify the hook-site bytes match vanilla (with idempotent
        "already applied" detection for re-runs).
@@ -50,10 +48,8 @@ Typical usage::
             xbe, _SPEC,
             data_block=pack("<f", k) + b"\\xFF" * 4,
             build_body=lambda shim_va, data_va: _build_body(shim_va, data_va),
-            label="flap_at_peak",
+            label="my_feature",
         )
-
-See :mod:`azurik_mod.patches.flap_at_peak` for a worked example.
 """
 
 from __future__ import annotations
@@ -275,9 +271,9 @@ def install_hand_shim(
 
     # Order matters: vanilla comparison FIRST so we don't mistake
     # a vanilla E8-CALL at the hook for an already-installed
-    # trampoline (root_motion_roll / _climb both hook vanilla
-    # E8 CALLs; the trampoline-shape heuristic can't tell them
-    # apart without the content check).
+    # trampoline (CALL-wrap shims hook vanilla E8 CALLs; the
+    # trampoline-shape heuristic can't tell them apart without
+    # the content check).
     if current == spec.hook_vanilla:
         # Vanilla — proceed with install below.
         pass
@@ -360,8 +356,7 @@ def whitelist_for_hand_shim(
 
     For packs that carry >1 data block or use a non-``FLD [abs32]``
     reference, pass a custom ``data_abs32_opcode`` (e.g. ``b"\\xA1"``
-    for wing_flap_count's ``MOV EAX, ds:[abs32]`` pattern, though
-    that one still has bespoke logic for the 3× packed int case).
+    for ``MOV EAX, ds:[abs32]`` patterns).
 
     Returns an empty list when ``hook_va`` is out of range (the
     callback must be graceful for verify-patches to work on

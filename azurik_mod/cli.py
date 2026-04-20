@@ -325,27 +325,6 @@ def main() -> None:
                         help="[RETIRED — only covers state-3 slow "
                              "slide; state-4 fast slide uses a "
                              "dynamic 500x multiplier]")
-    p_full.add_argument("--no-fall-damage", dest="no_fall_damage",
-                        action="store_true",
-                        help="[RETIRED — no-op, use config editor "
-                             "damage thresholds or critters_damage "
-                             "hitPoints]")
-    p_full.add_argument("--infinite-fuel", dest="infinite_fuel",
-                        action="store_true",
-                        help="[RETIRED — no-op, use config editor "
-                             "armor_properties.fuel_max or zero "
-                             "attacks_anims Fuel multipliers]")
-    p_full.add_argument("--flaps-air-1", dest="flaps_air_1",
-                        type=int, metavar="N",
-                        help="[RETIRED — no-op, use config editor "
-                             "armor_properties Flaps column]")
-    p_full.add_argument("--flaps-air-2", dest="flaps_air_2",
-                        type=int, metavar="N",
-                        help="[RETIRED — see --flaps-air-1]")
-    p_full.add_argument("--flaps-air-3", dest="flaps_air_3",
-                        type=int, metavar="N",
-                        help="[RETIRED — see --flaps-air-1]")
-
     # apply-physics (standalone physics slider runner)
     p_physics = sub.add_parser(
         "apply-physics",
