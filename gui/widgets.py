@@ -618,8 +618,13 @@ class PackBrowser(ttk.Frame):
 
         # Keep explicit references to pack lists by category so the
         # input ``packs`` argument (which may be a filtered subset)
-        # overrides the registry's global view.
-        requested = {p.name for p in packs}
+        # overrides the registry's global view.  ``deprecated`` packs
+        # are filtered out here — they stay in the registry for CLI /
+        # test / direct-apply use, but the GUI browser hides them so
+        # casual users don't stumble into a checkbox that's known to
+        # not produce the expected in-game effect.
+        requested = {p.name for p in packs
+                     if not getattr(p, "deprecated", False)}
         grouped = packs_by_category()
 
         for cat in all_categories():
@@ -635,7 +640,9 @@ class PackBrowser(ttk.Frame):
         # impossible after register_pack's ensure_category, but
         # handle gracefully anyway).
         known = {c.id for c in all_categories()}
-        stragglers = [p for p in packs if p.category not in known]
+        stragglers = [p for p in packs
+                      if p.category not in known
+                      and not getattr(p, "deprecated", False)]
         if stragglers:
             from azurik_mod.patching.category import Category
             orphan = Category("other", "Other",

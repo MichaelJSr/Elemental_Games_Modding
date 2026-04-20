@@ -203,15 +203,29 @@ class ParametricSliderUsesTooltip(unittest.TestCase):
 
     def test_no_info_glyph_when_description_empty(self):
         """A slider with no description must NOT show an ⓘ
-        glyph — no point triggering an empty tooltip."""
-        from azurik_mod.patches.player_physics import (
-            WALK_SPEED_SCALE,   # no description
-        )
+        glyph — no point triggering an empty tooltip.  Build a
+        throwaway ParametricPatch with ``description=""`` rather
+        than picking a real slider (every shipping slider now
+        has a description after round 11.10's content pass)."""
+        import struct
+        from azurik_mod.patching.spec import ParametricPatch
         from gui.widgets import ParametricSlider
-        self.assertFalse(
-            (getattr(WALK_SPEED_SCALE, 'description', '') or '').strip(),
-            msg="fixture sanity: WALK_SPEED_SCALE has no description")
-        slider = ParametricSlider(self._root, WALK_SPEED_SCALE)
+        empty_desc = ParametricPatch(
+            name="_test_no_desc",
+            label="No-description fixture",
+            va=0,
+            size=0,
+            original=b"",
+            default=1.0,
+            slider_min=0.0,
+            slider_max=2.0,
+            slider_step=0.1,
+            unit="x",
+            encode=lambda v: struct.pack("<d", float(v)),
+            decode=lambda b: struct.unpack("<d", b)[0],
+            description="",
+        )
+        slider = ParametricSlider(self._root, empty_desc)
         slider.pack()
         self._root.update_idletasks()
         for widget in _walk_descendants(slider):

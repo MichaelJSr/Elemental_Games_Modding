@@ -227,6 +227,12 @@ FEATURE = register_feature(Feature(
     ),
     sites=CLIMB_SPEED_SITES,
     apply=lambda xbe_data: None,
+    # Deprecated as of round 11.10: user-verified the shim has
+    # no in-game effect.  Same root cause as root_motion_roll —
+    # anim_apply_translation commits deltas via vtable+0xC0
+    # inside the call, before the post-CALL shim runs.  Hidden
+    # from the GUI pack browser.
+    deprecated=True,
     default_on=False,
     included_in_randomizer_qol=False,
     category="player",

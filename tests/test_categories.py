@@ -298,26 +298,26 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         browser = PackBrowser(self._root, all_packs(), {},
                               pack_params=params)
         slider_keys = sorted(browser.sliders().keys())
-        # Slider inventory as of round 11.8:
+        # Slider inventory as of round 11.10:
         #
         #   player_physics owns 9 sliders (direct byte patches +
-        #   hand-assembled shim for wing_flap_ceiling_scale).
+        #   one hand-assembled shim for wing_flap_ceiling_scale).
         #
-        #   flap_at_peak / slope_slide_speed / root_motion_roll /
-        #   root_motion_climb are shim-backed packs, each owning
-        #   their single virtual slider.  They were deleted in
-        #   round 10 after being misdiagnosed as "doesn't work
-        #   in-game" — the round-11.6 forensic showed that the GUI
-        #   backend was silently dropping all non-player_physics
-        #   pack_params entries, so the slider values never reached
-        #   apply_pack and the shims always ran with scale=1.0
-        #   (no-op).  Restored in round 11.8 now that the generic
-        #   pack_params_json channel ensures slider values
-        #   actually reach the apply pipeline.
+        #   flap_at_peak and slope_slide_speed are shim-backed
+        #   packs, each owning one virtual slider.  Restored in
+        #   round 11.8 from the round-10 purge (which was a GUI
+        #   wiring bug, not a genuine apply failure).
+        #
+        #   root_motion_roll and root_motion_climb are also
+        #   registered but DEPRECATED in round 11.10 — they stay
+        #   importable + testable but the GUI browser hides them
+        #   because user-verified they produce no observable
+        #   in-game effect even after the wiring fix (probable
+        #   cause: anim_apply_translation commits deltas via
+        #   vtable+0xC0 inside the call).
         #
         #   wing_flap_count / no_fall_damage / infinite_fuel are
-        #   still deleted (boolean toggle packs, GUI-wired
-        #   correctly pre-delete — their deletion reason holds).
+        #   still deleted.
         self.assertEqual(
             slider_keys,
             [("flap_at_peak",       "flap_at_peak_scale"),
@@ -330,24 +330,51 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
              ("player_physics",     "swim_speed_scale"),
              ("player_physics",     "walk_speed_scale"),
              ("player_physics",     "wing_flap_ceiling_scale"),
-             ("root_motion_climb",  "climb_speed_scale"),
-             ("root_motion_roll",   "roll_speed_scale"),
              ("slope_slide_speed",  "slope_slide_speed_scale")])
         self.assertIn("player_physics", params)
         self.assertEqual(len(params["player_physics"]), 9)
-        for pack_name in ("flap_at_peak", "slope_slide_speed",
-                          "root_motion_roll", "root_motion_climb"):
+        for pack_name in ("flap_at_peak", "slope_slide_speed"):
             self.assertIn(pack_name, params,
                 msg=f"{pack_name} restored in round 11.8; its "
                     f"single-slider bucket must be rendered")
             self.assertEqual(len(params[pack_name]), 1,
                 msg=f"{pack_name} exposes exactly one slider")
+        for pack_name in ("root_motion_roll", "root_motion_climb"):
+            self.assertNotIn(pack_name, params,
+                msg=f"{pack_name} is deprecated in round 11.10 — "
+                    f"GUI browser must hide it")
         for pack_name in ("wing_flap_count", "no_fall_damage",
                           "infinite_fuel"):
             self.assertNotIn(pack_name, params,
                 msg=f"{pack_name} stays deleted (boolean toggle "
-                    f"pack, not affected by the round-11.6 slider "
-                    f"wiring bug)")
+                    f"pack)")
+
+    def test_deprecated_packs_stay_in_registry(self):
+        """Deprecated packs must stay importable + invocable via
+        CLI + tests — only the GUI browser hides them.  Pins the
+        ``Feature.deprecated`` flag introduced in round 11.10."""
+        from azurik_mod.patching.registry import get_pack
+        for pack_name in ("root_motion_roll", "root_motion_climb"):
+            pack = get_pack(pack_name)
+            self.assertIsNotNone(pack,
+                msg=f"{pack_name} must still be in registry")
+            self.assertTrue(pack.deprecated,
+                msg=f"{pack_name} must have deprecated=True so "
+                    f"the GUI hides it")
+
+    def test_non_deprecated_packs_have_deprecated_false(self):
+        """Default of ``deprecated`` is False; every shipping
+        pack should have deprecated=False explicitly (no accidental
+        stray deprecations)."""
+        from azurik_mod.patching.registry import all_packs
+        active_packs = [p for p in all_packs() if not p.deprecated]
+        # Must have at least player_physics + fps_unlock + the
+        # QoL packs + randomizer pools on the active list.
+        active_names = {p.name for p in active_packs}
+        for expected in ("player_physics", "fps_unlock",
+                         "qol_skip_logo", "rand_major"):
+            self.assertIn(expected, active_names,
+                msg=f"{expected} should not be deprecated")
 
     def test_plugin_category_gets_its_own_tab(self):
         """Simulate a plugin: register a category + a pack referencing

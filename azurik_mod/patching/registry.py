@@ -140,6 +140,19 @@ class PatchPack:
     Use sparingly — every custom_apply is a special case that
     downstream tooling has to understand separately."""
 
+    deprecated: bool = False
+    """When True, the pack stays registered (so CLI + tests + direct
+    ``apply_pack`` calls still work) but the GUI's Patches page hides
+    it from the pack browser so casual users don't stumble into a
+    checkbox that's known to not produce the expected effect.
+
+    Use this — rather than deleting the pack — when a shim applies
+    bytes correctly but in-game validation shows the hook doesn't
+    achieve the intended gameplay effect, and we've decided to leave
+    the code in tree as RE reference rather than rip it out.  See
+    docs/LEARNINGS.md § "Deprecated physics packs" for the current
+    entries."""
+
     def patch_specs(self) -> list[PatchSpec]:
         """Return only the PatchSpec entries in this pack."""
         return [s for s in self.sites if isinstance(s, PatchSpec)]

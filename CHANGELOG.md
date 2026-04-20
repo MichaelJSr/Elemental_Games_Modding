@@ -2,6 +2,100 @@
 
 ## Unreleased
 
+### Descriptions pass + fuel-cost math fix + deprecations (round 11.10)
+
+**Descriptions**: Added tooltip descriptions to every slider
+(previously only 3 sliders had them); trimmed the 5 long pack
+descriptions for consistency:
+
+| | Before | After |
+|---|---|---|
+| `gravity` (slider) | no description | 233 chars |
+| `walk_speed_scale` (slider) | no description | 197 chars |
+| `swim_speed_scale` (slider) | no description | 143 chars |
+| `jump_speed_scale` (slider) | no description | 135 chars |
+| `air_control_scale` (slider) | no description | 185 chars |
+| `wing_flap_ceiling_scale` (slider) | 121 chars | same |
+| `flap_descent_fuel_cost_scale` (slider) | 157 chars | 440 chars (now explains the threshold-clear math) |
+| `flap_at_peak` (pack) | 113 chars | 113 chars (unchanged round 11.9) |
+| `root_motion_roll` / `_climb` (pack) | 157 / 119 chars | unchanged |
+
+Every slider now has a concise, mechanism-level tooltip that
+explains what the slider does + one-sentence "what this
+DOESN'T affect" disambiguation where relevant.
+
+**`flap_descent_fuel_cost_scale` math clarified + range expanded**:
+
+User reported that values between 0 and 1 still cleared the
+gauge in a single flap.  Ghidra-verified: vanilla
+``consume_fuel(this, cost)`` does
+``fuel_current -= cost/fuel_max`` and THEN clears to 0 if the
+new ``fuel_current < 0.5 × cost/fuel_max``.  Vanilla
+``fuel_max`` is just 1 (air1), 2 (air2), or 5 (air3), so any
+positive ``cost > fuel_max × 2`` triggers the clear-to-0 path
+— which is every positive scale for air1/air2 and most for
+air3.
+
+Slider range expanded from ``[0.0, 1.0]`` to ``[-10.0, 1.0]``
+so users can reach the useful values:
+
+- ``1.0`` (default) — vanilla drain (gauge clears in 1 flap)
+- ``0.0`` — no drain (descent flaps cost only the first-flap 1.0)
+- negative — REFUND (each descent flap ADDS fuel back)
+
+Tooltip rewrites to lay out the arithmetic explicitly.
+
+**`slope_slide_speed` enhanced**: now patches BOTH state-3
+(slow slide, constant overwrite at VA 0x1AAB68) AND state-4
+(fast slide, shim at VA 0x8A095) — previously only state-4 was
+covered.  Single slider drives both.
+
+**Deprecations**: added a ``deprecated: bool`` flag to
+``Feature`` / ``PatchPack``.  Deprecated packs stay registered
+(CLI / tests / direct ``apply_pack`` still work) but the GUI's
+``PackBrowser`` hides them so casual users don't stumble into
+a checkbox that doesn't produce the expected effect.
+
+Marked deprecated as of round 11.10:
+
+- `root_motion_roll` — user-verified the shim has no observable
+  in-game effect even after the round-11.6 wiring fix.  Probable
+  cause: ``anim_apply_translation`` commits the translation
+  deltas via vtable+0xC0 INSIDE the function, before our
+  post-CALL shim scales them.
+- `root_motion_climb` — same root cause.
+
+Slope-slide stays active (with state-3 enhancement).
+flap_at_peak stays active (superseded but composes
+orthogonally with wing_flap_ceiling_scale).
+
+**Entity Editor investigation (armor Flaps)**: user reported
+edits to `armor_properties_real.Flaps` weren't applying.  Full
+pipeline audit (new test `test_entity_editor_keyed_flaps.py`):
+
+- `get_pending_mod()` emits the correct ``_keyed_patches``
+  shape.
+- ``cmd_randomize_full``'s keyed-patch loop correctly writes
+  doubles at ``cell_offset + 8``.
+- Re-read confirms the values landed.
+
+Conclusion: the apply pipeline IS correct.  The user-reported
+"doesn't apply" must be a UI-interaction issue (e.g. build ran
+without a freshly-loaded ISO populating ``_keyed_tables``, or
+the entity-combo didn't show `air_shield_*` rows).  Four new
+tests pin the invariant.  **Workaround** for users who hit the
+UI issue: use ``azurik-mod randomize-full --config-mod
+flaps.json`` directly with a hand-edited JSON file:
+
+```json
+{"_keyed_patches": {"armor_properties_real":
+  {"air_shield_1": {"Flaps": 10.0},
+   "air_shield_2": {"Flaps": 20.0},
+   "air_shield_3": {"Flaps": 50.0}}}}
+```
+
+910 tests pass total (+6).
+
 ### GUI: info-tooltip system + concise descriptions (round 11.9)
 
 User reported that slider descriptions were crowding the

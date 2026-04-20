@@ -321,6 +321,16 @@ FEATURE = register_feature(Feature(
     ),
     sites=ROLL_SPEED_SITES,
     apply=lambda xbe_data: None,
+    # Deprecated as of round 11.10: user-verified that the shim
+    # installs bytes cleanly but produces no observable in-game
+    # effect even with the round-11.6 wiring bug fixed.  Probable
+    # cause: ``anim_apply_translation`` commits the translation
+    # deltas via the vtable+0xC0 call INSIDE the function, before
+    # our post-CALL shim gets a chance to scale them.  A correct
+    # shim would need to hook the vtable call itself (deeper RE).
+    # Hidden from the GUI pack browser; CLI / direct apply_pack
+    # still work for anyone wanting to experiment.
+    deprecated=True,
     default_on=False,
     included_in_randomizer_qol=False,
     category="player",

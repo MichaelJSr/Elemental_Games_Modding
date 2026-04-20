@@ -55,11 +55,16 @@ class SliderDescriptor(unittest.TestCase):
     def test_slider_registered_on_player_physics(self):
         self.assertIn(FLAP_DESCENT_FUEL_COST_SCALE, PLAYER_PHYSICS_SITES)
 
-    def test_slider_range_allows_zero(self):
-        """0.0 is the whole point — it disables the drain.  The
-        slider's min must allow it (``or 1.0`` shortcut does NOT
-        apply here; explicit None check is used upstream)."""
-        self.assertEqual(FLAP_DESCENT_FUEL_COST_SCALE.slider_min, 0.0)
+    def test_slider_range_allows_zero_and_negative(self):
+        """0.0 and negative values must both be reachable.
+        Round 11.10 expanded the range to include refunds
+        (negative = each descent flap ADDS fuel instead of
+        draining it) after user testing showed values between
+        0 and 1 still cleared the gauge in a single flap due to
+        vanilla's clear-on-low-fuel threshold kicking in whenever
+        cost > fuel_max × 2."""
+        self.assertLessEqual(FLAP_DESCENT_FUEL_COST_SCALE.slider_min, 0.0,
+            msg="0.0 must be reachable so users can disable drain")
         self.assertEqual(FLAP_DESCENT_FUEL_COST_SCALE.default, 1.0)
 
     def test_hook_site_constants(self):

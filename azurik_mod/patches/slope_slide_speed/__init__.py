@@ -76,6 +76,17 @@ _VANILLA_SLOPE_DAT_VA = 0x003902A0
 # Shim body size (3 instructions: FLD, FMUL, JMP).
 _SHIM_BODY_SIZE = 17
 
+# State-3 (slow-slide) constant — separate 4-byte float at
+# VA 0x001AAB68 read by the FLD at VA 0x89B76 inside
+# ``player_slope_slide_tick``.  Direct byte overwrite is safe:
+# the constant has a single reader.  Round 11.10 layered this on
+# top of the state-4 shim so the slider scales BOTH sub-paths
+# — user-reported state-3 slides (walking over moderately steep
+# terrain) were previously untouched by the shim alone.
+_STATE3_CONST_VA = 0x001AAB68
+_VANILLA_STATE3_CONST = 2.0
+_STATE3_CONST_VANILLA_BYTES = struct.pack("<f", _VANILLA_STATE3_CONST)
+
 _SPEC = HandShimSpec(
     hook_va=_HOOK_VA,
     hook_vanilla=_HOOK_VANILLA,
@@ -92,7 +103,7 @@ _SPEC = HandShimSpec(
 
 SLOPE_SLIDE_SHIM_SLIDER = ParametricPatch(
     name="slope_slide_speed_scale",
-    label="Slope-slide speed (steep-terrain auto-slide, state 4)",
+    label="Slope-slide speed (both states)",
     va=0,
     size=0,
     original=b"",
@@ -104,9 +115,10 @@ SLOPE_SLIDE_SHIM_SLIDER = ParametricPatch(
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
     description=(
-        "Scales state-4 fast-slide velocity (steep-terrain "
-        "auto-slide).  1.0 = vanilla.  State-3 slow-slide is "
-        "unaffected."
+        "Scales auto-slide velocity down steep terrain.  Covers "
+        "BOTH sub-states: state-4 (fast slide, shim at VA "
+        "0x8A095) and state-3 (slow slide, 4-byte constant at "
+        "VA 0x1AAB68).  1.0 = vanilla."
     ),
 )
 
@@ -145,26 +157,72 @@ def apply_slope_slide_speed_shim(
     *,
     scale: float = 1.0,
 ) -> bool:
-    """Install the slope-slide state-4 velocity shim.
+    """Install the slope-slide velocity patch.
+
+    Two sub-patches, both driven by the same ``scale``:
+
+    1. **State-4 (fast slide) shim** at VA 0x8A095.  Intercepts the
+       ``FLD [0x003902A0]`` and multiplies the loaded value by
+       ``scale`` before downstream velocity integration consumes it.
+       Hand-assembled trampoline; see module docstring for the
+       exact bytecode.
+    2. **State-3 (slow slide) constant overwrite** at VA 0x1AAB68.
+       Direct 4-byte float rewrite from vanilla ``2.0`` to
+       ``2.0 * scale``.  The constant has a single reader (the
+       FLD at VA 0x89B76 inside ``player_slope_slide_tick``); no
+       collateral impact elsewhere in the binary.
 
     Returns ``True`` on install / already-applied.  ``scale=1.0``
-    is a byte-identity op (``x * 1.0 == x``), but the shim still
+    is a byte-identity op for both sub-patches but the shim still
     installs so any future slider change takes effect immediately.
     """
     scale = float(scale)
     if scale <= 0:
         scale = 1e-4
 
+    # --- State-4 shim ---
     result = install_hand_shim(
         xbe_data, _SPEC,
         data_block=with_sentinel(struct.pack("<f", scale)),
         build_body=_build_shim_body,
         label=f"Slope-slide (state-4) speed: scale={scale:.3f}x",
     )
-    # None means either "already applied" (which is also success) or
-    # "drift" (which is failure).  The helper prints the appropriate
-    # diagnostic; we just translate to bool.
-    return result is not None or _is_already_applied(xbe_data)
+    shim_ok = (
+        result is not None or _is_already_applied(xbe_data))
+
+    # --- State-3 direct constant overwrite ---
+    from azurik_mod.patching.xbe import va_to_file
+    state3_off = va_to_file(_STATE3_CONST_VA)
+    current = bytes(xbe_data[state3_off:state3_off + 4])
+    if current == _STATE3_CONST_VANILLA_BYTES:
+        new_value = _VANILLA_STATE3_CONST * scale
+        xbe_data[state3_off:state3_off + 4] = struct.pack(
+            "<f", new_value)
+        print(f"  Slope-slide (state-3) constant: "
+              f"{_VANILLA_STATE3_CONST:.3f} -> {new_value:.3f} at "
+              f"VA 0x{_STATE3_CONST_VA:X}")
+    elif scale == 1.0:
+        # Expected no-op.
+        pass
+    else:
+        # Either already patched (idempotent re-apply at same
+        # scale) or drifted.  Check whether the current bytes
+        # decode to the expected scaled value — if yes, silent
+        # success; otherwise warn.
+        try:
+            cur_val = struct.unpack("<f", current)[0]
+        except Exception:  # noqa: BLE001
+            cur_val = float("nan")
+        expected = _VANILLA_STATE3_CONST * scale
+        if abs(cur_val - expected) < 1e-5:
+            print(f"  Slope-slide (state-3) already at "
+                  f"{cur_val:.3f}x (scale={scale:.3f})")
+        else:
+            print(f"  WARNING: state-3 constant at VA "
+                  f"0x{_STATE3_CONST_VA:X} drifted (got "
+                  f"{current.hex()}); skipping state-3 patch.")
+
+    return shim_ok
 
 
 def _is_already_applied(xbe_data: bytearray) -> bool:
@@ -184,12 +242,22 @@ def _is_already_applied(xbe_data: bytearray) -> bool:
 def _slope_slide_dynamic_whitelist(xbe: bytes) -> list[tuple[int, int]]:
     # Body layout: FLD [const] @ 0 ; FMUL [scale_va] @ 6 ; JMP @ 12.
     # Offset 6 uses opcode D8 0D (FMUL m32fp) — that's the scale ref.
-    return whitelist_for_hand_shim(
+    ranges = whitelist_for_hand_shim(
         xbe, _SPEC,
         data_abs32_offsets=(6,),
         data_abs32_opcode=b"\xD8\x0D",
         data_whitelist_size=8,
     )
+    # State-3 constant overwrite (round 11.10).  Always on the
+    # whitelist regardless of whether the apply actually ran —
+    # vanilla XBE still sees 4 bytes at the same file offset.
+    try:
+        from azurik_mod.patching.xbe import va_to_file
+        off = va_to_file(_STATE3_CONST_VA)
+        ranges.append((off, off + 4))
+    except Exception:  # noqa: BLE001
+        pass
+    return ranges
 
 
 # ---------------------------------------------------------------------------
@@ -210,9 +278,9 @@ def _custom_apply(
 FEATURE = register_feature(Feature(
     name="slope_slide_speed",
     description=(
-        "Scales the state-4 (fast) slope-slide velocity via a "
-        "17-byte shim at VA 0x8A095.  The state-3 (slow) slide "
-        "constant at 0x1AAB68 is untouched."
+        "Scales auto-slide velocity on steep terrain — covers "
+        "both state-3 (slow slide, constant at 0x1AAB68) and "
+        "state-4 (fast slide, shim at VA 0x8A095)."
     ),
     sites=SLOPE_SLIDE_SITES,
     apply=lambda xbe_data: None,

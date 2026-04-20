@@ -211,6 +211,13 @@ GRAVITY_PATCH = ParametricPatch(
     unit="m/s^2",
     encode=lambda g: struct.pack("<f", float(g)),
     decode=lambda b: struct.unpack("<f", b)[0],
+    description=(
+        "World gravity constant at VA 0x1980A8.  Earth is 9.8; "
+        "0.0 = everything floats.  Affects the player AND every "
+        "entity that uses the gravity term — projectiles, enemies, "
+        "physics objects.  Jump / wing-flap velocity scales with "
+        "√(2g·h), so halving gravity halves jump impulse."
+    ),
 )
 
 
@@ -236,6 +243,13 @@ WALK_SPEED_SCALE = ParametricPatch(
     unit="x",
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
+    description=(
+        "Multiplier on the ground walking-speed baseline (FLD "
+        "[EAX+0x40] at VA 0x85F62).  Vanilla = 7.0 units/s.  "
+        "2x ≈ double speed.  Does NOT affect rolling, swimming, "
+        "or airborne horizontal movement — those have their own "
+        "sliders."
+    ),
 )
 
 ROLL_SPEED_SCALE = ParametricPatch(
@@ -272,6 +286,12 @@ SWIM_SPEED_SCALE = ParametricPatch(
     unit="x",
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
+    description=(
+        "Multiplier on the swim-stroke FMUL at VA 0x8B7BF.  "
+        "Vanilla swim stroke = magnitude × 10.0 per frame; 2x "
+        "doubles the stroke distance.  Only affects the swim "
+        "state (in-water movement)."
+    ),
 )
 
 JUMP_SPEED_SCALE = ParametricPatch(
@@ -287,6 +307,12 @@ JUMP_SPEED_SCALE = ParametricPatch(
     unit="x",
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
+    description=(
+        "Scales the first-jump initial velocity (FLD at VA "
+        "0x89160).  v0 = √(2g·h) so the slider is LINEAR in "
+        "velocity — 2x ≈ 2x v0 ≈ 4x peak height.  Separate "
+        "from wing-flap impulse."
+    ),
 )
 
 AIR_CONTROL_SCALE = ParametricPatch(
@@ -302,6 +328,12 @@ AIR_CONTROL_SCALE = ParametricPatch(
     unit="x",
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
+    description=(
+        "Scales the horizontal air-control scalar entity[+0x140] "
+        "consumed by player_airborne_tick.  Affects how much "
+        "the stick moves the player sideways while airborne.  "
+        "Rewrites 7 imm32 sites (5 jump-init + 2 airborne-reinit)."
+    ),
 )
 
 FLAP_HEIGHT_SCALE = ParametricPatch(
@@ -337,7 +369,11 @@ FLAP_BELOW_PEAK_SCALE = ParametricPatch(
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
     description=(
-        "Scales 2nd+ flap v0 when >6m below peak. 2x = un-halved."
+        "Scales v0 for 2nd+ flaps when >6m below peak (the "
+        "descent-penalty halving branch).  Vanilla halves v0 "
+        "via ×0.5 FMUL; 2x cancels the halving (full v0), 4x "
+        "doubles it.  Does NOT affect the fuel drain in the "
+        "same branch — see flap_descent_fuel_cost_scale for that."
     ),
 )
 
@@ -479,16 +515,23 @@ FLAP_DESCENT_FUEL_COST_SCALE = ParametricPatch(
     size=0,
     original=b"",
     default=1.0,
-    slider_min=0.0,
+    slider_min=-10.0,
     slider_max=1.0,
-    slider_step=0.01,
+    slider_step=0.05,
     unit="x",
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
     description=(
-        "Scales the 100 fuel drain that fires on flaps taken "
-        ">6m below peak.  0.0 disables the drain — pair with "
-        "wing_flap_ceiling_scale so descent flaps stay usable."
+        "Scales the fuel cost of the descent-penalty flap "
+        "(fires when you've fallen >6m below peak).  Vanilla "
+        "cost = 100.0 fuel, but vanilla fuel_max is just 1-5 "
+        "(per armor air-level), so any positive scale triggers "
+        "the 'clear on low fuel' path and empties the gauge in "
+        "one flap.  Set to 0.0 to disable the drain entirely — "
+        "the first-flap cost of 1.0 still applies.  NEGATIVE "
+        "values refund fuel on every descent flap (scale=-1 "
+        "adds 100 fuel back), which effectively lets the gauge "
+        "refill mid-flight."
     ),
 )
 
