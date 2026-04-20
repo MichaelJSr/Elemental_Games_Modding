@@ -2,6 +2,63 @@
 
 ## Unreleased
 
+### Restored 4 shim-backed physics packs (round 11.8)
+
+User-requested restoration of the four shim packs deleted in
+round 10.  The round-11.6 forensic confirmed that the deletion
+rationale ("doesn't work in-game") was likely a GUI wiring
+false-negative — the backend silently dropped slider values for
+every pack other than `player_physics`, so the shims always
+applied with scale=1.0 (no-op) regardless of user input.
+
+Now that the generic `pack_params_json` channel (round 11.6)
+guarantees slider values reach `apply_pack`, users can directly
+validate whether each shim produces in-game effect.
+
+Restored packs (from git history at `d20c4dd^`):
+
+| Pack | Hook VA | Shim body | Slider |
+|---|---|---|---|
+| `flap_at_peak` | 0x89409 | 43 B | `flap_at_peak_scale` |
+| `root_motion_roll` | 0x866D9 | 134 B | `roll_speed_scale` |
+| `root_motion_climb` | 0x883FF | 128 B | `climb_speed_scale` |
+| `slope_slide_speed` | 0x8A095 | 17 B | `slope_slide_speed_scale` |
+
+All four register via `register_feature(...)` at pack import
+time from `azurik_mod/patches/__init__.py`.  60 pack-level
+tests restored alongside the source; all pass.
+
+**Clarification on `flap_at_peak` vs `flap_below_peak`**: users
+sometimes conflate them.  They target different sites in
+`wing_flap` with different semantics:
+
+- `flap_below_peak_scale` — scales the ×0.5 halving factor at
+  VA 0x893DD (descent-penalty branch, `fVar1 > 6`).
+- `flap_at_peak_scale` — enforces a v0 floor at the final FSTP
+  (VA 0x89409), bypassing the `min(fVar1, fh)` clamp near peak.
+
+Neither is redundant with the other; both are useful knobs.
+`flap_at_peak` is mostly SUPERSEDED by `wing_flap_ceiling_scale`
+(which raises the `peak_z` latch) but remains as an independent
+impulse-floor mechanism.
+
+**Header / registry sync**: five new VA anchors promoted in
+`azurik.h` (`AZURIK_SHIM_HOOK_FLAP_AT_PEAK_VA`,
+`AZURIK_SHIM_HOOK_ROLL_ANIM_APPLY_VA`,
+`AZURIK_SHIM_HOOK_CLIMB_ANIM_APPLY_VA`,
+`AZURIK_SHIM_HOOK_SLOPE_FAST_SLIDE_VA`,
+`AZURIK_ANCHOR_PEAK_Z_FSTP_VA`) to replace the old "deleted
+in round 10" comment block.  VA-audit drift test updated to
+cover them.  Ghidra plate comments pushed at each hook address
+documenting the restoration + the round-10 deletion history
++ the round-11.6 wiring-bug forensic.
+
+**`test_categories.py`** updated: the `slider_keys` expected
+list expands from 9 (player_physics only) to 13 (adds the 4
+restored shim packs' single virtual slider each).
+
+895 tests pass total (+60 from the restored pack tests).
+
 ### Wing-flap descent fuel-cost slider (round 11.7)
 
 Companion to `wing_flap_ceiling_scale`.  User reported that

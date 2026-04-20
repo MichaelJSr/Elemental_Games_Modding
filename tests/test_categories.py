@@ -298,34 +298,56 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         browser = PackBrowser(self._root, all_packs(), {},
                               pack_params=params)
         slider_keys = sorted(browser.sliders().keys())
-        # player_physics owns 9 working sliders as of round 11.7.
-        # Round 10 deleted the 4 shim-backed "per-flap" attempts
-        # (flap_at_peak, slope_slide_speed, root_motion_roll,
-        # root_motion_climb).  Round 11 added wing_flap_ceiling_scale
-        # (shim-backed, raises peak_z envelope).  Round 11.7 added
-        # flap_descent_fuel_cost_scale — direct 4-byte imm rewrite
-        # at VA 0x893CE, disables the descent-penalty fuel drain
-        # that otherwise clears the air-power gauge after one flap
-        # >6m below peak.
+        # Slider inventory as of round 11.8:
+        #
+        #   player_physics owns 9 sliders (direct byte patches +
+        #   hand-assembled shim for wing_flap_ceiling_scale).
+        #
+        #   flap_at_peak / slope_slide_speed / root_motion_roll /
+        #   root_motion_climb are shim-backed packs, each owning
+        #   their single virtual slider.  They were deleted in
+        #   round 10 after being misdiagnosed as "doesn't work
+        #   in-game" — the round-11.6 forensic showed that the GUI
+        #   backend was silently dropping all non-player_physics
+        #   pack_params entries, so the slider values never reached
+        #   apply_pack and the shims always ran with scale=1.0
+        #   (no-op).  Restored in round 11.8 now that the generic
+        #   pack_params_json channel ensures slider values
+        #   actually reach the apply pipeline.
+        #
+        #   wing_flap_count / no_fall_damage / infinite_fuel are
+        #   still deleted (boolean toggle packs, GUI-wired
+        #   correctly pre-delete — their deletion reason holds).
         self.assertEqual(
             slider_keys,
-            [("player_physics", "air_control_scale"),
-             ("player_physics", "flap_below_peak_scale"),
-             ("player_physics", "flap_descent_fuel_cost_scale"),
-             ("player_physics", "flap_height_scale"),
-             ("player_physics", "gravity"),
-             ("player_physics", "jump_speed_scale"),
-             ("player_physics", "swim_speed_scale"),
-             ("player_physics", "walk_speed_scale"),
-             ("player_physics", "wing_flap_ceiling_scale")])
+            [("flap_at_peak",       "flap_at_peak_scale"),
+             ("player_physics",     "air_control_scale"),
+             ("player_physics",     "flap_below_peak_scale"),
+             ("player_physics",     "flap_descent_fuel_cost_scale"),
+             ("player_physics",     "flap_height_scale"),
+             ("player_physics",     "gravity"),
+             ("player_physics",     "jump_speed_scale"),
+             ("player_physics",     "swim_speed_scale"),
+             ("player_physics",     "walk_speed_scale"),
+             ("player_physics",     "wing_flap_ceiling_scale"),
+             ("root_motion_climb",  "climb_speed_scale"),
+             ("root_motion_roll",   "roll_speed_scale"),
+             ("slope_slide_speed",  "slope_slide_speed_scale")])
         self.assertIn("player_physics", params)
         self.assertEqual(len(params["player_physics"]), 9)
         for pack_name in ("flap_at_peak", "slope_slide_speed",
-                          "root_motion_roll", "root_motion_climb",
-                          "wing_flap_count", "no_fall_damage",
+                          "root_motion_roll", "root_motion_climb"):
+            self.assertIn(pack_name, params,
+                msg=f"{pack_name} restored in round 11.8; its "
+                    f"single-slider bucket must be rendered")
+            self.assertEqual(len(params[pack_name]), 1,
+                msg=f"{pack_name} exposes exactly one slider")
+        for pack_name in ("wing_flap_count", "no_fall_damage",
                           "infinite_fuel"):
             self.assertNotIn(pack_name, params,
-                msg=f"{pack_name} was deleted in round 10")
+                msg=f"{pack_name} stays deleted (boolean toggle "
+                    f"pack, not affected by the round-11.6 slider "
+                    f"wiring bug)")
 
     def test_plugin_category_gets_its_own_tab(self):
         """Simulate a plugin: register a category + a pack referencing

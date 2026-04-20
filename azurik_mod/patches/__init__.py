@@ -70,6 +70,17 @@ from azurik_mod.patches.qol_skip_save_signature import (
     SKIP_SAVE_SIG_SITES,
     apply_skip_save_signature_patch,
 )
+# Shim-backed physics packs.  Restored in round 11.8 after the
+# round-11.6 forensic confirmed the round-10 deletions were
+# likely GUI-wiring false negatives (see docs/LEARNINGS.md
+# § "Retired physics sliders (round-10 purge)").  Each module's
+# side-effectful ``register_feature(...)`` call runs at import
+# time; the F401 noqa silences the unused-import warning since
+# these imports exist purely to wire registration.
+import azurik_mod.patches.flap_at_peak  # noqa: F401
+import azurik_mod.patches.slope_slide_speed  # noqa: F401
+import azurik_mod.patches.root_motion_roll  # noqa: F401
+import azurik_mod.patches.root_motion_climb  # noqa: F401
 # ``randomize`` has no byte patches — it surfaces the randomizer
 # shuffle pools as ``Feature(category="randomize")`` entries so
 # the category-aware GUI + CLI can treat them uniformly with the

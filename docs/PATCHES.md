@@ -43,6 +43,10 @@ register_category(Category(
 |----------------------|-------|------------|----------------|---------------|--------|
 | `fps_unlock`         | 50    | no         | `performance`  | fps           | [azurik_mod/patches/fps_unlock/](../azurik_mod/patches/fps_unlock/) |
 | `player_physics`     | 9     | no         | `player`       | physics, c-shim | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
+| `flap_at_peak`       | 1     | no         | `player`       | physics, c-shim, cheat | [azurik_mod/patches/flap_at_peak/](../azurik_mod/patches/flap_at_peak/) |
+| `root_motion_roll`   | 1     | no         | `player`       | physics, c-shim, root-motion | [azurik_mod/patches/root_motion_roll/](../azurik_mod/patches/root_motion_roll/) |
+| `root_motion_climb`  | 1     | no         | `player`       | physics, c-shim, root-motion | [azurik_mod/patches/root_motion_climb/](../azurik_mod/patches/root_motion_climb/) |
+| `slope_slide_speed`  | 1     | no         | `player`       | physics, c-shim | [azurik_mod/patches/slope_slide_speed/](../azurik_mod/patches/slope_slide_speed/) |
 | `qol_skip_logo`      | 1     | no         | `boot`         | c-shim        | [azurik_mod/patches/qol_skip_logo/](../azurik_mod/patches/qol_skip_logo/) |
 | `qol_gem_popups`     | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_gem_popups/](../azurik_mod/patches/qol_gem_popups/) |
 | `qol_other_popups`   | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_other_popups/](../azurik_mod/patches/qol_other_popups/) |

@@ -593,12 +593,6 @@ and tests use the new name.
 
 ### Retired physics sliders (round-10 purge, late April 2026)
 
-After in-game testing confirmed that the round-8 shim-revival
-attempts and several round-1..round-7 byte patches all produced
-zero observable effect, the following packs/sliders were
-deleted entirely.  They're documented here so future RE work
-doesn't repeat the same hook attempts.
-
 **Deleted: config-editor alternatives exist**
 
 | Pack | Attempted hooks | Use instead |
@@ -607,27 +601,51 @@ doesn't repeat the same hook attempts.
 | `infinite_fuel` | prologue RET at 0x842D0, NOP at 0x83DE3 | Config editor: `armor_properties.fuel_max` very large, or zero every `attacks_anims` Fuel multiplier. |
 | `wing_flap_count` | 47-byte dispatch shim at 0x89321 | Config editor: `armor_properties.Flaps` column. |
 
-**Deleted: no working hook found**
+### Restored in round 11.8 — previously misdiagnosed as broken
 
-| Pack | Hooks tried | Why they didn't work |
+The round-10 purge also deleted four shim packs that landed bytes
+cleanly but the user reported "no observable effect in-game".
+The round-11.6 forensic later revealed that the "no effect"
+symptom was caused by a GUI wiring bug: the backend's
+`build_randomized_iso` function only forwarded
+`pack_params["player_physics"]` to the randomizer, silently
+dropping slider values for every other pack.  The four shim
+packs thus always applied with scale=1.0 (no-op) regardless of
+what the user entered.
+
+Restored in round 11.8 now that the generic `pack_params_json`
+channel ensures slider values actually reach `apply_pack`:
+
+| Pack | Hook VA | Shim strategy |
 |---|---|---|
-| `flap_at_peak` | FSUB NOP @ 0x89381 · FLD-ST1 rewrite @ 0x8939F · final-FSTP shim @ 0x89409 | Near-peak v0 = 0 is latched by `peak_z` in `player_jump_init` @ 0x8915A and every attempted intercept downstream gets re-clamped by the state machine / airborne tick. |
-| `root_motion_roll` | CALL-wrap shim @ 0x866D9 | `anim_apply_translation` commits deltas via vtable+0xC0 **inside** the call; scaling param_1 after the call is too late. |
-| `root_motion_climb` | CALL-wrap shim @ 0x883FF | Same story as roll. |
-| `slope_slide_speed` | constant overwrite @ 0x1AAB68 · FLD shim @ 0x8A095 | State-4 fast slide uses a dynamic 500x multiplier computed from surface normal, not the static FLD we patched. |
+| `flap_at_peak` | 0x89409 | 43-byte shim; replays the final `FSTP [ESI+0x2C]` with `max(vanilla_v0, sqrt(2g·fh)·scale)` — enforces a v0 floor. Largely superseded by `wing_flap_ceiling_scale` but usable as an independent impulse-floor knob. |
+| `root_motion_roll` | 0x866D9 | 134-byte `__thiscall` wrap around `anim_apply_translation`; post-scales `param_1[0x6C..0x71]` translation deltas only when `PlayerInputState.flags & 0x40` (WHITE/BACK = roll) is set. |
+| `root_motion_climb` | 0x883FF | 128-byte `__thiscall` wrap, ungated (entire function is climb-state). |
+| `slope_slide_speed` | 0x8A095 | 17-byte `FLD [abs32]; FMUL [scale_va]; JMP back` — scales the state-4 fast-slide velocity scalar. |
 
-`player_physics` keeps stub `apply_flap_at_peak` /
-`apply_climb_speed` / `apply_slope_slide_speed` entry points
-for back-compat, but they always return `False` and never
-mutate bytes.
+**Caveat for users**: the round-10 deletion rationale included
+analysis suggesting the root-motion shims might hook too late
+(`anim_apply_translation` commits deltas via vtable+0xC0 inside
+the call), but that analysis was confounded with the wiring bug
+and was never independently validated. The restored packs may or
+may not actually produce in-game effect; they're back so users
+can test directly with their values actually reaching the apply
+pipeline.
 
-**The common pattern**: player state driven by the animation
-system or by per-frame state-machine code paths isn't cleanly
-byte-patchable.  A correct shim would need to hook *inside*
-`anim_apply_translation` (before the vtable+0xC0 commit) or
-intercept the state machine's root-motion integration at
-`FUN_00085700` / `player_physics_state_machine` — both of
-which we did not attempt.  Future work.
+`flap_at_peak` in particular is **related to but distinct from**
+`wing_flap_ceiling_scale`:
+
+| Slider | Hook | Semantics |
+|---|---|---|
+| `wing_flap_ceiling_scale` | FADD at 0x89154 in `player_jump_init` | Raises `peak_z` latch → wing_flap's `fVar1 = peak_z + fh - current_z` stays positive higher up → full v0 naturally |
+| `flap_at_peak` | FSTP at 0x89409 in `wing_flap` | Enforces `v0 ≥ sqrt(2g·fh)·scale` as a floor on the FINAL write, regardless of `fVar1` clamp |
+| `flap_below_peak_scale` | FMUL at 0x893DD in `wing_flap` | Scales the ×0.5 halving when `fVar1 > 6` (far below peak) |
+
+`wing_flap_ceiling_scale` and `flap_at_peak` both address the
+"flaps weaken near peak" problem but via different mechanisms —
+envelope expansion vs output-floor enforcement.  They compose
+cleanly; the floor catches any edge case where the envelope
+expansion doesn't land.
 
 ### Airborne horizontal-control speed (new April 2026)
 

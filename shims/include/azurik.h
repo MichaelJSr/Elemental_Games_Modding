@@ -1251,19 +1251,45 @@ enum PlayerPhysicsState {
  * docs/LEARNINGS.md.  Kept as an anchor for RE agents. */
 #define AZURIK_PATCH_FLAP_AT_PEAK_FLD_ST_VA      0x0008939F
 
-/* Shim-revival round (late April 2026) was attempted at five hook
- * sites listed below, but the resulting four packs (flap_at_peak,
- * slope_slide_speed, root_motion_roll, root_motion_climb) all
- * landed bytes cleanly yet produced no in-game effect and were
- * deleted in round 10.  Hook VAs kept here purely as RE anchors
- * for any future attempt:
- *
- *   0x00089409 — final z-velocity FSTP in wing_flap
- *   0x0008915A — peak-z write in player_jump_init
- *   0x000866D9 — CALL anim_apply_translation in player_walk_state
- *   0x000883FF — CALL anim_apply_translation in player_climb_tick
- *   0x0008A095 — state-4 fast-slide velocity FLD
+/* Shim-backed physics sliders (round-8 authorship; deleted in
+ * round 10 based on what the round-11.6 forensic showed was a GUI
+ * wiring bug; restored in round 11.8 now that the generic
+ * pack_params_json channel delivers the slider value all the way
+ * to apply_pack).  Each hook VA anchors the trampoline site for
+ * the named feature folder under ``azurik_mod/patches/<name>/``.
  */
+
+/* ``flap_at_peak`` — enforce a minimum v0 for subsequent flaps near
+ * peak_z, bypassing ``fVar2 = min(fVar1, flap_height)`` when fVar1
+ * is tiny.  Hooks the final z-velocity FSTP; shim replays the
+ * FSTP with ``max(vanilla_v0, sqrt(2g*flap_height)*scale)``.
+ * See docs/LEARNINGS.md § "Wing-flap v0 cap" for why vanilla's
+ * clamp is by-design.  Largely superseded by
+ * ``wing_flap_ceiling_scale`` (which raises peak_z instead), but
+ * kept as an independent "impulse floor" knob. */
+#define AZURIK_SHIM_HOOK_FLAP_AT_PEAK_VA        0x00089409
+
+/* ``root_motion_roll`` — scale WHITE-button roll translation deltas
+ * applied by ``anim_apply_translation``.  Hooks the CALL from
+ * inside ``player_walk_state`` (the ground-state tick that runs
+ * the roll animation). */
+#define AZURIK_SHIM_HOOK_ROLL_ANIM_APPLY_VA     0x000866D9
+
+/* ``root_motion_climb`` — same pattern as roll but ungated, hooked
+ * inside ``player_climb_tick``. */
+#define AZURIK_SHIM_HOOK_CLIMB_ANIM_APPLY_VA    0x000883FF
+
+/* ``slope_slide_speed`` — scale the state-4 fast-slide velocity
+ * computed from surface normal.  Hooks the FLD that loads the
+ * velocity scalar into the FPU. */
+#define AZURIK_SHIM_HOOK_SLOPE_FAST_SLIDE_VA    0x0008A095
+
+/* RE anchor only (no shim today): the peak_z FSTP in
+ * ``player_jump_init``.  ``wing_flap_ceiling_scale`` hooks the
+ * FADD that FEEDS this FSTP at 0x89154, so this VA is documented
+ * purely for cross-reference. */
+#define AZURIK_ANCHOR_PEAK_Z_FSTP_VA            0x0008915A
+
 #define AZURIK_PATCH_SLOPE_SLIDE_FMUL_VA        0x00089B76
 #define AZURIK_PATCH_SWIM_FMUL_VA               0x0008B7BF
 #define AZURIK_PATCH_AIR_CTRL_12_IMM32_VA       0x00083FAC

@@ -341,6 +341,15 @@ _PHYSICS_PATCH_SITE_VA_MACROS = frozenset({
     "AZURIK_PATCH_AIR_CTRL_9_IMM32_VA",
     "AZURIK_PATCH_CLIMB_FLD_PRIMARY_VA",
     "AZURIK_PATCH_CLIMB_FLD_SECONDARY_VA",
+    # Shim-hook anchors (round 11.8 restoration).  Covered by the
+    # per-pack apply tests but still need to be on this frozenset
+    # so the ``every anchor is audited somewhere`` drift test
+    # doesn't flag them as orphans.
+    "AZURIK_SHIM_HOOK_FLAP_AT_PEAK_VA",
+    "AZURIK_SHIM_HOOK_ROLL_ANIM_APPLY_VA",
+    "AZURIK_SHIM_HOOK_CLIMB_ANIM_APPLY_VA",
+    "AZURIK_SHIM_HOOK_SLOPE_FAST_SLIDE_VA",
+    "AZURIK_ANCHOR_PEAK_Z_FSTP_VA",
 })
 
 
