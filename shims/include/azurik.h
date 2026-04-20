@@ -1228,9 +1228,12 @@ enum PlayerPhysicsState {
  * CALL-style shim here: load flap_height, FMUL by user scale,
  * FADDP the entity.z already on ST(0), RET.  Net effect:
  * ``peak_z = entity.z + K * flap_height`` instead of
- * ``entity.z + flap_height`` — raises the wing-flap altitude
- * ceiling without touching per-flap v0 (orthogonal to
- * ``flap_height_scale`` / ``flap_below_peak_scale``). */
+ * ``entity.z + flap_height``.  The consumer in ``wing_flap``
+ * (FUN_00089300) computes ``fVar1 = peak_z + flap_height -
+ * current_z``, so the hard ceiling grows to
+ * ``(K+1) * flap_height`` above the jump's starting ground
+ * (vanilla K=1 → 2*flap_height).  Orthogonal to
+ * ``flap_height_scale`` / ``flap_below_peak_scale``. */
 #define AZURIK_PATCH_PEAK_Z_FADD_VA             0x00089154
 #define AZURIK_PATCH_FLAP_FLD_VA                0x000893AE
 #define AZURIK_PATCH_FLAP_SUB_FMUL_VA           0x000893DD

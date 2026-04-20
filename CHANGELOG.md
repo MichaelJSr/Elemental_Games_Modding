@@ -32,9 +32,13 @@ RET                 ; resume at 0x8915A (vanilla FSTP)
 
 Installed as a 5-byte `CALL rel32` + 1-byte NOP at the vanilla
 FADD.  Net effect:
-`peak_z = entity.z + ceiling_scale * flap_height`.  Orthogonal
-to `flap_height_scale` (per-flap v0) and `flap_below_peak_scale`
-(>6m halving) — the three compose cleanly.
+`peak_z = entity.z + K * flap_height`.  The wing-flap hard
+ceiling therefore becomes `(K+1) * flap_height` above the
+ground the player jumped from (vanilla K=1 → 2·flap_height,
+because `wing_flap`'s own formula adds another flap_height on
+top of peak_z).  Concretely: K=2 ≈ 1.5× vanilla headroom, K=5
+≈ 3×, K=10 ≈ 5.5×.  Orthogonal to `flap_height_scale`
+(per-flap v0) and `flap_below_peak_scale` (>6m halving).
 
 **Why this round works when rounds 7–10 didn't**: the earlier
 `flap_at_peak` shim attempts hooked *downstream* of peak_z (at

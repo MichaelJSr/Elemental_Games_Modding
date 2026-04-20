@@ -82,7 +82,7 @@ azurik-mod randomize-full --iso iso/Azurik.iso --seed 42 --output iso/Azurik_ran
 
 # Player-physics sliders without randomizing anything
 azurik-mod apply-physics --iso iso/Azurik.iso --output iso/Azurik_mod.iso \
-    --gravity 4.9 --walk-speed 1.5
+    --gravity 4.9 --walk-speed 1.5 --wing-flap-ceiling 3.0
 
 # Verify a built XBE against every registered patch pack
 azurik-mod verify-patches --xbe out/default.xbe --original stock.xbe --strict

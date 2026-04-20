@@ -448,11 +448,13 @@ WING_FLAP_CEILING_SCALE = ParametricPatch(
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
     description=(
-        "Multiplier on the flap_height term in the peak_z latch "
-        "at jump-init (VA 0x89154).  Raises the altitude ceiling "
-        "that caps subsequent-flap v0 without touching per-flap "
-        "impulse.  At 2x the player can flap up to ~2x higher "
-        "than the first flap; at 10x, effectively uncapped."
+        "Multiplies the flap_height term in the peak_z latch "
+        "written by player_jump_init (shim at VA 0x89154).  The "
+        "wing-flap hard ceiling becomes (K+1)*flap_height above "
+        "the ground the player jumped from, versus vanilla's "
+        "2*flap_height (K=1).  Concretely: K=1 vanilla, K=2 "
+        "~1.5x headroom, K=5 ~3x, K=10 ~5.5x.  Orthogonal to "
+        "the per-flap impulse sliders."
     ),
 )
 
@@ -1242,10 +1244,23 @@ def apply_wing_flap_ceiling(
     Post-RET control returns to the unchanged ``FSTP [ESI+0x164]``
     at VA 0x8915A, which writes the adjusted sum to ``peak_z``.
 
-    Net effect: ``peak_z = entity.z + ceiling_scale * flap_height``
-    instead of the vanilla ``entity.z + flap_height``.  Orthogonal
-    to ``flap_height_scale`` (per-flap v0) and ``flap_below_peak_scale``
-    (2nd+ flap halving factor) — those three knobs cleanly compose.
+    Net effect: ``peak_z = entity.z + K * flap_height`` instead of
+    vanilla's ``entity.z + flap_height``.  The consumer in
+    ``wing_flap`` (FUN_00089300) evaluates
+
+    .. code-block:: text
+
+        fVar1 = peak_z + flap_height - current_z
+
+    so the hard ceiling above the jump's starting ground becomes
+    ``(K+1) * flap_height`` (vanilla K=1 → 2 × flap_height).  See
+    ``docs/LEARNINGS.md`` § "Wing-flap ceiling — shim at jump_init"
+    for the full (K+1) math and why this hook point works where
+    the round-7..10 downstream attempts didn't.
+
+    Orthogonal to ``flap_height_scale`` (per-flap v0) and
+    ``flap_below_peak_scale`` (2nd+ flap halving factor) — those
+    three knobs cleanly compose.
 
     Returns ``True`` on apply, ``False`` on no-op / drift / already-
     installed.  Idempotent (second apply is a no-op thanks to the

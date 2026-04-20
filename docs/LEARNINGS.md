@@ -215,22 +215,61 @@ Round 10 deleted the `flap_at_peak` pack and made
 The `peak_z` latch in `player_jump_init` is the **source of
 truth** for the wing-flap altitude cap.  It has exactly one
 writer: the `FSTP [ESI+0x164]` at VA 0x8915A, fed by the
-`FADD [ESI+0x144]` at VA 0x89154 that adds `entity.flap_height`
-to `entity.z` (loaded by the `FLD [EDI+0x5C]` at VA 0x8914C).
-Nothing else in the binary writes `[ESI+0x164]` for a player-
-shaped entity (verified by scanning the full `.text` section
-for FSTP/FST/MOV patterns at that offset; one incidental hit
-at VA 0x026615 writes a different struct's field of the same
-offset, confirmed via absence of `[ESI+0x144]` / `[ESI+0x5C]`
-touches in that function).
+`FADD [ESI+0x144]` at VA 0x89154 that adds the per-jump
+`flap_height` field to `entity.z` (loaded by the `FLD [EDI+0x5C]`
+at VA 0x8914C).  Nothing else in the binary writes
+`[ESI+0x164]` for the player-shape state struct (verified by
+scanning the full `.text` section for FSTP/FST/MOV patterns at
+that offset; one incidental hit at VA 0x026615 writes a
+different struct's field of the same offset, confirmed via
+absence of `[ESI+0x144]` / `[ESI+0x5C]` touches in that
+function — and via the Ghidra decompilation showing both uses
+in isolation).
 
-Because there's no downstream re-derivation, scaling the
-`flap_height` term at the FADD source propagates cleanly into
-every subsequent `wing_flap` invocation: `fVar1 = peak_z +
-flap_height - current_z` gets the bigger `peak_z`, so `fVar2 =
-min(fVar1, flap_height)` stays positive further above ground,
-and the `sqrt(2g*fVar2)` v0 formula produces a real impulse
-instead of 0 near-peak.
+**Vanilla math** (from the `wing_flap` decompilation at VA
+0x89300):
+
+```c
+fVar1 = peak_z + flap_height - current_z;   // clamped >= 0
+fVar2 = min(fVar1, flap_height);
+v0    = sqrt(2 * 9.8 * fVar2);
+```
+
+With the vanilla `peak_z = entity.z_at_jump + flap_height`:
+
+- `fVar1 = entity.z_at_jump + 2·flap_height − current_z`
+- Hard ceiling where `fVar1 = 0`:
+  `current_z = entity.z_at_jump + 2·flap_height`
+
+So the vanilla altitude envelope above the ground the player
+jumped from is **2·flap_height**, not one — `wing_flap` adds
+`flap_height` again on top of `peak_z` inside its own formula.
+
+**Round 11 shim** at VA 0x89154 rewrites the FADD source with
+a scaled flap_height.  Ceiling becomes:
+
+```
+peak_z_patched = entity.z_at_jump + K · flap_height
+fVar1_patched  = (K + 1) · flap_height − (current_z − entity.z_at_jump)
+ceiling_patched = entity.z_at_jump + (K + 1) · flap_height
+```
+
+- `K = 1` → `2·flap_height` (vanilla)
+- `K = 2` → `3·flap_height` (≈1.5× vanilla ceiling headroom)
+- `K = 5` → `6·flap_height` (≈3×)
+- `K = 10` → `11·flap_height` (≈5.5×)
+- `K = 20` (slider max) → `21·flap_height` (≈10.5×)
+
+i.e. the "multiplier" applies to `peak_z`, and the observable
+ceiling grows as `(K+1)/2` relative to vanilla.  Users who want
+"double the ceiling" should set `K ≈ 3`, not `K = 2`.
+
+Because there's no downstream re-derivation of `peak_z`, this
+scaling propagates cleanly into every subsequent `wing_flap`
+invocation: a bigger `peak_z` widens `fVar1`, `fVar2 = min(…,
+flap_height)` stays positive further above ground, and the
+`sqrt(2g·fVar2)` v0 formula produces a real impulse instead of
+0 near-vanilla-peak.
 
 Why rounds 7–10 all failed and this one doesn't: the earlier
 shims hooked **downstream** of the peak_z computation (at the
@@ -259,7 +298,6 @@ CALL's return-address push).  After RET the shim returns to
 the unchanged `FSTP [ESI+0x164]` at 0x8915A, which writes the
 adjusted sum to `peak_z`.
 
-Net effect: `peak_z = entity.z + ceiling_scale * flap_height`.
 The slider is orthogonal to `flap_height_scale` (per-flap v0)
 and `flap_below_peak_scale` (>6m-below halving) — the three
 compose cleanly.

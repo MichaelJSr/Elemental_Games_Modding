@@ -1847,6 +1847,49 @@ def cmd_inspect_physics(args):
                 _FLAP_SUBSEQUENT_SITE_VA,
                 _FLAP_SUBSEQUENT_SITE_VANILLA, b"\xD8\x0D")
 
+    # wing_flap_ceiling shim at VA 0x89154.  Report [VANILLA] when
+    # the FADD [ESI+0x144] is still in place, [PATCHED (K=...)]
+    # when a CALL rel32 trampoline + NOP has been installed and we
+    # can decode the scale float from the landed shim body.
+    from azurik_mod.patches.player_physics import (
+        _PEAK_Z_HOOK_VA,
+        _PEAK_Z_HOOK_VANILLA,
+        _PEAK_Z_SHIM_BODY_SIZE,
+    )
+    pk_off = va_to_file(_PEAK_Z_HOOK_VA)
+    pk_bytes = bytes(xbe_bytes[pk_off:pk_off + 6])
+    if pk_bytes == _PEAK_Z_HOOK_VANILLA:
+        print(f"  {'ceiling (shim)':14s} [VANILLA]  "
+              f"VA 0x{_PEAK_Z_HOOK_VA:X} (FADD [ESI+0x144])")
+    elif pk_bytes[0] == 0xE8 and pk_bytes[5] == 0x90:
+        rel32 = _struct.unpack("<i", pk_bytes[1:5])[0]
+        shim_va = _PEAK_Z_HOOK_VA + 5 + rel32
+        shim_fo = _resolve(shim_va)
+        if shim_fo is not None:
+            # Shim body: FLD..6..FMUL..12..FADDP..14..RET.  FMUL
+            # operand at body offset 8 (opcode 6 + modrm 2).
+            body = xbe_bytes[shim_fo:shim_fo + _PEAK_Z_SHIM_BODY_SIZE]
+            fmul_va = _struct.unpack("<I", body[8:12])[0]
+            scale_fo = _resolve(fmul_va)
+            if scale_fo is not None:
+                k = _struct.unpack(
+                    "<f", xbe_bytes[scale_fo:scale_fo + 4])[0]
+                ceiling_mult = (k + 1) / 2
+                print(f"  {'ceiling (shim)':14s} [PATCHED]  "
+                      f"K={k:.3f}  (ceiling = {k + 1:.2f}× "
+                      f"flap_height, {ceiling_mult:.2f}× vanilla)")
+            else:
+                print(f"  {'ceiling (shim)':14s} [PATCHED?] "
+                      f"shim @ VA 0x{shim_va:X} but scale operand "
+                      f"0x{fmul_va:X} not mappable")
+        else:
+            print(f"  {'ceiling (shim)':14s} [PATCHED?] "
+                  f"trampoline at VA 0x{_PEAK_Z_HOOK_VA:X} but "
+                  f"shim entry 0x{shim_va:X} not mappable")
+    else:
+        print(f"  {'ceiling (shim)':14s} [DRIFTED]  "
+              f"got {pk_bytes.hex()}")
+
     # Air-control: 5 primary imm32 sites (all vanilla 9.0) + 2
     # secondary imm32 sites inside FUN_00083F90 (12.0 and 9.0).
     print()
