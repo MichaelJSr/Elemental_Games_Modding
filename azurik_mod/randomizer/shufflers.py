@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from azurik_mod.config import REGISTRY_PATH
-from azurik_mod.iso.pack import GAMEDATA_REL, CONFIG_XBR_REL  # noqa: F401 (re-export)
+from azurik_mod.iso.pack import GAMEDATA_REL
 
 # ---------------------------------------------------------------------------
 # Registry + binary helpers

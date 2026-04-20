@@ -2873,16 +2873,69 @@ register(VanillaSymbol(
     calling_convention="stdcall",
     arg_bytes=8,
     doc=(
-        "Fall-damage tiered dispatcher.  __stdcall(float "
-        "fall_height, float fall_speed).  Called from "
-        "player_airborne_tick's landing transition (VA 0x8C173).  "
-        "Reads 7 cvars from config.xbr on first call ('fall min "
-        "velocity', 'fall height 1/2/3', 'fall damage 1/2/3') "
-        "cached as static doubles at 0x00390228..290.  Applies "
-        "damage via FUN_00044640 when thresholds are breached.  "
-        "Our no_fall_damage v2 rewrites the prologue to "
-        "'XOR AL,AL ; RET 8 ; NOP' \u2014 always returns 0 without "
-        "running tier selector."
+        "Fall-damage tiered dispatcher (surface-landing path).  "
+        "__stdcall(float fall_height, float fall_speed).  Called "
+        "from player_landing at VA 0x8C173.  Reads 7 cvars "
+        "from config.xbr on first call ('fall min velocity', "
+        "'fall height 1/2/3', 'fall damage 1/2/3') cached as "
+        "static doubles at 0x00390228..290.  Applies damage via "
+        "apply_damage (FUN_00044640) when thresholds are "
+        "breached.  Our no_fall_damage v2 rewrites the prologue "
+        "to 'XOR AL,AL ; RET 8 ; NOP' \u2014 always returns 0 "
+        "without running tier selector."
+    ),
+))
+
+register(VanillaSymbol(
+    name="fall_death_dispatch",
+    va=0x0008BE00,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc=(
+        "Fall-damage dispatcher (no-surface landing path).  "
+        "__stdcall(int entity).  Called from player_landing at "
+        "VA 0x8C095 when [entity+0x38] (surface-contact slot) "
+        "is NULL \u2014 the player landed without resolving a "
+        "floor.  Reads the cached 'fall height 4' cvar, "
+        "computes fall magnitude, calls apply_damage if it "
+        "exceeds threshold, plays 'fx/sound/player/fallingdeath' "
+        "SFX, sets death flag ([entity+0x16C] |= 1).  Our "
+        "no_fall_damage v2 rewrites the prologue to "
+        "'XOR AL,AL ; RET 4' \u2014 closes the second fall-damage "
+        "leak user reported as 'light damage still fires' after "
+        "v1 (which only patched FUN_0008AB70)."
+    ),
+))
+
+register(VanillaSymbol(
+    name="apply_damage",
+    va=0x00044640,
+    calling_convention="cdecl",
+    arg_bytes=12,
+    doc=(
+        "Generic damage-apply routine.  Called from ~22 sites "
+        "spanning combat, enemy impact, and environmental "
+        "hazards.  Fall-damage callers (VA 0x8AD9B inside "
+        "fall_damage_dispatch and VA 0x8BF59 inside "
+        "fall_death_dispatch) are both bypassed by our "
+        "no_fall_damage v2 pack.  NOT directly patched \u2014 "
+        "touching this shared routine would affect non-fall "
+        "damage too."
+    ),
+))
+
+register(VanillaSymbol(
+    name="player_landing",
+    va=0x0008C080,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc=(
+        "Player landing handler.  Dispatches to "
+        "fall_death_dispatch (no-surface path, VA 0x8C095) "
+        "or fall_damage_dispatch (surface path, VA 0x8C173) "
+        "based on [entity+0x38] (surface-contact slot).  "
+        "Called per-frame from player_airborne_tick's "
+        "transition-to-ground logic."
     ),
 ))
 

@@ -35,6 +35,25 @@ def va_to_file(va: int) -> int:
     raise ValueError(f"VA 0x{va:X} is below all known sections")
 
 
+def resolve_va_to_file(xbe_data: bytes, va: int) -> int | None:
+    """Dynamic VA→file-offset resolver that parses the section table
+    from ``xbe_data`` instead of relying on the Azurik-specific
+    :data:`XBE_SECTIONS` hard-coding.
+
+    Returns ``None`` if ``va`` is below every section or maps to an
+    uninitialised region beyond the raw image.  Used by whitelist
+    callbacks that need to follow injected-float pointers without
+    assuming Azurik's exact section layout.
+    """
+    _, secs = parse_xbe_sections(xbe_data)
+    for s in secs:
+        if s["vaddr"] <= va < s["vaddr"] + s["vsize"]:
+            delta = va - s["vaddr"]
+            if delta < s["raw_size"]:
+                return s["raw_addr"] + delta
+    return None
+
+
 def parse_xbe_sections(data: bytes) -> tuple[int, list[dict[str, Any]]]:
     """Parse an XBE header from `data` and return (base_addr, sections).
 

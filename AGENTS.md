@@ -150,7 +150,7 @@ byte isn't in the list, the test fails.  Either:
 - **Reverse-engineering notes**: [`docs/LEARNINGS.md`](docs/LEARNINGS.md)
 - **Tool roadmap** (what's shipped vs planned): [`docs/TOOLING_ROADMAP.md`](docs/TOOLING_ROADMAP.md)
 - **Save-file format investigation**: [`docs/SAVE_FORMAT.md`](docs/SAVE_FORMAT.md)
-- **Decompile / NXDK bridge plans**: [`docs/DECOMP.md`](docs/DECOMP.md), [`docs/D2_NXDK.md`](docs/D2_NXDK.md)
+- **Decompile reference** (XBE section map + notable functions): [`docs/DECOMP.md`](docs/DECOMP.md)
 - **Plugin authoring (third-party pack distribution)**: [`docs/PLUGINS.md`](docs/PLUGINS.md)
 
 When in doubt, [`docs/INDEX.md`](docs/INDEX.md) is the complete

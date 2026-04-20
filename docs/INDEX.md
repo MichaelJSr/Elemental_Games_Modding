@@ -64,10 +64,8 @@ table when you're looking for something specific.
 - [`D1_EXTEND.md`](D1_EXTEND.md) — Runtime xboxkrnl export
   resolver design (how `azurik_kernel.h` works at shim-apply
   time).
-- [`D2_NXDK.md`](D2_NXDK.md) — NXDK bridge plan (not yet
-  implemented — future work for higher-level C helpers).
-- [`DECOMP.md`](DECOMP.md) — Decompile-to-C plan + current state
-  (stubbed; Ghidra-export path still in design).
+- [`DECOMP.md`](DECOMP.md) — XBE section map + notable function
+  reference (FPS patch territory, input, collision, globals).
 
 ### Reference data
 

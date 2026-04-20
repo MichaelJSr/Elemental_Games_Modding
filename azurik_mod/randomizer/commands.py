@@ -824,13 +824,6 @@ def cmd_randomize(args):
             sys.exit(1)
 
 
-# NOTE: DIRECT_SEARCH_NAMES now lives in shufflers.py (it's consumed by
-# _find_all_entities_in_level there).  Re-exported below for any CLI
-# handlers that iterate the list directly.
-from azurik_mod.randomizer.shufflers import DIRECT_SEARCH_NAMES  # noqa: F401
-
-
-
 # ---------------------------------------------------------------------------
 # Full game randomizer: major + keys + gems + barriers + connections + QoL
 # ---------------------------------------------------------------------------

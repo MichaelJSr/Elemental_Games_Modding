@@ -394,14 +394,7 @@ def _wing_flap_count_dynamic_whitelist(
 
     ranges: list[tuple[int, int]] = [(hook_off, hook_off + 5)]
 
-    def _resolve_va_to_file(va: int) -> int | None:
-        _, secs = parse_xbe_sections(xbe)
-        for s in secs:
-            if s["vaddr"] <= va < s["vaddr"] + s["vsize"]:
-                delta = va - s["vaddr"]
-                if delta < s["raw_size"]:
-                    return s["raw_addr"] + delta
-        return None
+    from azurik_mod.patching.xbe import resolve_va_to_file
 
     # If a JMP trampoline is installed, follow it to the shim and
     # whitelist the shim body + referenced int constants.
@@ -410,7 +403,7 @@ def _wing_flap_count_dynamic_whitelist(
         if patch[:1] == b"\xE9":
             rel32 = struct.unpack("<i", patch[1:5])[0]
             shim_va = _WING_FLAP_HOOK_VA + 5 + rel32
-            shim_off = _resolve_va_to_file(shim_va)
+            shim_off = resolve_va_to_file(xbe, shim_va)
             if shim_off is not None:
                 ranges.append((shim_off, shim_off + 47))
                 # Shim body parse: pull the 3 `A1 <abs32>` sites.
@@ -426,7 +419,7 @@ def _wing_flap_count_dynamic_whitelist(
                         inj_va = struct.unpack(
                             "<I",
                             body[a1_offset + 1:a1_offset + 5])[0]
-                        inj_off = _resolve_va_to_file(inj_va)
+                        inj_off = resolve_va_to_file(xbe, inj_va)
                         if inj_off is not None:
                             ranges.append((inj_off, inj_off + 4))
 

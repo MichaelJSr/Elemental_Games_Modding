@@ -5,8 +5,9 @@
 > statically imports.
 >
 > **See also**: [`SHIMS.md`](./SHIMS.md) for the overall platform
-> picture; [`D2_NXDK.md`](./D2_NXDK.md) for the larger D3D / DSound /
-> XAPI integration that's deferred behind this milestone.
+> picture.  A full NXDK (D3D / DSound / XAPI) integration is
+> deferred behind this milestone — no shipped shim has demanded it
+> yet.
 
 ---
 
@@ -166,7 +167,7 @@ and "name → ordinal → name" round-trip consistency.
 | Call a function Azurik already imports (DbgPrint, NtClose, KeQueryPerformanceCounter, KeWaitForSingleObject, ...) | **D1 static** — automatic via `azurik_kernel.h`. Single indirect jump. |
 | Call a function Azurik doesn't import but that's common (DbgBreakPoint, KeEnterCriticalRegion, RtlZeroMemory, MmIsAddressValid, ...) | **D1-extend** — automatic via `azurik_kernel_extend.h`. First call ~1 µs, subsequent calls ~1 ns. |
 | Call a vanilla Azurik function (play_movie_fn, entity_lookup, ...) | **A3 vanilla-symbol registry** — declared in `azurik_vanilla.h`. Single CALL; no stub at all. |
-| Call D3D8 / DSound / XAPI (native Xbox SDK) | **Not yet — this is D2** (see [`D2_NXDK.md`](./D2_NXDK.md)). |
+| Call D3D8 / DSound / XAPI (native Xbox SDK) | **Not yet — deferred as a future NXDK integration (D2)**. |
 
 The dispatch is entirely automatic: write `#include
 "azurik_kernel_extend.h"` and call the function.  The layout

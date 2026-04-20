@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+### Shim-header sync + code cleanup (late April 2026)
+
+- Sync'd `azurik.h`, `azurik_vanilla.h`, `vanilla_symbols.py`, and
+  Ghidra with the new findings from the previous round:
+  - Added `FUN_0008BE00` (`fall_death_dispatch`, the no-surface
+    fall-damage path) — function-entry VA, extern declaration,
+    `VanillaSymbol` registry entry, Ghidra rename + plate
+    comment.
+  - Added `FUN_0008C080` (`player_landing`, the landing
+    dispatcher that branches to the two fall-damage paths).
+  - Added `FUN_00044640` (`apply_damage`, the generic damage-
+    apply routine shared by combat + fall damage) as
+    documented-but-not-patched.
+  - Added `AZURIK_PATCH_FLAP_AT_PEAK_FSUB_VA` patch-site anchor
+    in `azurik.h` with drift-audit coverage in
+    `tests/test_va_audit.py`.
+- Consolidated three duplicate `_find_repo_root()` helpers
+  (`ghidra_sync.py`, `ghidra_coverage.py`, `shim_inspect.py`)
+  into a single `find_repo_root()` exported from
+  `azurik_mod/xbe_tools/__init__.py`; each module now imports
+  the shared helper.
+- Consolidated two duplicate `_resolve_va_to_file()` helpers
+  (`player_physics/__init__.py`, `wing_flap_count/__init__.py`)
+  into a single `resolve_va_to_file(xbe_data, va)` function
+  exported from `azurik_mod/patching/xbe.py` next to the
+  existing `va_to_file()` + `parse_xbe_sections()` primitives.
+- Removed unused imports: `CONFIG_XBR_REL` (re-export with no
+  consumer) in `shufflers.py`, and `DIRECT_SEARCH_NAMES`
+  (re-export with no consumer) in `commands.py` — the latter's
+  stale migration NOTE comment was removed too.
+- Collapsed `from ... import RANDOMIZER_POOLS  # noqa: F401`
+  into `import azurik_mod.patches.randomize  # noqa: F401` to
+  signal the side-effect-only purpose explicitly.
+- Deleted `docs/D2_NXDK.md` (deferred NXDK-integration plan,
+  11 KB of speculative design); the concept is preserved in a
+  one-line mention inside `docs/SHIMS.md` / `docs/D1_EXTEND.md`
+  for when a shim concretely needs native D3D / DSound access.
+- Rewrote `README.md` for concision (275 → 172 lines):
+  trimmed redundant prose, removed the `examples/`-folder
+  reference (long retired), collapsed doc-map table into the
+  header link block.
+- 785 tests + 761 subtests pass (unchanged from the previous
+  round).
+
 ### Player packs — round 5 (flap-at-peak + fall-damage second path)
 
 Another user report cycle surfaced two issues:

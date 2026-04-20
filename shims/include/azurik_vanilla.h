@@ -1233,21 +1233,71 @@ void player_slope_slide_tick(void);
 __attribute__((stdcall))
 unsigned char player_swim_tick(int context);
 
-/* Fall-damage dispatcher.  Called from ``player_airborne_tick``'s
- * landing-transition path (VA 0x8C173) with ``param_1 = fall
- * height`` and ``param_2 = fall velocity``.  Reads 7 cvars
- * from ``config.xbr`` on first call ("fall min velocity",
- * "fall height 1/2/3", "fall damage 1/2/3") and caches them
- * as static doubles at ``_DAT_00390228..00390290``.  Applies
- * damage via ``FUN_00044640`` when thresholds are breached.
+/* Fall-damage dispatcher (surface landing path).  Called from
+ * ``player_landing`` at VA 0x8C173 with
+ * ``param_1 = fall_height`` and ``param_2 = fall_speed``.
+ * Reads 7 cvars from ``config.xbr`` on first call
+ * ("fall min velocity", "fall height 1/2/3",
+ * "fall damage 1/2/3") cached as static doubles at
+ * ``_DAT_00390228..00390290``.  Applies damage via
+ * ``apply_damage`` when thresholds are breached.
  *
- * Our ``no_fall_damage`` patch (April 2026 v2) rewrites the
- * prologue to ``XOR AL, AL ; RET 8 ; NOP`` — always return 0
- * (no damage) without running the tier selector.
+ * Our ``no_fall_damage`` v2 patch rewrites the prologue to
+ * ``XOR AL, AL ; RET 8 ; NOP`` — always return 0 without
+ * running the tier selector.
  *
  * Vanilla VA: 0x0008AB70  (mangled: _fall_damage_dispatch@8) */
 __attribute__((stdcall))
 unsigned char fall_damage_dispatch(float fall_height, float fall_speed);
+
+/* Fall-death dispatcher (no-surface landing path).  Called
+ * from ``player_landing`` at VA 0x8C095 when
+ * ``[entity+0x38]`` (surface-contact slot) is NULL — i.e.,
+ * the player landed without resolving a floor (falling off
+ * the world edge, water splash at low surface, etc.).
+ *
+ * Reads the cached "fall height 4" cvar, computes fall
+ * magnitude from (peak_z − current_z) and vertical velocity,
+ * calls ``apply_damage`` if magnitude exceeds threshold, plays
+ * "fx/sound/player/fallingdeath", and sets the entity death
+ * flag (``[entity+0x16C] |= 1``).
+ *
+ * Our ``no_fall_damage`` v2 patch rewrites the prologue to
+ * ``XOR AL, AL ; RET 4`` — closes the second fall-damage
+ * leak (user reported "light damage still fires" with v1,
+ * which only patched FUN_0008AB70).
+ *
+ * Vanilla VA: 0x0008BE00  (mangled: _fall_death_dispatch@4) */
+__attribute__((stdcall))
+unsigned char fall_death_dispatch(int entity);
+
+/* Generic damage-apply routine.  Called from ~22 sites spanning
+ * combat, enemy impact, and environmental hazards.  For fall
+ * damage specifically, called from ``fall_damage_dispatch``
+ * (VA 0x8AD9B) and ``fall_death_dispatch`` (VA 0x8BF59).
+ * __stdcall (callers push 12 bytes of args and rely on callee
+ * to clean — verified by zero ESP adjustment at 0x8BF5E after
+ * the call).
+ *
+ * NOT directly patched by any pack — the ``no_fall_damage``
+ * pack bypasses its two fall-related callers instead of
+ * touching this shared routine.
+ *
+ * Vanilla VA: 0x00044640  (mangled: _apply_damage@12) */
+__attribute__((stdcall))
+void apply_damage(int entity, int kind, unsigned char caller_flag);
+
+/* Player landing handler.  Dispatches based on
+ * ``[entity+0x38]`` (surface-contact slot):
+ *   - null → ``fall_death_dispatch`` (VA 0x8C095)
+ *   - non-null → ``fall_damage_dispatch`` (VA 0x8C173)
+ *
+ * Both damage paths are bypassed by the ``no_fall_damage`` v2
+ * pack (prologue rewrites of each dispatcher).
+ *
+ * Vanilla VA: 0x0008C080  (mangled: _player_landing@8) */
+__attribute__((stdcall))
+void player_landing(int entity, int landing_ctx);
 
 /* Fuel consumer.  __thiscall where ``this = armor_mgr``.
  * Decrements ``armor_mgr.fuel_current`` (``[this+0x24]``) by

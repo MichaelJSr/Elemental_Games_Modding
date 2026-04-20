@@ -350,9 +350,8 @@ them non-recursive.
   `XGRPH` as named sections in the XBE).  Those functions are
   vanilla-Azurik code from the shim platform's perspective — expose
   specific ones via `vanilla_symbols.py` + `azurik_vanilla.h` as
-  demand arises.  D2 (see [`D2_NXDK.md`](./D2_NXDK.md)) would wire
-  them in as a group via the Xbox SDK, but is deferred until a
-  shim concretely needs them.
+  demand arises.  A full NXDK (Xbox SDK) bridge is deferred until a
+  shim concretely needs native D3D8 / DSound access.
 - **Escape hatch preserved**.  The legacy byte-patch form of every
   migrated pack stays behind an env var (`AZURIK_SKIP_LOGO_LEGACY=1`
   etc.) so users on a host without the i386 clang toolchain can
@@ -546,11 +545,9 @@ table whenever a tier lands or a new candidate becomes concrete.
    note + when-to-use guide in [`D1_EXTEND.md`](./D1_EXTEND.md).
 
 2. **NXDK integration (D2).**  Full Xbox SDK (D3D8, DSound, XAPI,
-   XGraphics, ...) wired into the shim toolchain.  Design note +
-   migration plan + concrete milestones in
-   [`docs/D2_NXDK.md`](./D2_NXDK.md).  Deferred because D1-extend
-   (runtime kernel-export resolver) covers the kernel-API side,
-   and no shipped shim has demanded native D3D / DSound yet.
+   XGraphics, ...) wired into the shim toolchain.  Deferred because
+   D1-extend (runtime kernel-export resolver) covers the kernel-API
+   side, and no shipped shim has demanded native D3D / DSound yet.
 
 3. **Unicorn-backed test harness (B2).**  Static byte checks only
    prove the shim LANDS correctly; they don't prove the runtime

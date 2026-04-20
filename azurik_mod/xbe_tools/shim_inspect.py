@@ -314,12 +314,7 @@ def format_inspection(r: ShimInspection) -> str:
     return "\n".join(lines)
 
 
-def _find_repo_root() -> Path:
-    here = Path(__file__).resolve().parent
-    for p in (here, *here.parents):
-        if (p / "pyproject.toml").exists() and (p / "azurik_mod").is_dir():
-            return p
-    return Path.cwd()
+from azurik_mod.xbe_tools import find_repo_root as _find_repo_root  # noqa: E402
 
 
 __all__ = [

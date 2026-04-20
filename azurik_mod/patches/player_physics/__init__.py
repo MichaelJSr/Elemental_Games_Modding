@@ -1378,15 +1378,9 @@ def _player_speed_dynamic_whitelist(
 
     # Dynamic: if a site has been rewritten to `FLD/FMUL [abs32]`,
     # follow the abs32 pointer through the section table and whitelist
-    # a 4-byte range for the injected float constant.
-    def _resolve_va_to_file(va: int) -> int | None:
-        _, secs = parse_xbe_sections(xbe)
-        for s in secs:
-            if s["vaddr"] <= va < s["vaddr"] + s["vsize"]:
-                delta = va - s["vaddr"]
-                if delta < s["raw_size"]:
-                    return s["raw_addr"] + delta
-        return None
+    # a 4-byte range for the injected float constant.  Uses the
+    # shared resolver from ``azurik_mod.patching.xbe``.
+    from azurik_mod.patching.xbe import resolve_va_to_file
 
     follow_sites: list[tuple[int, bytes]] = [
         (walk_off, b"\xD9\x05"),   # FLD  [abs32] (walk base)
@@ -1419,7 +1413,7 @@ def _player_speed_dynamic_whitelist(
             patch = xbe[site_off:site_off + 6]
             if patch[:2] == prefix:
                 va = struct.unpack("<I", patch[2:6])[0]
-                fo = _resolve_va_to_file(va)
+                fo = resolve_va_to_file(xbe, va)
                 if fo is not None:
                     ranges.append((fo, fo + 4))
 

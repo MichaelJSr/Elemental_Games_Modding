@@ -1149,6 +1149,9 @@ enum PlayerPhysicsState {
 #define AZURIK_FUN_PLAYER_SWIM_TICK_VA          0x0008B700
 #define AZURIK_FUN_PLAYER_PHYSICS_STATE_VA      0x0008CCC0
 #define AZURIK_FUN_FALL_DAMAGE_DISPATCH_VA      0x0008AB70
+#define AZURIK_FUN_FALL_DEATH_DISPATCH_VA       0x0008BE00
+#define AZURIK_FUN_PLAYER_LANDING_VA            0x0008C080
+#define AZURIK_FUN_APPLY_DAMAGE_VA              0x00044640
 #define AZURIK_FUN_CONSUME_FUEL_VA              0x000842D0
 #define AZURIK_FUN_PLAYER_AIRBORNE_REINIT_VA    0x00083F90
 #define AZURIK_FUN_PLAYER_INPUT_TICK_VA         0x00084940
@@ -1164,6 +1167,13 @@ enum PlayerPhysicsState {
 #define AZURIK_PATCH_JUMP_FLD_VA                0x00089160
 #define AZURIK_PATCH_FLAP_FLD_VA                0x000893AE
 #define AZURIK_PATCH_FLAP_SUB_FMUL_VA           0x000893DD
+/* Binary-toggle NOP site (late April 2026): when patched to
+ * 3 × NOP, removes the `fVar1 = min(remaining, flap_height)`
+ * cap inside `wing_flap` so subsequent flaps near peak get
+ * full v0 = sqrt(2g × flap_height) regardless of how far
+ * above peak the player has risen.  Target of the
+ * `flap_at_peak_scale` slider. */
+#define AZURIK_PATCH_FLAP_AT_PEAK_FSUB_VA       0x00089381
 #define AZURIK_PATCH_SLOPE_SLIDE_FMUL_VA        0x00089B76
 #define AZURIK_PATCH_SWIM_FMUL_VA               0x0008B7BF
 #define AZURIK_PATCH_AIR_CTRL_12_IMM32_VA       0x00083FAC
