@@ -23,6 +23,7 @@ from azurik_mod.patches.fps_unlock import (
 )
 from azurik_mod.patches.player_physics import (
     AIR_CONTROL_SCALE,
+    CLIMB_SPEED_SCALE,
     FLAP_HEIGHT_SCALE,
     GRAVITY_PATCH,
     JUMP_SPEED_SCALE,
@@ -32,6 +33,7 @@ from azurik_mod.patches.player_physics import (
     SWIM_SPEED_SCALE,
     WALK_SPEED_SCALE,
     apply_air_control_speed,
+    apply_climb_speed,
     apply_flap_height,
     apply_jump_speed,
     apply_player_physics,
@@ -61,10 +63,6 @@ from azurik_mod.patches.qol_skip_save_signature import (
     AZURIK_VERIFY_SAVE_SIG_VA,
     SKIP_SAVE_SIG_SITES,
     apply_skip_save_signature_patch,
-)
-from azurik_mod.patches.enable_dev_menu import (
-    DEV_MENU_SITES,
-    apply_enable_dev_menu_patch,
 )
 
 # ``randomize`` has no byte patches — it surfaces the randomizer
@@ -116,6 +114,7 @@ __all__ = [
     "OTHER_POPUP_OFFSETS",
     "PICKUP_ANIM_SPEC",
     "AIR_CONTROL_SCALE",
+    "CLIMB_SPEED_SCALE",
     "FLAP_HEIGHT_SCALE",
     "JUMP_SPEED_SCALE",
     "PLAYER_PHYSICS_SITES",
@@ -129,6 +128,7 @@ __all__ = [
     "SWIM_SPEED_SCALE",
     "WALK_SPEED_SCALE",
     "apply_air_control_speed",
+    "apply_climb_speed",
     "apply_flap_height",
     "apply_fps_patches",
     "apply_gem_popups_patch",

@@ -1298,6 +1298,7 @@ def cmd_randomize_full(args):
         air_control_scale = float(
             getattr(args, 'player_air_control_scale', None) or 1.0)
         flap_scale = float(getattr(args, 'player_flap_scale', None) or 1.0)
+        climb_scale = float(getattr(args, 'player_climb_scale', None) or 1.0)
         player_char = getattr(args, 'player_character', None)
         xbe_path = extract_dir / "default.xbe"
 
@@ -1316,7 +1317,8 @@ def cmd_randomize_full(args):
                                or swim_scale != 1.0
                                or jump_scale != 1.0
                                or air_control_scale != 1.0
-                               or flap_scale != 1.0),
+                               or flap_scale != 1.0
+                               or climb_scale != 1.0),
         }
 
         needs_xbe = any(_FLAG_PACKS.values()) or bool(player_char)
@@ -1337,6 +1339,7 @@ def cmd_randomize_full(args):
                     "jump_speed_scale": jump_scale,
                     "air_control_scale": air_control_scale,
                     "flap_height_scale": flap_scale,
+                    "climb_speed_scale": climb_scale,
                 },
             }
 
@@ -1742,10 +1745,10 @@ def cmd_inspect_physics(args):
 
     Dumps: which sliders are vanilla vs patched, the injected float
     values for walk/roll/swim/jump, gravity, roll force-always-on
-    state, and enable_dev_menu trampoline status.  Useful for
-    verifying that a built ISO actually contains the patches you
-    expect — if 'doesn't work' in gameplay, run this first to
-    confirm bytes are where they should be.
+    state, and the rolling/climbing state-speed constants.
+    Useful for verifying that a built ISO actually contains the
+    patches you expect — if 'doesn't work' in gameplay, run this
+    first to confirm bytes are where they should be.
     """
     import struct as _struct
     from pathlib import Path as _Path
@@ -1753,13 +1756,12 @@ def cmd_inspect_physics(args):
     from azurik_mod.patching.xbe import parse_xbe_sections, va_to_file
     from azurik_mod.patches.player_physics import (
         _AIR_CONTROL_IMM32_VANILLA, _AIR_CONTROL_SITE_VAS,
+        _CLIMB_CONST_VA, _CLIMB_CONST_VANILLA,
         _FLAP_SITE_VA, _FLAP_SITE_VANILLA,
         _JUMP_SITE_VA, _JUMP_SITE_VANILLA,
-        _ROLL_EDGE_LOCK_PATCH, _ROLL_EDGE_LOCK_VA,
-        _ROLL_FORCE_ON_1_PATCH, _ROLL_FORCE_ON_1_VA,
-        _ROLL_FORCE_ON_2_PATCH, _ROLL_FORCE_ON_2_VA,
-        _ROLL_SITE_VA, _ROLL_SITE_VANILLA,
+        _ROLL_CONST_VA, _ROLL_CONST_VANILLA,
         _SWIM_SITE_VA, _SWIM_SITE_VANILLA,
+        _VANILLA_CLIMB_SPEED, _VANILLA_ROLL_SPEED,
         _WALK_SITE_VA, _WALK_SITE_VANILLA,
     )
 
@@ -1820,14 +1822,34 @@ def cmd_inspect_physics(args):
 
     _check_site("walk",
                 _WALK_SITE_VA, _WALK_SITE_VANILLA, b"\xD9\x05")
-    _check_site("roll (FMUL)",
-                _ROLL_SITE_VA, _ROLL_SITE_VANILLA, b"\xD8\x0D")
     _check_site("swim",
                 _SWIM_SITE_VA, _SWIM_SITE_VANILLA, b"\xD8\x0D")
     _check_site("jump (FLD)",
                 _JUMP_SITE_VA, _JUMP_SITE_VANILLA, b"\xD9\x05")
     _check_site("flap (FADD)",
                 _FLAP_SITE_VA, _FLAP_SITE_VANILLA, b"\xD8\x05")
+
+    # Roll + climb: direct-constant patches (4-byte floats).
+    def _check_constant(label, va, vanilla_bytes, vanilla_value):
+        off = va_to_file(va)
+        current = bytes(xbe_bytes[off:off + 4])
+        if current == vanilla_bytes:
+            print(f"  {label:14s} [VANILLA]  const VA 0x{va:X} = "
+                  f"{vanilla_value:.3f}")
+        else:
+            try:
+                val = _struct.unpack("<f", current)[0]
+                print(f"  {label:14s} [PATCHED]  const VA "
+                      f"0x{va:X} = {val:.4f}  (= "
+                      f"{val / vanilla_value:.3f}× vanilla)")
+            except Exception:  # noqa: BLE001
+                print(f"  {label:14s} [DRIFTED]  "
+                      f"bytes = {current.hex()}")
+
+    _check_constant("roll (ground)", _ROLL_CONST_VA,
+                    _ROLL_CONST_VANILLA, _VANILLA_ROLL_SPEED)
+    _check_constant("climb", _CLIMB_CONST_VA,
+                    _CLIMB_CONST_VANILLA, _VANILLA_CLIMB_SPEED)
 
     # Air-control: 5 imm32 sites.  Each either has the vanilla 9.0
     # imm32 or has been rewritten to 9.0 × air_control_scale.
@@ -1844,48 +1866,6 @@ def cmd_inspect_physics(args):
             print(f"  VA 0x{site_va:06X} [PATCHED]  "
                   f"imm32 = {val:.4f}  (= "
                   f"{val / 9.0:.3f}× vanilla)")
-
-    # Roll aux: edge-lock + force-on sites.
-    print("\nRoll auxiliary patches:")
-    el_fo = va_to_file(_ROLL_EDGE_LOCK_VA)
-    el = bytes(xbe_bytes[el_fo:el_fo + 2])
-    el_state = ("[NOPED]  " if el == _ROLL_EDGE_LOCK_PATCH
-                else "[VANILLA]")
-    print(f"  edge-lock     {el_state} bytes = {el.hex()} "
-          f"(VA 0x{_ROLL_EDGE_LOCK_VA:X})")
-    f1_fo = va_to_file(_ROLL_FORCE_ON_1_VA)
-    f1 = bytes(xbe_bytes[f1_fo:f1_fo + 2])
-    f1_state = ("[PATCHED]" if f1 == _ROLL_FORCE_ON_1_PATCH
-                else "[VANILLA]")
-    print(f"  force-on #1   {f1_state} bytes = {f1.hex()} "
-          f"(VA 0x{_ROLL_FORCE_ON_1_VA:X})")
-    f2_fo = va_to_file(_ROLL_FORCE_ON_2_VA)
-    f2 = bytes(xbe_bytes[f2_fo:f2_fo + 2])
-    f2_state = ("[PATCHED]" if f2 == _ROLL_FORCE_ON_2_PATCH
-                else "[VANILLA]")
-    print(f"  force-on #2   {f2_state} bytes = {f2.hex()} "
-          f"(VA 0x{_ROLL_FORCE_ON_2_VA:X})")
-
-    # Dev-menu trampoline at VA 0x53750.
-    print("\nenable_dev_menu trampoline:")
-    hook_fo = va_to_file(0x00053750)
-    hook = bytes(xbe_bytes[hook_fo:hook_fo + 7])
-    if hook[0] == 0xE9 and hook[5:7] == b"\x90\x90":
-        rel = _struct.unpack("<i", hook[1:5])[0]
-        shim_va = 0x00053750 + 5 + rel
-        _, secs = parse_xbe_sections(xbe_bytes)
-        for s in secs:
-            if s["vaddr"] <= shim_va < s["vaddr"] + s["vsize"]:
-                print(f"  [INSTALLED] hook bytes = {hook.hex()} "
-                      f"-> JMP to VA 0x{shim_va:X} "
-                      f"(section {s['name']!r})")
-                break
-        else:
-            print(f"  [INSTALLED?] hook bytes = {hook.hex()} "
-                  f"-> VA 0x{shim_va:X} NOT IN A LOADED "
-                  f"SECTION — patch may be broken")
-    else:
-        print(f"  [VANILLA]   hook bytes = {hook.hex()}")
 
     print()
 
@@ -1917,6 +1897,7 @@ def cmd_apply_physics(args):
     air_control_scale = float(
         getattr(args, "air_control_speed", None) or 1.0)
     flap_scale = float(getattr(args, "flap_height", None) or 1.0)
+    climb_scale = float(getattr(args, "climb_speed", None) or 1.0)
 
     if (gravity is None
             and walk_scale == 1.0
@@ -1924,11 +1905,13 @@ def cmd_apply_physics(args):
             and swim_scale == 1.0
             and jump_scale == 1.0
             and air_control_scale == 1.0
-            and flap_scale == 1.0):
+            and flap_scale == 1.0
+            and climb_scale == 1.0):
         print("No physics changes requested.  "
               "Pass --gravity, --walk-speed, --roll-speed (or "
               "legacy --run-speed), --swim-speed, --jump-speed, "
-              "--air-control-speed, and/or --flap-height.")
+              "--air-control-speed, --flap-height, and/or "
+              "--climb-speed.")
         return
 
     def _patch_xbe_in_place(xbe_path: Path) -> None:
@@ -1943,6 +1926,7 @@ def cmd_apply_physics(args):
             air_control_scale=(air_control_scale
                                if air_control_scale != 1.0 else None),
             flap_scale=flap_scale if flap_scale != 1.0 else None,
+            climb_scale=climb_scale if climb_scale != 1.0 else None,
         )
         xbe_path.write_bytes(data)
 

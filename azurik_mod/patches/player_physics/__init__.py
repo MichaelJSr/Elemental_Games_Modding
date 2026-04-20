@@ -313,6 +313,21 @@ FLAP_HEIGHT_SCALE = ParametricPatch(
     decode=lambda b: struct.unpack("<d", b)[0],
 )
 
+CLIMB_SPEED_SCALE = ParametricPatch(
+    name="climb_speed_scale",
+    label="Player climbing speed",
+    va=0,
+    size=0,
+    original=b"",
+    default=1.0,
+    slider_min=0.1,
+    slider_max=10.0,
+    slider_step=0.05,
+    unit="x",
+    encode=lambda v: struct.pack("<d", float(v)),
+    decode=lambda b: struct.unpack("<d", b)[0],
+)
+
 # Back-compat alias: the old name `RUN_SPEED_SCALE` shipped before we
 # realised the 3.0 multiplier is the roll boost, not a run modifier.
 # Keep as an import alias so any external code still works.
@@ -328,49 +343,60 @@ _WALK_SITE_VANILLA = bytes([
     0xD9, 0x40, 0x40,          # FLD dword [EAX+0x40]
 ])
 
-_ROLL_SITE_VA = 0x000849E4
-_ROLL_SITE_VANILLA = bytes([
-    0xD8, 0x0D,
-    0xBC, 0x25, 0x1A, 0x00,    # FMUL dword [0x001A25BC]
-])
-# Back-compat aliases (_RUN_SITE_* was the old name).
-_RUN_SITE_VA = _ROLL_SITE_VA
-_RUN_SITE_VANILLA = _ROLL_SITE_VANILLA
-
-# WHITE-button edge-lock inside FUN_00084f90.  The 2-byte ``JNZ +8``
-# at VA 0x00085200 tests ``piVar7[0x4d]`` (the WHITE edge-lock byte)
-# and, when set, skips the flag-setting code path — making WHITE a
-# one-frame pulse.  NOPing this JNZ makes WHITE-held produce a
-# SUSTAINED magnitude boost for every frame the button is down.
-_ROLL_EDGE_LOCK_VA = 0x00085200
-_ROLL_EDGE_LOCK_VANILLA = bytes.fromhex("7508")   # JNZ +8
-_ROLL_EDGE_LOCK_PATCH = bytes.fromhex("9090")     # NOP NOP
-
-# Force-always-on override.  Even after the edge-lock NOP, bit 0x40
-# still needs ONE of WHITE or RIGHT_THUMB (R3 click) to be pressed —
-# which some users' xemu input configs don't wire up at all, making
-# ``roll_scale`` invisible to them.  To guarantee the slider is
-# observable in gameplay, we additionally patch the two-instruction
-# tail of the bit-0x40 XOR-update block to force DL |= 0x40 every
-# frame:
+# -----------------------------------------------------------
+# Rolling / sliding ground-state speed (v3 April 2026).
 #
-#   VA 0x85214: ``24 40`` (AND AL, 0x40) -> ``B0 40`` (MOV AL, 0x40)
-#     - Now AL is always 0x40, regardless of button state.
-#   VA 0x8521C: ``32 D0`` (XOR DL, AL) -> ``0A D0`` (OR  DL, AL)
-#     - XOR would TOGGLE bit 0x40 per frame (causing flicker).
-#       Switching to OR makes bit 0x40 sticky-set — written to
-#       [ESI+0x20] as "on" every frame.
+# The previous roll slider rewrote the FMUL at VA 0x849E4 (the
+# WHITE-button 3× magnitude boost inside FUN_00084940) and
+# additionally force-always-on'd bit 0x40 of the input flags.
+# That approach had a subtle coupling bug: the boosted magnitude
+# then propagated into FUN_00089480's airborne physics (via
+# ``entity[+0x140] × magnitude``), so cranking roll_scale made
+# mid-air horizontal travel MUCH faster, which users
+# reasonably perceived as "gravity changed / longer air-time".
 #
-# Each is a 2-byte byte-for-byte rewrite; other bits in the flag
-# byte are untouched (each bit 0x01..0x20 has its own XOR-update
-# block earlier in FUN_00084f90 with its own MOV DL, BL / XOR DL).
-_ROLL_FORCE_ON_1_VA = 0x00085214
-_ROLL_FORCE_ON_1_VANILLA = bytes.fromhex("2440")   # AND AL, 0x40
-_ROLL_FORCE_ON_1_PATCH   = bytes.fromhex("b040")   # MOV AL, 0x40
+# v3 replaces that approach entirely.  ``FUN_00089A70`` is the
+# true rolling/sliding GROUND-state physics function (reached
+# via state machine cases 3 / 4 from FUN_0008CCC0).  Its
+# rolling-velocity FMUL at VA 0x00089B76 reads the constant
+# ``[0x001AAB68]`` (vanilla value: 2.0) — and that constant
+# has EXACTLY ONE reader in the entire binary (the site we
+# want to scale).  Single reader means we can patch the
+# 4-byte float IN PLACE with zero shim overhead and zero
+# collateral damage to other systems.
+#
+# Semantics under v3:
+#   rolling_ground_velocity = dt × magnitude × (2.0 × roll_scale)
+# Only the rolling/sliding ground state is affected.  Walking,
+# airborne physics, swimming, jumping, and the WHITE button
+# behaviour are left at vanilla.
+_ROLL_CONST_VA = 0x001AAB68
+_VANILLA_ROLL_SPEED = 2.0
+_ROLL_CONST_VANILLA = struct.pack("<f", _VANILLA_ROLL_SPEED)
 
-_ROLL_FORCE_ON_2_VA = 0x0008521C
-_ROLL_FORCE_ON_2_VANILLA = bytes.fromhex("32d0")   # XOR DL, AL
-_ROLL_FORCE_ON_2_PATCH   = bytes.fromhex("0ad0")   # OR  DL, AL
+# Back-compat aliases — these symbols were public in the pre-v3
+# roll approach.  Keep them pointing at the new target so any
+# pinned external code that imports them keeps working.
+_ROLL_SITE_VA = _ROLL_CONST_VA   # semantic shift: now the CONST,
+                                  # not the FMUL instruction
+_ROLL_SITE_VANILLA = _ROLL_CONST_VANILLA
+_RUN_SITE_VA = _ROLL_CONST_VA
+_RUN_SITE_VANILLA = _ROLL_CONST_VANILLA
+
+
+# -----------------------------------------------------------
+# Climbing-state speed (new April 2026).
+#
+# ``FUN_00087F80`` (climbing / hanging-ledge state) reads a
+# climbing-speed baseline from the .rdata float at VA
+# ``0x001980E4`` (value ``2.0``).  The constant has EXACTLY TWO
+# readers, BOTH inside FUN_00087F80 (VAs 0x87FA7 and 0x88357 —
+# the main climb-velocity FLD and a secondary climb-retarget
+# FLD).  Patching the constant directly scales ALL climb
+# motion uniformly with no collateral.
+_CLIMB_CONST_VA = 0x001980E4
+_VANILLA_CLIMB_SPEED = 2.0
+_CLIMB_CONST_VANILLA = struct.pack("<f", _VANILLA_CLIMB_SPEED)
 
 _SWIM_SITE_VA = 0x0008B7BF
 _SWIM_SITE_VANILLA = bytes([
@@ -479,6 +505,7 @@ def apply_player_physics(
     jump_scale: float | None = None,
     air_control_scale: float | None = None,
     flap_scale: float | None = None,
+    climb_scale: float | None = None,
     # Back-compat alias: callers that still pass run_scale get
     # transparently routed to roll_scale (the new name).
     run_scale: float | None = None,
@@ -486,7 +513,7 @@ def apply_player_physics(
 ) -> None:
     """Apply the XBE-side portion of the player physics pack.
 
-    All seven adjustments operate on ``default.xbe`` directly.
+    All eight adjustments operate on ``default.xbe`` directly.
     Speed sliders no longer touch ``config.xbr`` — the values
     there turned out to be dead data (see module docstring).
     """
@@ -518,6 +545,10 @@ def apply_player_physics(
     if f != 1.0:
         apply_flap_height(xbe_data, flap_scale=f)
 
+    c = 1.0 if climb_scale is None else float(climb_scale)
+    if c != 1.0:
+        apply_climb_speed(xbe_data, climb_scale=c)
+
 
 def apply_player_speed(
     xbe_data: bytearray,
@@ -529,40 +560,27 @@ def apply_player_speed(
 ) -> bool:
     """Patch ``default.xbe`` so the player walks / rolls at custom speeds.
 
-    ``walk_scale`` and ``roll_scale`` are INDEPENDENT multipliers on
-    vanilla walking and vanilla rolling respectively (see module
-    docstring for the derivation).  ``1.0 / 1.0`` is a byte-identity
-    no-op; anything else rewrites both player-specific instruction
-    sites.
+    v3 (April 2026) — ``walk_scale`` and ``roll_scale`` are
+    INDEPENDENT, UNCOUPLED multipliers on distinct physics systems:
 
-    How it works:
+    * ``walk_scale`` scales the walking-state velocity via an
+      injected FLD constant (replaces ``CritterData.run_speed`` =
+      7.0 for the player only).
+    * ``roll_scale`` scales the rolling/sliding GROUND-state
+      velocity by overwriting the single-reader constant at VA
+      ``0x001AAB68`` (vanilla 2.0) used by ``FUN_00089A70``.  This
+      targets ONLY the ground-roll physics — walking, airborne
+      flight, jumping, and swimming are completely unaffected.
+      (Prior versions used an FMUL rewrite + force-always-on in
+      ``FUN_00084f90``, which coupled roll_scale to airborne
+      horizontal speed via the shared ``magnitude`` variable.
+      That coupling is what made roll_scale look like "gravity
+      got weaker" to users — it's gone in v3.)
 
-    1. Derives two injected floats from BOTH sliders:
-
-         inject_base      = _VANILLA_PLAYER_BASE_SPEED × walk_scale
-         inject_roll_mult = _VANILLA_ROLL_MULTIPLIER   × roll_scale / walk_scale
-
-       so the game formula ``base × stick_mag`` (walking) and
-       ``base × mult × stick_mag`` (rolling) yield
-       ``walk_scale × vanilla_walking`` and ``roll_scale ×
-       vanilla_rolling`` respectively — each slider scales only its
-       own vanilla baseline.
-    2. Injects both floats into the XBE via the shim-landing
-       infrastructure (``_carve_shim_landing`` — same mechanism C-shim
-       trampolines use).
-    3. Rewrites ``MOV EAX,[EBP+0x34]; FLD [EAX+0x40]`` at VA 0x85F62
-       into ``FLD dword [abs walk_va]`` (6 bytes).  The base now
-       comes from ``inject_base`` instead of ``CritterData.run_speed``
-       (which is 7.0 at runtime for the player).
-    4. Rewrites ``FMUL dword [0x001A25BC]`` at VA 0x849E4 into
-       ``FMUL dword [abs roll_va]``.  The shared 3.0 constant at
-       0x001A25BC is left untouched — all 45 other readers keep
-       vanilla behaviour.
-
-    Returns True when the patch was applied, False if both scales are
-    at the default of 1.0 (no-op) or if the patch sites have drifted
-    from vanilla (already patched / game update / etc.) — in the drift
-    case a warning is printed and the buffer is left untouched.
+    Returns True when the patch was applied, False if both scales
+    are at the default of 1.0 (no-op) or if the patch sites have
+    drifted from vanilla — in the drift case a warning is printed
+    and the buffer is left untouched.
     """
     # Back-compat: accept old run_scale kwarg.  Explicit roll_scale
     # wins if the caller set both.
@@ -572,20 +590,10 @@ def apply_player_speed(
     if walk_scale == 1.0 and roll_scale == 1.0:
         return False
 
-    # Late import to avoid the circular dependency that would happen if
-    # apply.py imported this module at top level.
-    from azurik_mod.patching.apply import _carve_shim_landing
-
     walk_off = va_to_file(_WALK_SITE_VA)
-    roll_off = va_to_file(_ROLL_SITE_VA)
+    roll_off = va_to_file(_ROLL_CONST_VA)
 
     # --- Safety: ensure vanilla bytes at the sites we plan to touch.
-    # When roll_scale == 1.0 we leave the roll site alone entirely
-    # (no FMUL rewrite, no force-on), so we don't need to check its
-    # bytes — and leaving them at vanilla means the roll FMUL keeps
-    # its original WHITE/R3-gated behaviour as a pure no-op (×1.0
-    # would be equivalent anyway but saves a dynamic_whitelist
-    # entry).
     if walk_scale != 1.0 and (
         bytes(xbe_data[walk_off:walk_off + 6]) != _WALK_SITE_VANILLA
     ):
@@ -595,111 +603,82 @@ def apply_player_speed(
               f"{bytes(xbe_data[walk_off:walk_off + 6]).hex()})")
         return False
     if roll_scale != 1.0 and (
-        bytes(xbe_data[roll_off:roll_off + 6]) != _ROLL_SITE_VANILLA
+        bytes(xbe_data[roll_off:roll_off + 4]) != _ROLL_CONST_VANILLA
     ):
-        print(f"  WARNING: player_speed — roll site at VA "
-              f"0x{_ROLL_SITE_VA:X} already patched or drifted, "
+        print(f"  WARNING: player_speed — roll constant at VA "
+              f"0x{_ROLL_CONST_VA:X} already patched or drifted, "
               f"skipping (got "
-              f"{bytes(xbe_data[roll_off:roll_off + 6]).hex()})")
+              f"{bytes(xbe_data[roll_off:roll_off + 4]).hex()}, "
+              f"expected {_ROLL_CONST_VANILLA.hex()})")
         return False
 
-    # --- Inject our two per-player floats -----------------------------
-    # Engine formulas (paired with our force-always-on roll patch
-    # applied further below):
-    #     velocity = inject_base × magnitude × direction
-    #     magnitude = raw_stick × (inject_roll_mult when flag set,
-    #                              else 1.0)
-    # With force-always-on making the flag perpetually set and our
-    # simple slider semantics:
-    #     walk_scale = walking-speed multiplier
-    #     roll_scale = EXTRA walking-speed multiplier (stacks)
-    # we choose:
-    #     inject_base      = _VANILLA_PLAYER_BASE_SPEED × walk_scale
-    #     inject_roll_mult = roll_scale    (NOT 3 × roll_scale;
-    #                                       the 3× "roll" factor was
-    #                                       the original WHITE-button
-    #                                       boost — by redirecting
-    #                                       the FMUL target to our
-    #                                       injected constant, we
-    #                                       replace the 3× with a
-    #                                       clean user-controlled
-    #                                       multiplier.)
-    # Result:
-    #     walking = 7 × walk_scale × roll_scale × raw_stick × direction
-    # Short-circuit at (walk=1, roll=1) preserves vanilla bytes.
-    safe_walk_scale = max(_WALK_SCALE_MIN, float(walk_scale))
-    inject_base = _VANILLA_PLAYER_BASE_SPEED * safe_walk_scale
-    inject_roll_mult = float(roll_scale)
-
-    # Only patch the walk site when walk_scale != 1.0, and only
-    # patch the roll site when roll_scale != 1.0.  Keeps the
-    # "one slider changed, other site unchanged" invariant that
-    # makes verify-patches --strict diffs clean and lets users
-    # opt into one axis at a time without collateral bytes.
     walk_va = None
-    roll_va = None
+    roll_new_value: float | None = None
+
     if walk_scale != 1.0:
+        # Late import to avoid the circular dep at module-load.
+        from azurik_mod.patching.apply import _carve_shim_landing
+
+        safe_walk_scale = max(_WALK_SCALE_MIN, float(walk_scale))
+        inject_base = _VANILLA_PLAYER_BASE_SPEED * safe_walk_scale
         walk_value_bytes = struct.pack("<f", inject_base)
         _, walk_va = _carve_shim_landing(xbe_data, walk_value_bytes)
         # FLD dword [abs walk_va]   encoded as D9 05 <va>
         xbe_data[walk_off:walk_off + 6] = (
             b"\xD9\x05" + struct.pack("<I", walk_va))
-    if roll_scale != 1.0:
-        roll_value_bytes = struct.pack("<f", inject_roll_mult)
-        _, roll_va = _carve_shim_landing(xbe_data, roll_value_bytes)
-        # FMUL dword [abs roll_va]   encoded as D8 0D <va>
-        xbe_data[roll_off:roll_off + 6] = (
-            b"\xD8\x0D" + struct.pack("<I", roll_va))
-
-    # --- When roll_scale != 1.0, also disable the WHITE-button
-    # edge-lock AND force bit 0x40 to be set every frame so the
-    # slider is visible in gameplay regardless of the user's
-    # controller configuration (some xemu input configs don't
-    # wire WHITE / R3 at all, which would make the slider
-    # invisible otherwise).
-    if roll_scale != 1.0:
-        # 1. NOP the WHITE edge-lock so if the user DOES press
-        # WHITE, it gives sustained (not one-frame) boost.
-        el_off = va_to_file(_ROLL_EDGE_LOCK_VA)
-        el_current = bytes(xbe_data[el_off:el_off + 2])
-        if el_current == _ROLL_EDGE_LOCK_VANILLA:
-            xbe_data[el_off:el_off + 2] = _ROLL_EDGE_LOCK_PATCH
-        elif el_current != _ROLL_EDGE_LOCK_PATCH:
-            print(f"  WARNING: player_speed — roll edge-lock at VA "
-                  f"0x{_ROLL_EDGE_LOCK_VA:X} drifted (got "
-                  f"{el_current.hex()}); skipping that sub-patch.")
-
-        # 2. Force-always-on: make bit 0x40 set every frame
-        # regardless of button state.  Two tiny rewrites in the
-        # XOR-update tail of FUN_00084f90 produce ``DL |= 0x40``
-        # as the final write to [ESI+0x20].  Without this, users
-        # whose xemu config doesn't route WHITE/R3 correctly
-        # would see no effect from the slider.
-        f1_off = va_to_file(_ROLL_FORCE_ON_1_VA)
-        f2_off = va_to_file(_ROLL_FORCE_ON_2_VA)
-        f1_current = bytes(xbe_data[f1_off:f1_off + 2])
-        f2_current = bytes(xbe_data[f2_off:f2_off + 2])
-        if (f1_current == _ROLL_FORCE_ON_1_VANILLA
-                and f2_current == _ROLL_FORCE_ON_2_VANILLA):
-            xbe_data[f1_off:f1_off + 2] = _ROLL_FORCE_ON_1_PATCH
-            xbe_data[f2_off:f2_off + 2] = _ROLL_FORCE_ON_2_PATCH
-            print(f"  Player roll force-on: enabled — bit 0x40 "
-                  f"always set, so magnitude is multiplied by "
-                  f"the injected value every frame of movement.")
-        elif not (f1_current == _ROLL_FORCE_ON_1_PATCH
-                  and f2_current == _ROLL_FORCE_ON_2_PATCH):
-            print(f"  WARNING: player_speed — roll force-on sites "
-                  f"drifted (f1={f1_current.hex()}, "
-                  f"f2={f2_current.hex()}); skipping.")
-
-    if walk_va is not None:
         print(f"  Player walk speed: {walk_scale:.3f}x vanilla  "
               f"(injected base = {inject_base:.3f}, "
               f"VA 0x{walk_va:X})")
-    if roll_va is not None:
-        print(f"  Player roll speed: {roll_scale:.3f}x vanilla  "
-              f"(injected roll mult = "
-              f"{inject_roll_mult:.3f}, VA 0x{roll_va:X})")
+
+    if roll_scale != 1.0:
+        # Direct constant overwrite — no shim, no trampoline.
+        # VA 0x001AAB68 is a single-reader .rdata float, so we
+        # can swap vanilla 2.0 for 2.0 × roll_scale in-place and
+        # the change takes effect on every frame of ground-roll
+        # physics without any instruction rewriting.
+        roll_new_value = _VANILLA_ROLL_SPEED * float(roll_scale)
+        xbe_data[roll_off:roll_off + 4] = (
+            struct.pack("<f", roll_new_value))
+        print(f"  Player roll (ground) speed: {roll_scale:.3f}x vanilla  "
+              f"(constant {_VANILLA_ROLL_SPEED:.3f} -> "
+              f"{roll_new_value:.3f} at VA 0x{_ROLL_CONST_VA:X})")
+
+    return True
+
+
+def apply_climb_speed(
+    xbe_data: bytearray,
+    *,
+    climb_scale: float = 1.0,
+) -> bool:
+    """Patch ``default.xbe`` so the player climbs at a custom speed.
+
+    Scales the climbing-velocity baseline constant at VA
+    ``0x001980E4`` (vanilla 2.0).  The constant has EXACTLY TWO
+    readers, both in ``FUN_00087F80`` (the climbing/hanging-ledge
+    state), so a direct 4-byte float overwrite affects ONLY
+    climbing motion — every other physics state is untouched.
+
+    Returns True when the patch was applied, False if ``climb_scale``
+    is 1.0 (no-op) or if the constant has drifted from vanilla.
+    """
+    if climb_scale == 1.0:
+        return False
+
+    off = va_to_file(_CLIMB_CONST_VA)
+    current = bytes(xbe_data[off:off + 4])
+    if current != _CLIMB_CONST_VANILLA:
+        print(f"  WARNING: climb_speed — constant at VA "
+              f"0x{_CLIMB_CONST_VA:X} already patched or drifted, "
+              f"skipping (got {current.hex()}, "
+              f"expected {_CLIMB_CONST_VANILLA.hex()})")
+        return False
+
+    new_value = _VANILLA_CLIMB_SPEED * float(climb_scale)
+    xbe_data[off:off + 4] = struct.pack("<f", new_value)
+    print(f"  Player climbing speed: {climb_scale:.3f}x vanilla  "
+          f"(constant {_VANILLA_CLIMB_SPEED:.3f} -> {new_value:.3f} "
+          f"at VA 0x{_CLIMB_CONST_VA:X})")
     return True
 
 
@@ -906,40 +885,28 @@ def apply_flap_height(
 def _player_speed_dynamic_whitelist(
     xbe: bytes,
 ) -> list[tuple[int, int]]:
-    """Return the byte ranges touched by :func:`apply_player_speed`
-    and :func:`apply_swim_speed`.
+    """Return the byte ranges touched by the player-physics pack.
 
     ``verify-patches --strict`` calls this during its whitelist-diff
-    pass so the FLD/FMUL instruction rewrites AND the three injected
-    per-player floats don't register as unexpected byte flips.  The
-    float VAs are baked into the rewritten instructions at apply
-    time — we follow the ``abs32`` field in each patched instruction
-    to find them, then resolve to file offsets via the live section
-    table (which covers an appended ``SHIMS`` section if the floats
-    ended up there).
+    pass so instruction rewrites AND injected/overwritten float
+    constants don't register as unexpected byte flips.
 
-    Always returns the static 6-byte rewrite ranges; adds the
-    dynamic 4-byte float ranges only when the apply is detected.
-    Invoked on vanilla XBEs too (the pack may not have been applied)
-    so must never raise on unrecognised bytes.
+    Always returns the static rewrite ranges; adds the dynamic
+    4-byte float ranges only when the apply is detected.  Invoked
+    on vanilla XBEs too (the pack may not have been applied) so
+    must never raise on unrecognised bytes.
     """
     from azurik_mod.patching.xbe import parse_xbe_sections, va_to_file
 
     try:
         walk_off = va_to_file(_WALK_SITE_VA)
-        roll_off = va_to_file(_ROLL_SITE_VA)
         swim_off = va_to_file(_SWIM_SITE_VA)
     except Exception:  # noqa: BLE001
         return []
 
-    # Static: the four 6-byte instruction rewrite sites + the
-    # 2-byte roll edge-lock JNZ + two 2-byte roll always-on patches
-    # are always whitelisted.  On a vanilla XBE these ranges hold
-    # their pristine bytes so the diff reports zero, keeping
-    # whitelisting safe.
     ranges: list[tuple[int, int]] = [
+        # Instruction rewrites (6 bytes each).
         (walk_off, walk_off + 6),
-        (roll_off, roll_off + 6),
         (swim_off, swim_off + 6),
     ]
     try:
@@ -948,15 +915,15 @@ def _player_speed_dynamic_whitelist(
     except Exception:  # noqa: BLE001
         pass
     try:
-        el_off = va_to_file(_ROLL_EDGE_LOCK_VA)
-        ranges.append((el_off, el_off + 2))
+        # Roll now targets a 4-byte constant at VA 0x001AAB68.
+        ranges.append((va_to_file(_ROLL_CONST_VA),
+                       va_to_file(_ROLL_CONST_VA) + 4))
     except Exception:  # noqa: BLE001
         pass
     try:
-        fon1 = va_to_file(_ROLL_FORCE_ON_1_VA)
-        fon2 = va_to_file(_ROLL_FORCE_ON_2_VA)
-        ranges.append((fon1, fon1 + 2))
-        ranges.append((fon2, fon2 + 2))
+        # Climb targets a 4-byte constant at VA 0x001980E4.
+        ranges.append((va_to_file(_CLIMB_CONST_VA),
+                       va_to_file(_CLIMB_CONST_VA) + 4))
     except Exception:  # noqa: BLE001
         pass
     # Air-control: 5 imm32 sites (4 bytes each).
@@ -987,7 +954,6 @@ def _player_speed_dynamic_whitelist(
 
     follow_sites: list[tuple[int, bytes]] = [
         (walk_off, b"\xD9\x05"),   # FLD  [abs32] (walk base)
-        (roll_off, b"\xD8\x0D"),   # FMUL [abs32] (roll mult)
         (swim_off, b"\xD8\x0D"),   # FMUL [abs32] (swim mult)
     ]
     try:
@@ -1026,12 +992,13 @@ PLAYER_PHYSICS_SITES = [
     JUMP_SPEED_SCALE,
     AIR_CONTROL_SCALE,
     FLAP_HEIGHT_SCALE,
+    CLIMB_SPEED_SCALE,
 ]
-"""Registered Patches-page sites.  Gravity writes to a .rdata float
-directly; walk/roll/swim/jump speed sliders are "virtual" (va=0)
-and the pack's apply function materialises their values into
-injected XBE bytes (walk/roll/swim via shim-landing FLD/FMUL
-rewrites, jump via direct imm32 overwrites at five call sites)."""
+"""Registered Patches-page sites.  Gravity, roll, and climb
+sliders write to isolated .rdata floats directly; walk, swim,
+and jump use shim-landed FLD/FMUL rewrites; air-control uses
+imm32 overwrites at five call sites; flap uses a single FADD
+rewrite."""
 
 
 def _apply_defaults(xbe_data: bytearray) -> None:
@@ -1049,6 +1016,7 @@ def _custom_apply(
     jump_speed_scale: float | None = None,
     air_control_scale: float | None = None,
     flap_height_scale: float | None = None,
+    climb_speed_scale: float | None = None,
     # Back-compat: the old kwarg spellings.  New callers should use
     # the *_speed_scale forms, but CLI / serialized configs that
     # predate the rename still work.
@@ -1059,6 +1027,7 @@ def _custom_apply(
     swim_scale: float | None = None,
     jump_scale: float | None = None,
     flap_scale: float | None = None,
+    climb_scale: float | None = None,
     **_extra,
 ) -> None:
     """Unified-dispatcher hook — forwards slider kwargs to the full
@@ -1082,6 +1051,8 @@ def _custom_apply(
     jump = jump_speed_scale if jump_speed_scale is not None else jump_scale
     flap = (flap_height_scale if flap_height_scale is not None
             else flap_scale)
+    climb = (climb_speed_scale if climb_speed_scale is not None
+             else climb_scale)
     apply_player_physics(
         xbe_data,
         gravity=gravity,
@@ -1091,6 +1062,7 @@ def _custom_apply(
         jump_scale=jump,
         air_control_scale=air_control_scale,
         flap_scale=flap,
+        climb_scale=climb,
     )
 
 
@@ -1098,10 +1070,10 @@ FEATURE = register_feature(Feature(
     name="player_physics",
     description=(
         "Scales world gravity and every player movement / speed "
-        "parameter we've RE'd: walking, rolling (WHITE boost "
-        "made permanent), swimming, jumping, horizontal air-"
-        "control speed, and wing-flap (Air-power double-jump) "
-        "impulse.  Gravity is global; the rest are player-only."
+        "parameter we've RE'd: walking, rolling (ground state), "
+        "climbing, swimming, jumping, horizontal air-control "
+        "speed, and wing-flap (Air-power double-jump) impulse.  "
+        "Gravity is global; the rest are player-only."
     ),
     sites=PLAYER_PHYSICS_SITES,
     apply=_apply_defaults,
@@ -1116,6 +1088,7 @@ FEATURE = register_feature(Feature(
 
 __all__ = [
     "AIR_CONTROL_SCALE",
+    "CLIMB_SPEED_SCALE",
     "FLAP_HEIGHT_SCALE",
     "GRAVITY_BASELINE",
     "GRAVITY_PATCH",
@@ -1126,6 +1099,7 @@ __all__ = [
     "SWIM_SPEED_SCALE",
     "WALK_SPEED_SCALE",
     "apply_air_control_speed",
+    "apply_climb_speed",
     "apply_flap_height",
     "apply_jump_speed",
     "apply_player_physics",

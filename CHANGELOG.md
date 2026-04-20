@@ -2,7 +2,90 @@
 
 ## Unreleased
 
-### player_physics — air-control + wing-flap sliders
+### player_physics v3 — roll redesigned, climb added, dev-menu retired
+
+Three-part user-driven revamp of the player-movement system.
+
+**#1. `enable_dev_menu` removed (dead end).**  Across four design
+iterations (two ``JZ``→``NOP``s, cheat-cvar short-circuit,
+three-stage-validator short-circuit, and finally a trampoline on
+the universal level loader `FUN_00053750`), every approach landed
+the planned bytes correctly but the user could never observe the
+forced "levels/selector" boot path in-game.  The actual
+cutscene→first-level transition seems to route through a path we
+haven't yet mapped.  Rather than ship a feature that only LOOKS
+right in the binary diff, the whole pack is retired.  Research
+notes in `docs/LEARNINGS.md` § "enable_dev_menu — three-stage
+validator chain" are kept as historical reference for any future
+attempt.  Removed:
+
+- `azurik_mod/patches/enable_dev_menu/__init__.py` + README
+- `EnableDevMenuFeature` test class in `tests/test_tier3_tools.py`
+- `test_enable_dev_menu_is_experimental` in `tests/test_categories.py`
+- Dev-menu probe block from `azurik-mod inspect-physics`
+- Row in `docs/PATCHES.md`, PLUGINS.md example reference
+
+The `experimental` category is still registered but has zero
+shipped packs — the browser correctly hides the tab.
+
+**#2. `roll_speed_scale` retargeted to the rolling-GROUND state.**
+v2's approach (rewrite FMUL at 0x849E4 + force-always-on bit
+0x40) had a real coupling bug user testing caught: boosted
+``magnitude`` propagated through `FUN_00089480` into airborne
+horizontal speed (`entity[+0x140] × magnitude`), which felt like
+"gravity got weaker" because the player covered way more ground
+per jump.  v3 scraps FMUL-rewrite + force-on entirely and
+targets `FUN_00089A70`'s rolling/sliding ground-state velocity
+FMUL directly by overwriting the 4-byte float constant at VA
+**`0x001AAB68`** (vanilla 2.0) to `2.0 × roll_scale`.  The
+constant has exactly one reader in the entire binary, so the
+patch is byte-minimal (4 bytes) and cannot leak into any other
+physics system.  The WHITE-button edge-lock, the force-on
+sites, and the old FMUL instruction all stay at vanilla.
+
+**#3. New `climb_speed_scale` slider.**  `FUN_00087F80`
+(climbing / hanging-ledge state) reads its baseline climb
+velocity from the .rdata float at VA **`0x001980E4`** (vanilla
+2.0).  The constant has exactly two readers, both in
+FUN_00087F80, so a direct 4-byte overwrite affects only
+climbing.  Range 0.1-10.0×.
+
+**Net effect on player_physics pack**: 8 sliders total (gravity,
+walk, roll, swim, jump, air-control, flap, climb).  The roll
+slider now does what its name advertises — affects rolling, not
+airborne speed.  The climb slider fills the last obvious
+vanilla-movement-speed axis users can tweak.
+
+New / changed APIs:
+
+- `apply_climb_speed(xbe, climb_scale=X)` in `player_physics/__init__.py`
+- `_ROLL_CONST_VA` / `_ROLL_CONST_VANILLA` / `_VANILLA_ROLL_SPEED`
+- `_CLIMB_CONST_VA` / `_CLIMB_CONST_VANILLA` / `_VANILLA_CLIMB_SPEED`
+- Back-compat: `_ROLL_SITE_VA` / `_ROLL_SITE_VANILLA` now alias
+  the new constant VA/bytes (semantic shift; pinned byte lengths
+  changed from 6 → 4).
+- Removed: `_ROLL_EDGE_LOCK_*`, `_ROLL_FORCE_ON_1_*`,
+  `_ROLL_FORCE_ON_2_*`.
+- CLI: `--player-climb-scale` on `randomize-full`, `--climb-speed`
+  on `apply-physics`.
+
+`inspect-physics` now reports roll/climb as `[VANILLA]` /
+`[PATCHED]` 4-byte direct-constant overwrites (instead of the
+old FMUL-pointer-chase + force-on triple).
+
+Dynamic-whitelist counts for ``verify-patches --strict``: 11
+ranges on vanilla (4 × 6-byte instr sites, 5 × 4-byte
+air-control imm32, 2 × 4-byte direct-constant roll+climb), up
+to 15 ranges post-apply (adds 4 × 4-byte injected-float follows
+for walk/swim/jump/flap).
+
+Tests: 753 unit tests all green.  Physics-related test count
+unchanged.  `RollForceAlwaysOn` test class deleted;
+`ApplyClimbSpeedBehaviour` added; `ApplyPlayerSpeedBehaviour`,
+`DynamicWhitelistFromXbe`, `SliderSemantics` rewritten for v3
+semantics.
+
+### player_physics — air-control + wing-flap sliders (v2 April 2026)
 
 Two new player-movement patches, bringing the pack to **7
 sliders** (gravity + walk + roll + swim + jump + air-control +

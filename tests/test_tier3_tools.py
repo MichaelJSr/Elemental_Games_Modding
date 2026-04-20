@@ -1,11 +1,10 @@
-"""Tests for the Tier 3 RE tools + the ``enable_dev_menu`` feature.
+"""Tests for the Tier 3 RE tools.
 
 Coverage layers mirror :mod:`tests.test_tier2_tools`:
 
 - Synthetic-fixture unit tests (always run)
 - Vanilla-ISO cases (skip when fixtures absent)
 - CLI smoke tests
-- ``enable_dev_menu`` byte-pattern pins against the live XBE
 
 Shipped in this test file:
 
@@ -13,7 +12,15 @@ Shipped in this test file:
 #12  XBR structural diff   (``xbr_diff``)
 #13  Bink metadata dumper  (``bink_info``)
 #15  Ghidra snapshot export (``ghidra_snapshot``)
-     enable_dev_menu feature (patch bytes, category, patch set)
+
+(The ``enable_dev_menu`` feature and its tests lived here
+through April 2026; they were removed when the feature was
+retired as unshippable — the trampoline + JZ-NOP approaches
+both landed bytes correctly but the user couldn't observe
+any in-game effect on the cutscene-end → first-level
+transition path.  See ``docs/LEARNINGS.md`` §
+``enable_dev_menu — three-stage validator chain`` for the
+investigation trail.)
 """
 
 from __future__ import annotations
@@ -44,219 +51,6 @@ _VANILLA_W2 = (_REPO.parent /
 _VANILLA_MOVIES = (_REPO.parent /
                    "Azurik - Rise of Perathia (USA).xiso" /
                    "movies")
-
-
-# ---------------------------------------------------------------------------
-# enable_dev_menu feature
-# ---------------------------------------------------------------------------
-
-
-@unittest.skipUnless(_VANILLA_XBE.exists(),
-                     "vanilla default.xbe required")
-class EnableDevMenuFeature(unittest.TestCase):
-    """April 2026 v4: the feature now trampolines the universal
-    level-loader ``FUN_00053750``'s entry prologue.  Every call
-    into that function (regardless of which upstream code path
-    triggered the load) gets ``param_2`` (the level-name pointer)
-    rewritten to point at the ``"levels/selector"`` string at
-    VA 0x001A1E3C before the function body runs.  Every level
-    transition — New Game, Load Save, cutscene-end, developer-
-    console loadlevel — routes to selector.xbr.
-
-    v1-v3 post-mortem:
-      - v1 NOPed JZ instructions in a precursor dev-menu gate
-        that almost never triggered → invisible at runtime.
-      - v2 briefly pivoted to the cheat-UI cvar (separate feature;
-        kept as docs).
-      - v3 short-circuited three validators in ``dev_menu_flag_check``
-        to force the third-stage fallback that hard-codes selector
-        — but ``dev_menu_flag_check`` isn't the main entry point;
-        cutscene-end transitions in FUN_00055AB0 call FUN_00053750
-        DIRECTLY with "levels/water/w1" etc., bypassing the
-        validator chain entirely.
-
-    v4 hooks the UNIVERSAL level-loader entry so no upstream path
-    can escape the selector override."""
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        import azurik_mod.patches  # noqa
-        from azurik_mod.patching.registry import get_pack
-        cls.pack = get_pack("enable_dev_menu")
-        cls.xbe = _VANILLA_XBE.read_bytes()
-
-    def test_category_is_experimental(self):
-        self.assertEqual(self.pack.category, "experimental")
-
-    def test_hook_site_at_fun_00053750_entry(self):
-        """Single patch site: the prologue of the universal level
-        loader at VA 0x00053750."""
-        self.assertEqual(len(self.pack.sites), 1)
-        site = self.pack.sites[0]
-        self.assertEqual(site.va, 0x00053750,
-            msg="feature must target FUN_00053750's prologue, "
-                "not the old v3 validator short-circuits or the "
-                "v2 cvar getter.")
-
-    def test_vanilla_prologue_still_matches(self):
-        """Drift check: FUN_00053750 must start with the
-        7-byte prologue ``MOV EAX, [ESP+4] ; MOV ECX, [EAX+0x40]``
-        that our trampoline replays inside the shim.  Any drift
-        means the function's stack layout may have changed and
-        the trampoline would corrupt it."""
-        from azurik_mod.patching.xbe import va_to_file
-        off = va_to_file(0x00053750)
-        self.assertEqual(
-            self.xbe[off:off + 7],
-            bytes.fromhex("8b4424048b4840"),
-            msg="FUN_00053750 prologue drifted")
-
-    def test_levels_selector_string_present_at_vanilla_va(self):
-        """Drift check: the string 'levels/selector' must live
-        at VA 0x001A1E3C in ``.rdata``.  Our shim hard-codes
-        that VA as the imm32 we write into param_2 — if the
-        string has moved, the patch would override param_2 to
-        point at garbage."""
-        from azurik_mod.patching.xbe import va_to_file
-        off = va_to_file(0x001A1E3C)
-        self.assertEqual(
-            self.xbe[off:off + 16],
-            b"levels/selector\x00",
-            msg="'levels/selector' string drifted from VA "
-                "0x001A1E3C — shim would misroute param_2")
-
-    def test_apply_installs_jmp_trampoline(self):
-        """After apply, the first 5 bytes of FUN_00053750 must
-        be ``E9 rel32`` (JMP near) and bytes 5-6 must be NOPs
-        (preserves VA 0x00053757 as the start of ``SUB ESP``
-        for CFG tools)."""
-        import struct
-        from azurik_mod.patches.enable_dev_menu import (
-            apply_enable_dev_menu_patch)
-        from azurik_mod.patching.xbe import va_to_file
-        buf = bytearray(self.xbe)
-        apply_enable_dev_menu_patch(buf)
-        off = va_to_file(0x00053750)
-        self.assertEqual(buf[off], 0xE9,
-            msg="trampoline first byte must be 0xE9 (JMP near)")
-        self.assertEqual(bytes(buf[off + 5:off + 7]),
-                         b"\x90\x90",
-            msg="trampoline bytes 5-6 must be NOP NOP padding")
-
-    def test_shim_lands_within_xbe(self):
-        """Follow the trampoline's JMP rel32 and confirm the
-        target VA lives inside a loaded section of the patched
-        XBE (either ``.text`` padding spill or an appended
-        ``SHIMS`` section)."""
-        import struct
-        from azurik_mod.patches.enable_dev_menu import (
-            apply_enable_dev_menu_patch)
-        from azurik_mod.patching.xbe import parse_xbe_sections, va_to_file
-        buf = bytearray(self.xbe)
-        apply_enable_dev_menu_patch(buf)
-        off = va_to_file(0x00053750)
-        rel32 = struct.unpack("<i", bytes(buf[off + 1:off + 5]))[0]
-        shim_va = 0x00053750 + 5 + rel32
-        _, secs = parse_xbe_sections(bytes(buf))
-        landed_in = None
-        for s in secs:
-            if s["vaddr"] <= shim_va < s["vaddr"] + s["vsize"]:
-                landed_in = s["name"]
-                break
-        self.assertIsNotNone(landed_in,
-            msg=f"shim at VA 0x{shim_va:X} isn't inside any "
-                f"loaded section")
-
-    def test_shim_decodes_to_expected_instructions(self):
-        """Reconstruct the 27-byte shim from disk and verify it
-        matches the layout in the module docstring: CMP + JNZ +
-        MOV[ESP+8] + MOV EAX + MOV ECX + JMP."""
-        import struct
-        from azurik_mod.patches.enable_dev_menu import (
-            apply_enable_dev_menu_patch)
-        from azurik_mod.patching.xbe import parse_xbe_sections, va_to_file
-        buf = bytearray(self.xbe)
-        apply_enable_dev_menu_patch(buf)
-        off = va_to_file(0x00053750)
-        rel32 = struct.unpack("<i", bytes(buf[off + 1:off + 5]))[0]
-        shim_va = 0x00053750 + 5 + rel32
-
-        _, secs = parse_xbe_sections(bytes(buf))
-        shim_fo = None
-        for s in secs:
-            if s["vaddr"] <= shim_va < s["vaddr"] + s["vsize"]:
-                shim_fo = s["raw_addr"] + (shim_va - s["vaddr"])
-                break
-        self.assertIsNotNone(shim_fo)
-
-        shim = bytes(buf[shim_fo:shim_fo + 27])
-        # [0..4]: CMP DWORD [ESP+0x10], 0
-        self.assertEqual(shim[0:5],
-                         bytes.fromhex("837c241000"),
-            msg="shim [0..4] isn't CMP [ESP+0x10], 0")
-        # [5..6]: JNZ +8 (skip-override)
-        self.assertEqual(shim[5:7], bytes.fromhex("7508"),
-            msg="shim [5..6] isn't JNZ +8")
-        # [7..14]: MOV DWORD [ESP+8], imm32
-        self.assertEqual(shim[7:11], bytes.fromhex("c7442408"),
-            msg="shim [7..10] isn't MOV DWORD [ESP+8], imm32")
-        imm = struct.unpack("<I", shim[11:15])[0]
-        self.assertEqual(imm, 0x001A1E3C,
-            msg=f"shim imm32 is 0x{imm:X}, not the "
-                f"'levels/selector' VA 0x001A1E3C")
-        # [15..21]: replayed vanilla instructions
-        self.assertEqual(shim[15:22], bytes.fromhex("8b4424048b4840"),
-            msg="shim [15..21] doesn't replay the clobbered "
-                "MOV EAX/MOV ECX instructions")
-        # [22..26]: JMP rel32 back to 0x00053757
-        self.assertEqual(shim[22], 0xE9,
-            msg="shim tail byte isn't JMP near (0xE9)")
-        tail_rel = struct.unpack("<i", shim[23:27])[0]
-        tail_dst = (shim_va + 22) + 5 + tail_rel
-        self.assertEqual(tail_dst, 0x00053757,
-            msg=f"shim tail JMP goes to 0x{tail_dst:X}, not "
-                f"0x00053757 (the post-prologue return point)")
-
-    def test_apply_is_idempotent(self):
-        """Running apply twice produces identical bytes + doesn't
-        raise.  Protects against drift in the trampoline installer."""
-        from azurik_mod.patches.enable_dev_menu import (
-            apply_enable_dev_menu_patch)
-        buf = bytearray(self.xbe)
-        apply_enable_dev_menu_patch(buf)
-        first_run = bytes(buf)
-        apply_enable_dev_menu_patch(buf)
-        self.assertEqual(bytes(buf), first_run,
-            msg="re-apply changed the buffer — drift guard in "
-                "apply_enable_dev_menu_patch missed the "
-                "already-trampolined prologue")
-
-    def test_dynamic_whitelist_covers_trampoline_and_shim(self):
-        """verify-patches --strict whitelists the 7-byte prologue
-        rewrite AND the 27-byte shim block.  On a vanilla XBE,
-        only the prologue range is returned; after apply, the
-        shim range is also returned."""
-        from azurik_mod.patches.enable_dev_menu import (
-            _dev_menu_dynamic_whitelist,
-            apply_enable_dev_menu_patch,
-        )
-        # Vanilla XBE: 1 range (the 7-byte prologue).
-        vanilla_ranges = _dev_menu_dynamic_whitelist(self.xbe)
-        self.assertEqual(len(vanilla_ranges), 1,
-            msg="vanilla XBE should yield 1 range (the "
-                "prologue), not follow a non-existent JMP")
-        # Patched XBE: 2 ranges (prologue + shim).
-        buf = bytearray(self.xbe)
-        apply_enable_dev_menu_patch(buf)
-        patched_ranges = _dev_menu_dynamic_whitelist(bytes(buf))
-        self.assertEqual(len(patched_ranges), 2,
-            msg="patched XBE should yield 2 ranges (prologue "
-                "+ shim)")
-        # Verify the sizes: prologue = 7, shim = 27.
-        sizes = sorted(hi - lo for lo, hi in patched_ranges)
-        self.assertEqual(sizes, [7, 27],
-            msg="expected one 7-byte and one 27-byte whitelist "
-                "range")
 
 
 # ---------------------------------------------------------------------------

@@ -107,7 +107,7 @@ Anything `register_feature` accepts:
 
 See `azurik_mod/patches/<any>/__init__.py` for real examples:
 
-- `enable_dev_menu/` — simplest byte-patch feature
+- `qol_gem_popups/` — simplest byte-patch feature (NOP writes)
 - `qol_skip_logo/` — shim-backed trampoline
 - `player_physics/` — parametric sliders + custom apply
 - `randomize/` — category-only features (no XBE edits)

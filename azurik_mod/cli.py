@@ -303,6 +303,14 @@ def main() -> None:
                              "Rewrites FADD [0x001A25C0] at VA "
                              "0x896EA so the flap adds 8.0 * "
                              "flap_scale to velocity.z.")
+    p_full.add_argument("--player-climb-scale", type=float,
+                        metavar="X",
+                        help="Player climbing-state speed "
+                             "multiplier (default 1.0, range "
+                             "0.1-10.0).  Scales the 2.0 constant "
+                             "at VA 0x001980E4 (single-purpose "
+                             "float used only by FUN_00087F80 — "
+                             "the climbing/hanging-ledge state).")
 
     # apply-physics (standalone physics slider runner)
     p_physics = sub.add_parser(
@@ -332,9 +340,12 @@ def main() -> None:
     p_physics.add_argument("--walk-speed", type=float, metavar="X",
         help="Player walk speed multiplier (default 1.0; range 0.1-10.0).")
     p_physics.add_argument("--roll-speed", type=float, metavar="X",
-        help="Player roll / WHITE-button boost multiplier "
-             "(default 1.0; range 0.1-10.0).  Scales the 3.0 "
-             "multiplier at VA 0x001A25BC for the player only.")
+        help="Player rolling / sliding GROUND-state speed "
+             "multiplier (default 1.0; range 0.1-10.0).  v3: "
+             "scales the single-reader 2.0 constant at VA "
+             "0x001AAB68 (only read by FUN_00089A70 ground-"
+             "roll physics) — no longer couples to airborne "
+             "speed the way pre-v3 roll_scale did.")
     p_physics.add_argument("--run-speed", type=float, metavar="X",
         dest="run_speed",
         help="Deprecated alias for --roll-speed.  The 3.0 multiplier "
@@ -360,19 +371,25 @@ def main() -> None:
              "impulse multiplier (default 1.0; range 0.1-10.0).  "
              "Rewrites FADD [0x001A25C0] at VA 0x896EA so each "
              "flap press adds 8.0*flap_scale to velocity.z.")
+    p_physics.add_argument("--climb-speed", type=float, metavar="X",
+        help="Player climbing-state speed multiplier "
+             "(default 1.0; range 0.1-10.0).  Overwrites the "
+             "2.0 constant at VA 0x001980E4 (only read by "
+             "FUN_00087F80 — climbing/hanging-ledge physics).")
 
     # inspect-physics (diagnostic — read-only dump of patch state)
     p_inspect = sub.add_parser(
         "inspect-physics",
-        help="Dump the current state of player_physics + enable_dev_menu "
-             "patches in a built ISO / XBE",
+        help="Dump the current state of player_physics patches in a "
+             "built ISO / XBE",
         description=(
             "Read-only diagnostic.  Reports:\n"
             "  * Gravity constant current value\n"
-            "  * Walk / roll / swim / jump instruction sites:\n"
-            "    VANILLA / PATCHED (with the injected float)\n"
-            "  * Roll auxiliary patches (edge-lock NOP, force-always-on)\n"
-            "  * enable_dev_menu trampoline at FUN_00053750 entry\n"
+            "  * Walk / swim / jump / flap instruction sites:\n"
+            "    VANILLA / PATCHED (with injected float)\n"
+            "  * Roll (ground) + climb direct-constant overrides\n"
+            "    at VAs 0x001AAB68 and 0x001980E4\n"
+            "  * Air-control imm32 sites (5 × 4 bytes)\n"
             "\n"
             "Use this to verify a built ISO actually contains the\n"
             "patches you expect.  If 'doesn't work' in gameplay, run\n"

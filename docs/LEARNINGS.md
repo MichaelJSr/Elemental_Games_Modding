@@ -124,7 +124,64 @@ patches that layer on top of `CritterData.run_speed` must either
 preserve vanilla at scale=1 or clearly document the non-identity
 semantics.
 
-### WHITE-button sustained roll — bypassing the edge-lock (April 2026)
+### Roll v3 — the rolling-GROUND-state constant at VA 0x001AAB68 (April 2026)
+
+The v2 roll approach (FMUL rewrite at 0x849E4 + force-on bit
+0x40 at 0x85214/0x8521C) had a real bug that user testing
+caught: since bit 0x40 gates the shared ``magnitude`` variable,
+force-always-on coupled ``roll_scale`` into *airborne horizontal
+speed* via ``FUN_00089480``'s ``entity[+0x140] × magnitude``
+formula.  At ``roll_scale=3`` jumps covered 3× more horizontal
+distance, which felt identical to "gravity got weaker".
+
+v3 retargets ``roll_speed_scale`` at the correct, isolated
+surface.  ``FUN_00089A70`` is the rolling/sliding ground-state
+physics function (reached via state-machine cases 3/4 from
+``FUN_0008CCC0``).  Its velocity FMUL at VA ``0x00089B76``
+reads the constant ``[0x001AAB68]`` (vanilla ``2.0``).  That
+constant has **exactly one reader in the entire binary**, so
+the patch is a 4-byte direct overwrite:
+
+```asm
+00089b6d: D9 47 04            FLD  [EDI + 0x4]         ; dt
+00089b70: D8 8F 24 01 00 00   FMUL [EDI + 0x124]       ; × magnitude
+00089b76: D8 0D 68 AB 1A 00   FMUL [0x001AAB68]        ; × 2.0  ← patched
+```
+
+Setting ``roll_speed_scale=3`` overwrites the 4 bytes at the
+constant's file offset with ``float(6.0)``.  The WHITE
+edge-lock, the force-on sites, and the old FMUL at 0x849E4 all
+remain vanilla — so:
+
+- Walking: vanilla (the magnitude × 3 coupling is gone).
+- Airborne horizontal: vanilla (ditto).
+- Swimming: vanilla.
+- Rolling / sliding ground state: `dt × magnitude × (2.0 ×
+  roll_scale)` — scales linearly with the slider.
+
+### Climbing — the .rdata 2.0 at VA 0x001980E4 (new April 2026)
+
+``FUN_00087F80`` is the climbing / hanging-ledge state.  Its
+per-frame velocity scalar reads ``[0x001980E4]`` (value
+``2.0``) — used as ``dt × magnitude × [0x001980E4]`` for the
+primary climb FLD and as a secondary climb-retarget FLD.  The
+constant has **exactly two readers, both in FUN_00087F80**.
+Patching the constant in place therefore scales only climbing
+motion.  Implemented as ``apply_climb_speed(xbe, climb_scale=X)``
+inside ``player_physics/__init__.py``; slider range 0.1-10.0×.
+
+### WHITE-button sustained roll — bypassing the edge-lock (pre-v3, historical)
+
+**Historical.** In v2 (shipped April 2026, replaced by v3 the
+same month) ``apply_player_speed`` additionally NOPed a 2-byte
+``JNZ +8`` at VA ``0x00085200`` and installed two 2-byte
+"force-always-on" rewrites so the magnitude-boost bit 0x40 was
+set every frame.  That approach is gone in v3 — the force-on +
+edge-lock sites are now left at vanilla because the new roll
+target doesn't need them.  The analysis below is preserved
+for anyone investigating the WHITE-button input chain.
+
+
 
 The 3× boost at VA `0x849E4` (`FMUL [0x001A25BC]` inside
 `FUN_00084940`) is gated by bit `0x40` of the input-state flags
@@ -1263,6 +1320,21 @@ Two cut levels are now documented as ``KNOWN_CUT_LEVELS``:
 
 Both are useful flags for a future "randomizer finds all known
 dead portals" audit pass.
+
+## enable_dev_menu — retired as unshippable (April 2026, historical)
+
+**The `enable_dev_menu` patch was removed from the shipped pack
+list after four iteration attempts all failed to produce an
+observable effect in-game.**  Every version (JZ NOPs, cheat-cvar
+short-circuit, stage-1+2 short-circuit, `FUN_00053750`
+trampoline) landed its target bytes correctly in the XBE; the
+``inspect-physics`` diagnostic confirmed ``[INSTALLED]`` on
+each.  But the actual cutscene-end → first-level transition
+evidently routes through a code path we haven't mapped, so
+none of them rerouted the first level load to ``selector.xbr``.
+The research below is preserved because the validator-chain +
+state-machine analysis will still be useful for any future
+attempt to force the developer level hub.
 
 ## enable_dev_menu — three-stage validator chain (April 2026)
 

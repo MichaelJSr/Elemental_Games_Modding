@@ -47,29 +47,30 @@ if _REPO_ROOT not in sys.path:
 from azurik_mod.patches.player_physics import (  # noqa: E402
     _AIR_CONTROL_IMM32_VANILLA,
     _AIR_CONTROL_SITE_VAS,
+    _CLIMB_CONST_VA,
+    _CLIMB_CONST_VANILLA,
     _FLAP_SITE_VA,
     _FLAP_SITE_VANILLA,
     _JUMP_SITE_VA,
     _JUMP_SITE_VANILLA,
-    _ROLL_FORCE_ON_1_PATCH,
-    _ROLL_FORCE_ON_1_VA,
-    _ROLL_FORCE_ON_1_VANILLA,
-    _ROLL_FORCE_ON_2_PATCH,
-    _ROLL_FORCE_ON_2_VA,
-    _ROLL_FORCE_ON_2_VANILLA,
-    _ROLL_SITE_VA,
-    _ROLL_SITE_VANILLA,
+    _ROLL_CONST_VA,
+    _ROLL_CONST_VANILLA,
+    _ROLL_SITE_VA,              # back-compat: aliased to _ROLL_CONST_VA
+    _ROLL_SITE_VANILLA,         # back-compat: aliased to _ROLL_CONST_VANILLA
     _SWIM_SITE_VA,
     _SWIM_SITE_VANILLA,
     _VANILLA_AIR_CONTROL,
+    _VANILLA_CLIMB_SPEED,
     _VANILLA_FLAP_IMPULSE,
     _VANILLA_JUMP_GRAVITY,
     _VANILLA_PLAYER_BASE_SPEED,
-    _VANILLA_ROLL_MULTIPLIER,
+    _VANILLA_ROLL_MULTIPLIER,   # legacy 3.0 constant (still defined)
+    _VANILLA_ROLL_SPEED,        # new 2.0 rolling-state constant
     _VANILLA_SWIM_MULTIPLIER,
     _WALK_SITE_VA,
     _WALK_SITE_VANILLA,
     apply_air_control_speed,
+    apply_climb_speed,
     apply_flap_height,
     apply_jump_speed,
     apply_player_physics,
@@ -80,9 +81,9 @@ from azurik_mod.patches.player_physics import (  # noqa: E402
 # the pre-April-2026 names.  These tests double as a contract that
 # the renames preserve the old import surface.
 from azurik_mod.patches.player_physics import (  # noqa: E402
-    _RUN_SITE_VA,              # -> _ROLL_SITE_VA
-    _RUN_SITE_VANILLA,         # -> _ROLL_SITE_VANILLA
-    _VANILLA_RUN_MULTIPLIER,   # -> _VANILLA_ROLL_MULTIPLIER
+    _RUN_SITE_VA,              # -> _ROLL_CONST_VA (semantic shift v3)
+    _RUN_SITE_VANILLA,         # -> _ROLL_CONST_VANILLA
+    _VANILLA_RUN_MULTIPLIER,   # -> _VANILLA_ROLL_MULTIPLIER (unchanged)
 )
 from azurik_mod.patching.xbe import parse_xbe_sections, va_to_file
 
@@ -113,13 +114,26 @@ def _read_float_at_va(xbe: bytes, va: int) -> float | None:
 class BackCompatAliases(unittest.TestCase):
     """Legacy ``_RUN_*`` / ``_VANILLA_RUN_MULTIPLIER`` imports must
     still resolve — back-compat for external tools that pinned the
-    pre-April-2026 names."""
+    pre-April-2026 names.
 
-    def test_run_aliases_equal_roll_values(self):
-        self.assertEqual(_RUN_SITE_VA, _ROLL_SITE_VA)
-        self.assertEqual(_RUN_SITE_VANILLA, _ROLL_SITE_VANILLA)
+    v3 (April 2026): ``_ROLL_SITE_VA`` semantically shifted from an
+    FMUL instruction VA (0x849E4) to a direct-constant VA (0x1AAB68)
+    because the roll patch now overwrites a shared rolling-state
+    speed scalar instead of rewriting an instruction.  Callers that
+    pinned the old name still get ``VA/bytes`` pairs back — they
+    just point at the new target.
+    """
+
+    def test_run_aliases_equal_roll_const(self):
+        self.assertEqual(_RUN_SITE_VA, _ROLL_CONST_VA)
+        self.assertEqual(_RUN_SITE_VANILLA, _ROLL_CONST_VANILLA)
         self.assertEqual(_VANILLA_RUN_MULTIPLIER,
                          _VANILLA_ROLL_MULTIPLIER)
+
+    def test_roll_site_aliases_point_at_new_constant(self):
+        # Back-compat shim for pre-v3 callers.
+        self.assertEqual(_ROLL_SITE_VA, _ROLL_CONST_VA)
+        self.assertEqual(_ROLL_SITE_VANILLA, _ROLL_CONST_VANILLA)
 
 
 @unittest.skipUnless(_XBE_PATH,
@@ -134,12 +148,21 @@ class VanillaSitesInvariants(unittest.TestCase):
             msg="walk-site bytes drifted; the Ghidra walkthrough in "
                 "player_physics/__init__.py is out of date.")
 
-    def test_roll_site_has_vanilla_bytes(self):
+    def test_roll_constant_has_vanilla_bytes(self):
         xbe = _XBE_PATH.read_bytes()
-        off = va_to_file(_ROLL_SITE_VA)
-        self.assertEqual(bytes(xbe[off:off + 6]), _ROLL_SITE_VANILLA,
-            msg="roll-site bytes drifted; the Ghidra walkthrough in "
-                "player_physics/__init__.py is out of date.")
+        off = va_to_file(_ROLL_CONST_VA)
+        self.assertEqual(bytes(xbe[off:off + 4]), _ROLL_CONST_VANILLA,
+            msg="rolling-state speed constant at VA 0x001AAB68 "
+                "drifted; FUN_00089A70 ground-roll physics docs "
+                "are out of date (expected vanilla 2.0).")
+
+    def test_climb_constant_has_vanilla_bytes(self):
+        xbe = _XBE_PATH.read_bytes()
+        off = va_to_file(_CLIMB_CONST_VA)
+        self.assertEqual(bytes(xbe[off:off + 4]), _CLIMB_CONST_VANILLA,
+            msg="climbing-state speed constant at VA 0x001980E4 "
+                "drifted; FUN_00087F80 climbing physics docs "
+                "are out of date (expected vanilla 2.0).")
 
     def test_swim_site_has_vanilla_bytes(self):
         xbe = _XBE_PATH.read_bytes()
@@ -153,7 +176,13 @@ class VanillaSitesInvariants(unittest.TestCase):
 @unittest.skipUnless(_XBE_PATH,
     "vanilla default.xbe fixture not available")
 class ApplyPlayerSpeedBehaviour(unittest.TestCase):
-    """End-to-end walk + roll patch behaviour against a real XBE."""
+    """End-to-end walk + roll patch behaviour against a real XBE.
+
+    v3 (April 2026): walk still uses shim-landed FLD rewrite at
+    VA 0x85F62.  Roll switched from FMUL-rewrite-plus-force-on
+    (which coupled airborne speed) to a direct 4-byte constant
+    overwrite at VA 0x1AAB68 — vanilla 2.0, scaled by roll_scale.
+    """
 
     def setUp(self):
         self.orig = _XBE_PATH.read_bytes()
@@ -167,9 +196,8 @@ class ApplyPlayerSpeedBehaviour(unittest.TestCase):
                 "--strict passes for unopted users.")
 
     def test_walk_scale_patches_fld_and_injects_walk_float(self):
-        """At walk_scale=2.5, roll_scale=1.0 the injected base equals
-        vanilla × walk_scale (7.0 × 2.5 = 17.5) — that's what makes
-        the slider a true multiplier on vanilla walking."""
+        """At walk_scale=2.5 the injected base equals vanilla ×
+        walk_scale (7.0 × 2.5 = 17.5)."""
         data = bytearray(self.orig)
         self.assertTrue(apply_player_speed(data, walk_scale=2.5))
 
@@ -185,103 +213,97 @@ class ApplyPlayerSpeedBehaviour(unittest.TestCase):
                 "section byte")
         self.assertAlmostEqual(
             value, _VANILLA_PLAYER_BASE_SPEED * 2.5, places=5,
-            msg="injected base must equal vanilla_base × walk_scale — "
-                "that's what makes walk_scale a true multiplier on "
-                "vanilla walking.")
+            msg="injected base must equal vanilla_base × "
+                "walk_scale")
 
-    def test_roll_scale_patches_fmul_and_preserves_vanilla_constant(self):
-        """v2 simplified semantics: inject_roll_mult = roll_scale
-        (not 3 × roll_scale / walk_scale).  The force-always-on
-        patches make the FMUL fire every frame of movement, so
-        roll_scale acts as a permanent walking-speed multiplier.
-        The shared 3.0 constant at 0x001A25BC MUST stay untouched
-        (45 other readers depend on it)."""
+    def test_roll_scale_overwrites_constant_in_place(self):
+        """v3 semantics: ``roll_scale`` directly overwrites the
+        4-byte float at VA 0x001AAB68 (single-reader rolling-state
+        speed constant).  No shim needed, no instruction rewrite.
+        """
         data = bytearray(self.orig)
         self.assertTrue(apply_player_speed(data, roll_scale=1.5))
 
-        roll_off = va_to_file(_ROLL_SITE_VA)
-        patch = bytes(data[roll_off:roll_off + 6])
-        self.assertEqual(patch[:2], b"\xD8\x0D",
-            msg="roll site must become 'FMUL dword [abs32]'")
-        roll_va = struct.unpack("<I", patch[2:6])[0]
-        value = _read_float_at_va(bytes(data), roll_va)
-        self.assertIsNotNone(value)
-        self.assertAlmostEqual(value, 1.5, places=5,
-            msg="inject_roll_mult = roll_scale (v2 simplified)")
+        roll_off = va_to_file(_ROLL_CONST_VA)
+        patched = bytes(data[roll_off:roll_off + 4])
+        self.assertNotEqual(patched, _ROLL_CONST_VANILLA,
+            msg="roll_scale != 1.0 must rewrite the constant")
+        value = struct.unpack("<f", patched)[0]
+        self.assertAlmostEqual(
+            value, _VANILLA_ROLL_SPEED * 1.5, places=5,
+            msg="patched constant must equal 2.0 × roll_scale = 3.0")
 
-        # The shared 0x001A25BC constant MUST still be 3.0.
-        fo = 0x188000 + (0x001A25BC - 0x18F3A0)
-        shared = struct.unpack("<f", bytes(data[fo:fo + 4]))[0]
-        self.assertAlmostEqual(shared, 3.0, places=5,
-            msg="shared roll-multiplier at 0x001A25BC must NOT "
-                "be touched; 45 other systems read it.")
+        # No instruction was rewritten — the old FMUL at 0x849E4
+        # must still hold its vanilla 6 bytes.
+        old_fmul_off = va_to_file(0x000849E4)
+        self.assertEqual(
+            bytes(data[old_fmul_off:old_fmul_off + 6]),
+            bytes.fromhex("d80dbc251a00"),
+            msg="v3 roll must NOT touch the old FMUL at 0x849E4 "
+                "anymore — that's the coupling bug we fixed.")
 
     def test_combined_walk_and_roll_scales(self):
-        """v2: both sliders are simple multipliers that STACK to
-        give ``walk × roll`` total walking-speed multiplier."""
+        """Both sliders can be set together; each lands at its
+        own site with no cross-contamination."""
         data = bytearray(self.orig)
         self.assertTrue(apply_player_speed(
             data, walk_scale=0.5, roll_scale=2.0))
         walk_off = va_to_file(_WALK_SITE_VA)
-        roll_off = va_to_file(_ROLL_SITE_VA)
         walk_va = struct.unpack(
             "<I", bytes(data[walk_off + 2:walk_off + 6]))[0]
-        roll_va = struct.unpack(
-            "<I", bytes(data[roll_off + 2:roll_off + 6]))[0]
         self.assertAlmostEqual(
             _read_float_at_va(bytes(data), walk_va),
             _VANILLA_PLAYER_BASE_SPEED * 0.5, places=5,
             msg="inject_base = 7 × walk_scale = 3.5")
+        roll_off = va_to_file(_ROLL_CONST_VA)
+        roll_value = struct.unpack(
+            "<f", bytes(data[roll_off:roll_off + 4]))[0]
         self.assertAlmostEqual(
-            _read_float_at_va(bytes(data), roll_va),
-            2.0, places=5,
-            msg="inject_roll_mult = roll_scale = 2.0")
+            roll_value, _VANILLA_ROLL_SPEED * 2.0, places=5,
+            msg="roll const = 2.0 × roll_scale = 4.0")
+
+    def test_roll_scale_does_not_touch_airborne_sites(self):
+        """v3 regression: the previous roll approach force-always-on
+        bit 0x40, which coupled roll_scale into airborne horizontal
+        speed via magnitude.  v3 must leave the force-on sites,
+        the edge-lock, and the old FMUL instruction ALL at vanilla.
+        """
+        data = bytearray(self.orig)
+        self.assertTrue(apply_player_speed(data, roll_scale=3.0))
+        # The WHITE edge-lock (old VA 0x85200) must be vanilla.
+        self.assertEqual(bytes(data[va_to_file(0x00085200):
+                                    va_to_file(0x00085200) + 2]),
+                         bytes.fromhex("7508"),
+            msg="v3 roll must not NOP the WHITE edge-lock")
+        # Force-on sites (old VAs 0x85214, 0x8521C) must be vanilla.
+        self.assertEqual(bytes(data[va_to_file(0x00085214):
+                                    va_to_file(0x00085214) + 2]),
+                         bytes.fromhex("2440"),
+            msg="v3 roll must not patch force-on #1")
+        self.assertEqual(bytes(data[va_to_file(0x0008521C):
+                                    va_to_file(0x0008521C) + 2]),
+                         bytes.fromhex("32d0"),
+            msg="v3 roll must not patch force-on #2")
 
     def test_reapply_to_already_patched_is_rejected(self):
-        """Running apply a second time on the same buffer must refuse —
-        the walk-site bytes no longer match the vanilla sequence."""
+        """Running apply a second time on the same buffer must
+        refuse — the walk site no longer matches vanilla and
+        the roll constant no longer matches 2.0."""
         data = bytearray(self.orig)
         self.assertTrue(apply_player_speed(data, walk_scale=2.0))
         self.assertFalse(apply_player_speed(data, walk_scale=3.0),
-            msg="second apply on an already-patched buffer must "
-                "fail safe (we'd otherwise leave the injected float "
-                "orphaned and clobber the absolute-ref VA).")
-
-    def test_roll_scale_nops_white_edge_lock(self):
-        """April 2026: when roll_scale != 1.0, apply_player_speed
-        also NOPs the 2-byte ``JNZ +8`` at VA 0x00085200 inside
-        FUN_00084f90.  That NOP removes the WHITE-button edge-lock,
-        letting the 3× roll boost fire every frame WHITE is held
-        rather than just the first frame of a tap.  Without this
-        NOP, ``roll_scale`` is effectively invisible in sustained
-        gameplay since WHITE-held resets the flag on frame 2+."""
-        from azurik_mod.patches.player_physics import (
-            _ROLL_EDGE_LOCK_PATCH,
-            _ROLL_EDGE_LOCK_VA,
-            _ROLL_EDGE_LOCK_VANILLA,
-        )
-        # roll_scale=1.0 must leave the edge-lock alone.
-        data = bytearray(self.orig)
-        self.assertTrue(apply_player_speed(data, walk_scale=2.0,
-                                            roll_scale=1.0))
-        off = va_to_file(_ROLL_EDGE_LOCK_VA)
-        self.assertEqual(bytes(data[off:off + 2]),
-                         _ROLL_EDGE_LOCK_VANILLA,
-            msg="roll_scale=1.0 must not NOP the edge-lock")
-
-        # roll_scale != 1.0 must NOP the edge-lock.
+            msg="second walk apply on an already-patched buffer "
+                "must fail safe.")
         data2 = bytearray(self.orig)
         self.assertTrue(apply_player_speed(data2, roll_scale=2.0))
-        self.assertEqual(bytes(data2[off:off + 2]),
-                         _ROLL_EDGE_LOCK_PATCH,
-            msg="roll_scale=2.0 must NOP the edge-lock so WHITE-"
-                "held gives sustained boost")
+        self.assertFalse(apply_player_speed(data2, roll_scale=3.0),
+            msg="second roll apply on an already-patched buffer "
+                "must fail safe (constant already non-vanilla).")
 
     def test_legacy_run_scale_kwarg_still_works(self):
         """Back-compat: the old ``run_scale`` kwarg must still
-        route to the roll multiplier.  Ensures users with pinned
-        CLI flags / serialized configs don't break on first
-        upgrade."""
+        route to the roll constant overwrite.
+        """
         data_legacy = bytearray(self.orig)
         self.assertTrue(apply_player_speed(data_legacy, run_scale=2.0))
         data_new = bytearray(self.orig)
@@ -290,6 +312,37 @@ class ApplyPlayerSpeedBehaviour(unittest.TestCase):
             msg="run_scale=X must produce the exact same bytes as "
                 "roll_scale=X — otherwise the legacy kwarg silently "
                 "diverges.")
+
+
+@unittest.skipUnless(_XBE_PATH,
+    "vanilla default.xbe fixture not available")
+class ApplyClimbSpeedBehaviour(unittest.TestCase):
+    """Climbing-state speed patch: direct overwrite of the 4-byte
+    float at VA 0x001980E4 (vanilla 2.0).  Used only by
+    FUN_00087F80."""
+
+    def setUp(self):
+        self.orig = _XBE_PATH.read_bytes()
+
+    def test_default_is_noop(self):
+        data = bytearray(self.orig)
+        self.assertFalse(apply_climb_speed(data))
+        self.assertEqual(bytes(data), self.orig)
+
+    def test_nondefault_overwrites_constant(self):
+        data = bytearray(self.orig)
+        self.assertTrue(apply_climb_speed(data, climb_scale=2.5))
+        off = va_to_file(_CLIMB_CONST_VA)
+        value = struct.unpack("<f", bytes(data[off:off + 4]))[0]
+        self.assertAlmostEqual(
+            value, _VANILLA_CLIMB_SPEED * 2.5, places=5,
+            msg="climb constant must equal 2.0 × climb_scale = 5.0")
+
+    def test_reapply_to_drifted_buffer_is_rejected(self):
+        data = bytearray(self.orig)
+        self.assertTrue(apply_climb_speed(data, climb_scale=2.0))
+        self.assertFalse(apply_climb_speed(data, climb_scale=3.0),
+            msg="drifted constant must not be re-patched silently")
 
 
 @unittest.skipUnless(_XBE_PATH,
@@ -342,15 +395,15 @@ class ApplySwimSpeedBehaviour(unittest.TestCase):
 
     def test_swim_scale_does_not_touch_walk_or_roll_sites(self):
         """Site isolation: swim apply must rewrite ONLY the
-        FUN_0008b700 FMUL, never the walk FLD or roll FMUL."""
+        FUN_0008b700 FMUL, never the walk FLD or roll const."""
         data = bytearray(self.orig)
         self.assertTrue(apply_swim_speed(data, swim_scale=5.0))
         walk_off = va_to_file(_WALK_SITE_VA)
-        roll_off = va_to_file(_ROLL_SITE_VA)
+        roll_off = va_to_file(_ROLL_CONST_VA)
         self.assertEqual(
             bytes(data[walk_off:walk_off + 6]), _WALK_SITE_VANILLA)
         self.assertEqual(
-            bytes(data[roll_off:roll_off + 6]), _ROLL_SITE_VANILLA)
+            bytes(data[roll_off:roll_off + 4]), _ROLL_CONST_VANILLA)
 
     def test_reapply_rejected(self):
         data = bytearray(self.orig)
@@ -463,17 +516,17 @@ class ApplyJumpSpeedBehaviour(unittest.TestCase):
                 "refuse (bytes no longer match vanilla FLD).")
 
     def test_does_not_touch_walk_roll_swim_sites(self):
-        """Site isolation — jump apply must leave the walk / roll /
-        swim instruction bytes at vanilla."""
+        """Site isolation — jump apply must leave the walk /
+        swim instruction bytes and the roll constant at vanilla."""
         data = bytearray(self.orig)
         self.assertTrue(apply_jump_speed(data, jump_scale=3.0))
-        for va, vanilla in (
-            (_WALK_SITE_VA, _WALK_SITE_VANILLA),
-            (_ROLL_SITE_VA, _ROLL_SITE_VANILLA),
-            (_SWIM_SITE_VA, _SWIM_SITE_VANILLA),
+        for va, vanilla, n in (
+            (_WALK_SITE_VA, _WALK_SITE_VANILLA, 6),
+            (_SWIM_SITE_VA, _SWIM_SITE_VANILLA, 6),
+            (_ROLL_CONST_VA, _ROLL_CONST_VANILLA, 4),
         ):
             off = va_to_file(va)
-            self.assertEqual(bytes(data[off:off + 6]), vanilla,
+            self.assertEqual(bytes(data[off:off + n]), vanilla,
                 msg=f"jump apply touched VA 0x{va:X}")
 
     def test_apply_player_physics_routes_jump(self):
@@ -486,69 +539,6 @@ class ApplyJumpSpeedBehaviour(unittest.TestCase):
         self.assertEqual(patch[:2], b"\xD9\x05",
             msg="apply_player_physics(jump_scale=...) must "
                 "rewrite the FLD site")
-
-
-@unittest.skipUnless(_XBE_PATH,
-    "vanilla default.xbe fixture not available")
-class RollForceAlwaysOn(unittest.TestCase):
-    """April 2026 v2: when roll_scale != 1.0, apply_player_speed
-    additionally installs two 2-byte patches that force bit 0x40
-    of the input-state flags to always be set — so the
-    roll-FMUL's injected multiplier fires every frame of
-    movement regardless of whether the user presses WHITE or
-    R3 (some xemu input configurations don't route those
-    buttons at all, which previously made roll_scale invisible).
-    """
-
-    def test_roll_1_leaves_force_on_sites_intact(self):
-        """Identity: at roll=1.0 we short-circuit and leave the
-        force-on XOR-update tail untouched (vanilla WHITE/R3
-        gating preserved)."""
-        data = bytearray(_XBE_PATH.read_bytes())
-        self.assertTrue(apply_player_speed(data, walk_scale=2.0,
-                                            roll_scale=1.0))
-        f1 = va_to_file(_ROLL_FORCE_ON_1_VA)
-        f2 = va_to_file(_ROLL_FORCE_ON_2_VA)
-        self.assertEqual(bytes(data[f1:f1 + 2]),
-                         _ROLL_FORCE_ON_1_VANILLA,
-            msg="roll=1 must leave force-on site 1 at vanilla")
-        self.assertEqual(bytes(data[f2:f2 + 2]),
-                         _ROLL_FORCE_ON_2_VANILLA,
-            msg="roll=1 must leave force-on site 2 at vanilla")
-
-    def test_roll_nondefault_installs_force_on(self):
-        data = bytearray(_XBE_PATH.read_bytes())
-        self.assertTrue(apply_player_speed(data, roll_scale=2.0))
-        f1 = va_to_file(_ROLL_FORCE_ON_1_VA)
-        f2 = va_to_file(_ROLL_FORCE_ON_2_VA)
-        self.assertEqual(bytes(data[f1:f1 + 2]),
-                         _ROLL_FORCE_ON_1_PATCH,
-            msg="roll=2 must patch site 1 to MOV AL, 0x40")
-        self.assertEqual(bytes(data[f2:f2 + 2]),
-                         _ROLL_FORCE_ON_2_PATCH,
-            msg="roll=2 must patch site 2 to OR DL, AL")
-
-    def test_inject_roll_mult_is_simple_scale(self):
-        """After the semantic simplification (drop the 3×
-        factor + /walk_scale divisor): the injected FMUL
-        constant is simply ``roll_scale``."""
-        data = bytearray(_XBE_PATH.read_bytes())
-        self.assertTrue(apply_player_speed(data, roll_scale=2.5))
-        roll_off = va_to_file(_ROLL_SITE_VA)
-        patch = bytes(data[roll_off:roll_off + 6])
-        roll_va = struct.unpack("<I", patch[2:6])[0]
-        from azurik_mod.patching.xbe import parse_xbe_sections
-        _, secs = parse_xbe_sections(bytes(data))
-        roll_fo = None
-        for s in secs:
-            if s["vaddr"] <= roll_va < s["vaddr"] + s["vsize"]:
-                roll_fo = s["raw_addr"] + (roll_va - s["vaddr"])
-                break
-        value = struct.unpack("<f",
-                              bytes(data[roll_fo:roll_fo + 4]))[0]
-        self.assertAlmostEqual(value, 2.5, places=3,
-            msg="inject_roll_mult = roll_scale (simplified from "
-                "the pre-v2 3*roll/walk formula)")
 
 
 @unittest.skipUnless(_XBE_PATH,
@@ -704,13 +694,14 @@ class ApplyPlayerPhysicsRouting(unittest.TestCase):
     def test_gravity_alone_does_not_touch_speed_sites(self):
         data = bytearray(_XBE_PATH.read_bytes())
         apply_player_physics(data, gravity=7.0)
-        for va, vanilla in (
-            (_WALK_SITE_VA, _WALK_SITE_VANILLA),
-            (_ROLL_SITE_VA, _ROLL_SITE_VANILLA),
-            (_SWIM_SITE_VA, _SWIM_SITE_VANILLA),
+        for va, vanilla, n in (
+            (_WALK_SITE_VA, _WALK_SITE_VANILLA, 6),
+            (_SWIM_SITE_VA, _SWIM_SITE_VANILLA, 6),
+            (_ROLL_CONST_VA, _ROLL_CONST_VANILLA, 4),
+            (_CLIMB_CONST_VA, _CLIMB_CONST_VANILLA, 4),
         ):
             off = va_to_file(va)
-            self.assertEqual(bytes(data[off:off + 6]), vanilla,
+            self.assertEqual(bytes(data[off:off + n]), vanilla,
                 msg=f"gravity-only apply must not touch VA 0x{va:X}")
 
     def test_speed_alone_does_not_touch_gravity_constant(self):
@@ -759,52 +750,43 @@ class GracefulHandlingOfGarbage(unittest.TestCase):
     "vanilla default.xbe fixture not available")
 class DynamicWhitelistFromXbe(unittest.TestCase):
     """The pack's ``dynamic_whitelist_from_xbe`` callback powers
-    ``verify-patches --strict`` over the THREE instruction rewrites
-    (walk, roll, swim) + up to three injected per-player floats."""
+    ``verify-patches --strict``.
+
+    v3 (April 2026) range layout on a vanilla XBE:
+
+     - 3 × 6-byte instruction-site ranges (walk-FLD, swim-FMUL,
+       jump-FLD) + 1 × 6-byte (flap-FADD) = 4 six-byte ranges
+     - 5 × 4-byte imm32 ranges (air-control sites)
+     - 2 × 4-byte direct-constant ranges (roll + climb)
+    """
 
     def test_vanilla_xbe_includes_all_static_sites(self):
-        """On a vanilla XBE the callback whitelists every planned
-        patch site so ``verify-patches --strict`` won't flag them
-        as unexpected byte flips if the pack is disabled:
-
-         - 5 × 6-byte instruction-site ranges (walk, roll, swim,
-           jump-FLD, flap-FADD)
-         - 5 × 4-byte imm32 ranges (air-control sites)
-         - 3 × 2-byte roll auxiliary ranges (edge-lock + 2 force-on)
-         - up to 4 extra 4-byte follows (shared roll 3.0 +
-           shared swim 10.0 + shared gravity 9.8 via jump FLD +
-           shared flap 8.0 via flap FADD)
-        """
         from azurik_mod.patches.player_physics import (
-            _ROLL_EDGE_LOCK_VA,
             _player_speed_dynamic_whitelist,
         )
         xbe = _XBE_PATH.read_bytes()
         ranges = _player_speed_dynamic_whitelist(xbe)
         walk_off = va_to_file(_WALK_SITE_VA)
-        roll_off = va_to_file(_ROLL_SITE_VA)
+        roll_off = va_to_file(_ROLL_CONST_VA)
+        climb_off = va_to_file(_CLIMB_CONST_VA)
         swim_off = va_to_file(_SWIM_SITE_VA)
         jump_off = va_to_file(_JUMP_SITE_VA)
         flap_off = va_to_file(_FLAP_SITE_VA)
-        edge_off = va_to_file(_ROLL_EDGE_LOCK_VA)
-        f1_off = va_to_file(_ROLL_FORCE_ON_1_VA)
-        f2_off = va_to_file(_ROLL_FORCE_ON_2_VA)
         self.assertIn((walk_off, walk_off + 6), ranges)
-        self.assertIn((roll_off, roll_off + 6), ranges)
         self.assertIn((swim_off, swim_off + 6), ranges)
         self.assertIn((jump_off, jump_off + 6), ranges)
         self.assertIn((flap_off, flap_off + 6), ranges)
-        self.assertIn((edge_off, edge_off + 2), ranges)
-        self.assertIn((f1_off, f1_off + 2), ranges)
-        self.assertIn((f2_off, f2_off + 2), ranges)
+        self.assertIn((roll_off, roll_off + 4), ranges)
+        self.assertIn((climb_off, climb_off + 4), ranges)
         for ac_va in _AIR_CONTROL_SITE_VAS:
             ac_off = va_to_file(ac_va)
             self.assertIn((ac_off, ac_off + 4), ranges,
                 msg=f"air-control site 0x{ac_va:X} missing "
                     f"from whitelist")
-        # 5 instr sites + 3 two-byte + 5 air-control 4-byte +
-        # up to 4 extra 4-byte follows.
-        self.assertIn(len(ranges), (13, 14, 15, 16, 17),
+        # 4 instr sites (walk/swim/jump/flap) + 5 air-control imm32 +
+        # 2 direct-const (roll, climb) = 11 on vanilla.  After apply,
+        # up to 4 extra 4-byte follows for injected floats land.
+        self.assertIn(len(ranges), (11, 12, 13, 14, 15),
             msg=f"unexpected range count {len(ranges)}: {ranges}")
 
     def test_patched_xbe_adds_injected_float_ranges(self):
@@ -817,6 +799,7 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         data = bytearray(_XBE_PATH.read_bytes())
         self.assertTrue(apply_player_speed(
             data, walk_scale=2.0, roll_scale=1.5))
+        self.assertTrue(apply_climb_speed(data, climb_scale=2.0))
         self.assertTrue(apply_swim_speed(data, swim_scale=2.0))
         self.assertTrue(apply_jump_speed(data, jump_scale=1.5))
         self.assertTrue(apply_air_control_speed(data,
@@ -829,19 +812,23 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
                            if hi - lo == 6]
         two_byte_ranges = [(lo, hi) for lo, hi in ranges
                            if hi - lo == 2]
-        # 5 instruction-site rewrites: walk/roll/swim/jump/flap
-        # (all D9 05 or D8 0D/05 prefixes).
-        self.assertEqual(len(six_byte_ranges), 5,
-            msg="5 instr-site rewrites (walk/roll/swim/jump/flap)")
-        # 4-byte ranges: 5 injected floats (walk base, roll mult,
-        # swim mult, jump gravity scalar, flap impulse) + 5
-        # air-control imm32 sites = 10.
-        self.assertEqual(len(four_byte_ranges), 10,
-            msg="5 injected floats + 5 air-control imm32 = 10 "
-                "four-byte ranges")
-        # 3 two-byte ranges (edge-lock + 2 force-on sites).
-        self.assertEqual(len(two_byte_ranges), 3,
-            msg="3 roll-aux ranges (edge-lock + 2 force-on)")
+        # 4 six-byte instruction-site rewrites: walk/swim/jump/flap.
+        self.assertEqual(len(six_byte_ranges), 4,
+            msg="4 instr-site rewrites (walk/swim/jump/flap)")
+        # 4-byte ranges:
+        #   - 5 air-control imm32 sites
+        #   - 2 direct-constant sites (roll + climb)
+        #   - 4 injected-float follows (walk base, swim mult,
+        #     jump gravity scalar, flap impulse)
+        # = 11 four-byte ranges total.
+        self.assertEqual(len(four_byte_ranges), 11,
+            msg="5 air-control + 2 direct-const (roll/climb) "
+                "+ 4 injected floats = 11 four-byte ranges "
+                f"(got {len(four_byte_ranges)}: {four_byte_ranges})")
+        # No two-byte ranges anymore (roll no longer uses edge-lock
+        # or force-on patches).
+        self.assertEqual(len(two_byte_ranges), 0,
+            msg="v3 roll has no 2-byte aux patches")
 
     def test_callback_does_not_raise_on_all_zero_buffer(self):
         """Drift-safety: if called on something that isn't an XBE at
@@ -855,21 +842,18 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
 @unittest.skipUnless(_XBE_PATH,
     "vanilla default.xbe fixture not available")
 class SliderSemantics(unittest.TestCase):
-    """After April 2026 v2's force-always-on roll patch and
-    simplified inject_roll_mult, the slider semantics are:
+    """v3 (April 2026) slider semantics:
 
-    - walk_scale → walking-speed multiplier (always on)
-    - roll_scale → EXTRA walking-speed multiplier (also always on
-      when != 1.0; replaces the old WHITE/R3-gated behaviour which
-      was invisible to users whose xemu didn't route those buttons)
+    - walk_scale → walking-speed multiplier (shim-landed FLD)
+    - roll_scale → rolling/sliding GROUND-state speed multiplier
+      (direct 4-byte constant overwrite at VA 0x1AAB68)
+    - climb_scale → climbing-state speed multiplier
+      (direct 4-byte constant overwrite at VA 0x1980E4)
     - swim_scale → independent swim-stroke multiplier
-    - jump_scale → scales initial jump velocity (via sqrt of
-      injected 9.8×jump_scale² in the jump formula)
+    - jump_scale → scales initial jump velocity (sqrt of injected
+      9.8×jump_scale² in the jump formula)
 
-    Walking speed at runtime with all four sliders:
-      velocity = 7 × walk_scale × roll_scale × raw_stick × direction
-                 (with roll_scale = 1.0, the roll-FMUL isn't
-                  installed at all → velocity = 7 × walk × stick)
+    Each slider is a dedicated physics axis — no cross-coupling.
     """
 
     def test_walk_slider_is_base_multiplier(self):
@@ -888,49 +872,53 @@ class SliderSemantics(unittest.TestCase):
                     base, _VANILLA_PLAYER_BASE_SPEED * walk,
                     places=3)
 
-    def test_roll_slider_is_simple_scale(self):
-        """inject_roll_mult is simply ``roll_scale`` — no 3× factor,
-        no /walk_scale divisor (v2 simplification)."""
+    def test_roll_slider_scales_constant(self):
+        """v3: roll_scale directly overwrites VA 0x001AAB68 with
+        2.0 × roll_scale."""
         for roll in (0.25, 2.5, 7.0):
             with self.subTest(roll=roll):
                 data = bytearray(_XBE_PATH.read_bytes())
                 self.assertTrue(apply_player_speed(data,
                                                    roll_scale=roll))
-                roll_off = va_to_file(_ROLL_SITE_VA)
-                roll_va = struct.unpack(
-                    "<I", bytes(data[roll_off + 2:roll_off + 6]))[0]
-                mult = _read_float_at_va(bytes(data), roll_va)
-                self.assertAlmostEqual(mult, roll, places=3)
+                off = va_to_file(_ROLL_CONST_VA)
+                value = struct.unpack(
+                    "<f", bytes(data[off:off + 4]))[0]
+                self.assertAlmostEqual(
+                    value, _VANILLA_ROLL_SPEED * roll, places=3)
 
-    def test_walk_scale_alone_leaves_roll_bytes_at_vanilla(self):
-        """walk_scale=3, roll_scale=1 must NOT install the roll
-        force-always-on patches (since roll=1 is the short-circuit
-        no-op case for roll)."""
+    def test_climb_slider_scales_constant(self):
+        for climb in (0.5, 2.0, 5.0):
+            with self.subTest(climb=climb):
+                data = bytearray(_XBE_PATH.read_bytes())
+                self.assertTrue(apply_climb_speed(data,
+                                                  climb_scale=climb))
+                off = va_to_file(_CLIMB_CONST_VA)
+                value = struct.unpack(
+                    "<f", bytes(data[off:off + 4]))[0]
+                self.assertAlmostEqual(
+                    value, _VANILLA_CLIMB_SPEED * climb, places=3)
+
+    def test_walk_scale_alone_leaves_roll_constant_at_vanilla(self):
+        """walk_scale=3, roll_scale=1 must leave roll constant
+        untouched (roll=1 is the no-op short-circuit)."""
         data = bytearray(_XBE_PATH.read_bytes())
         self.assertTrue(apply_player_speed(data, walk_scale=3.0,
                                             roll_scale=1.0))
-        roll_off = va_to_file(_ROLL_SITE_VA)
-        f1_off = va_to_file(_ROLL_FORCE_ON_1_VA)
-        f2_off = va_to_file(_ROLL_FORCE_ON_2_VA)
-        self.assertEqual(bytes(data[roll_off:roll_off + 6]),
-                         _ROLL_SITE_VANILLA,
-            msg="roll=1 must leave FMUL site at vanilla")
-        self.assertEqual(bytes(data[f1_off:f1_off + 2]),
-                         _ROLL_FORCE_ON_1_VANILLA,
-            msg="roll=1 must leave force-on site 1 vanilla")
-        self.assertEqual(bytes(data[f2_off:f2_off + 2]),
-                         _ROLL_FORCE_ON_2_VANILLA,
-            msg="roll=1 must leave force-on site 2 vanilla")
+        roll_off = va_to_file(_ROLL_CONST_VA)
+        self.assertEqual(bytes(data[roll_off:roll_off + 4]),
+                         _ROLL_CONST_VANILLA,
+            msg="roll=1 must leave rolling-state constant at vanilla")
 
     def test_swim_scale_alone_touches_only_swim_site(self):
         data = bytearray(_XBE_PATH.read_bytes())
         self.assertTrue(apply_swim_speed(data, swim_scale=5.0))
-        for va, vanilla in (
-            (_WALK_SITE_VA, _WALK_SITE_VANILLA),
-            (_ROLL_SITE_VA, _ROLL_SITE_VANILLA),
+        for va, vanilla, n in (
+            (_WALK_SITE_VA, _WALK_SITE_VANILLA, 6),
+            (_ROLL_CONST_VA, _ROLL_CONST_VANILLA, 4),
+            (_CLIMB_CONST_VA, _CLIMB_CONST_VANILLA, 4),
         ):
             off = va_to_file(va)
-            self.assertEqual(bytes(data[off:off + 6]), vanilla,
+            self.assertEqual(bytes(data[off:off + n]), vanilla,
                 msg=f"swim apply must not touch VA 0x{va:X}")
         swim_off = va_to_file(_SWIM_SITE_VA)
         self.assertNotEqual(bytes(data[swim_off:swim_off + 6]),
@@ -939,13 +927,13 @@ class SliderSemantics(unittest.TestCase):
     def test_jump_scale_touches_only_jump_site(self):
         data = bytearray(_XBE_PATH.read_bytes())
         self.assertTrue(apply_jump_speed(data, jump_scale=3.0))
-        for va, vanilla in (
-            (_WALK_SITE_VA, _WALK_SITE_VANILLA),
-            (_ROLL_SITE_VA, _ROLL_SITE_VANILLA),
-            (_SWIM_SITE_VA, _SWIM_SITE_VANILLA),
+        for va, vanilla, n in (
+            (_WALK_SITE_VA, _WALK_SITE_VANILLA, 6),
+            (_SWIM_SITE_VA, _SWIM_SITE_VANILLA, 6),
+            (_ROLL_CONST_VA, _ROLL_CONST_VANILLA, 4),
         ):
             off = va_to_file(va)
-            self.assertEqual(bytes(data[off:off + 6]), vanilla,
+            self.assertEqual(bytes(data[off:off + n]), vanilla,
                 msg=f"jump apply must not touch VA 0x{va:X}")
         jump_off = va_to_file(_JUMP_SITE_VA)
         self.assertNotEqual(bytes(data[jump_off:jump_off + 6]),

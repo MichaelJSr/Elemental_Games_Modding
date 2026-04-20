@@ -183,19 +183,9 @@ class ShippedPackCategorisation(unittest.TestCase):
         performance mod.  The original D3D-BSOD-on-death concern
         turned out to be a pre-existing engine bug unrelated to
         the patch (reproducible on vanilla 30 FPS too), so the
-        patch stays in the expected category.  The ``experimental``
-        slot is reserved for patches that fundamentally change
-        game behaviour (e.g. ``enable_dev_menu``)."""
+        patch stays in the expected category."""
         from azurik_mod.patching.registry import get_pack
         self.assertEqual(get_pack("fps_unlock").category, "performance")
-
-    def test_enable_dev_menu_is_experimental(self):
-        """``enable_dev_menu`` bypasses the vanilla New Game flow
-        and can corrupt saves — it belongs in the opt-in
-        experimental bucket."""
-        from azurik_mod.patching.registry import get_pack
-        self.assertEqual(
-            get_pack("enable_dev_menu").category, "experimental")
 
     def test_randomizer_pools_are_in_randomize(self):
         """All five shuffle pools live in the ``randomize`` category
@@ -254,9 +244,14 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         self.assertNotIn("other", browser.tabs())
 
     def test_tabs_in_category_order(self):
-        """Shipped packs produce 6 tabs, in the registered
+        """Shipped packs produce 5 tabs, in the registered
         Category.order order: performance (10) → player (20) →
-        boot (30) → qol (40) → randomize (50) → experimental (80).
+        boot (30) → qol (40) → randomize (50).
+
+        ``experimental`` is registered but currently has no shipped
+        packs (the sole occupant ``enable_dev_menu`` was retired
+        April 2026 — see ``tests/test_tier3_tools.py`` module
+        docstring) so the browser correctly hides the tab.
 
         Note: this tests the RAW ``PackBrowser`` behaviour
         (every non-empty category renders).  The Patches PAGE
@@ -270,8 +265,7 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         browser = PackBrowser(self._root, all_packs(), {})
         self.assertEqual(
             browser.tabs(),
-            ["performance", "player", "boot", "qol",
-             "randomize", "experimental"])
+            ["performance", "player", "boot", "qol", "randomize"])
 
     def test_tab_titles_humanised(self):
         from azurik_mod.patching.registry import all_packs
@@ -283,7 +277,9 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         self.assertIn("Boot", titles[2])
         self.assertIn("Quality of Life", titles[3])
         self.assertEqual(titles[4], "Randomize")
-        self.assertEqual(titles[5], "Experimental")
+        # ``experimental`` has no shipped packs post-dev_menu
+        # retirement; the browser hides the tab entirely.
+        self.assertEqual(len(titles), 5)
 
     def test_parametric_sliders_rendered_inside_their_tab(self):
         """``player_physics`` lives in the Player tab AND exposes 4
@@ -305,6 +301,7 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         self.assertEqual(
             slider_keys,
             [("player_physics", "air_control_scale"),
+             ("player_physics", "climb_speed_scale"),
              ("player_physics", "flap_height_scale"),
              ("player_physics", "gravity"),
              ("player_physics", "jump_speed_scale"),
@@ -313,7 +310,7 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
              ("player_physics", "walk_speed_scale")])
         # Initial values mirrored into pack_params.
         self.assertIn("player_physics", params)
-        self.assertEqual(len(params["player_physics"]), 7)
+        self.assertEqual(len(params["player_physics"]), 8)
 
     def test_plugin_category_gets_its_own_tab(self):
         """Simulate a plugin: register a category + a pack referencing
@@ -405,7 +402,10 @@ class PatchesPageHidesRandomize(unittest.TestCase):
 
     def test_patches_page_still_shows_other_five_tabs(self):
         """Hiding ``randomize`` must not accidentally hide anyone
-        else — the remaining 5 categories must still render."""
+        else.  After ``enable_dev_menu`` was retired (April 2026)
+        the ``experimental`` category has no shipped packs so
+        the browser correctly hides its tab too; the remaining
+        4 categories must still render."""
         from gui.pages.patches import PatchesPage
 
         class _AppStub:
@@ -420,8 +420,7 @@ class PatchesPageHidesRandomize(unittest.TestCase):
         page = PatchesPage(self._root, _AppStub())
         self.assertEqual(
             page.tabs(),
-            ["performance", "player", "boot", "qol",
-             "experimental"],
+            ["performance", "player", "boot", "qol"],
             msg="Dropping randomize must not drop any other tabs")
 
     def test_randomize_packs_still_registered(self):
