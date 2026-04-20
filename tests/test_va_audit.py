@@ -262,6 +262,77 @@ _NON_VA_CONSTANTS = frozenset({
     "AZURIK_PLAYER_CHAR_NAME_FILE_OFF",  # file offset, not VA
     "AZURIK_CONTROLLER_STRIDE",          # sizeof(ControllerState)
     "AZURIK_SIM_DT_SECONDS_BITS",        # f32 bit pattern of 1/30
+    # Player-entity / armor / level / input struct field offsets
+    # (offsets from a base pointer, not VAs themselves).  Late
+    # April 2026 additions.
+    "AZURIK_ENT_INPUT_STATE_PTR",
+    "AZURIK_ENT_VELOCITY_X",
+    "AZURIK_ENT_VELOCITY_Y",
+    "AZURIK_ENT_VELOCITY_Z",
+    "AZURIK_ENT_TYPE",
+    "AZURIK_ENT_FLAGS_BYTE",
+    "AZURIK_ENT_STATE",
+    "AZURIK_ENT_FLAP_COUNTER",
+    "AZURIK_ENT_MAGNITUDE",
+    "AZURIK_ENT_DIRECTION_X",
+    "AZURIK_ENT_DIRECTION_Y",
+    "AZURIK_ENT_DIRECTION_Z",
+    "AZURIK_ENT_GRAB_TARGET",
+    "AZURIK_ENT_AIR_CONTROL",
+    "AZURIK_ENT_JUMP_HEIGHT",
+    "AZURIK_ENT_AIRBORNE_FLAG",
+    "AZURIK_ENT_PEAK_Z",
+    "AZURIK_ENT_PREV_Z",
+    "AZURIK_ENT_MISC_FLAGS",
+    "AZURIK_ARMOR_LEVEL_STRUCT",
+    "AZURIK_ARMOR_FUEL_CURRENT",
+    "AZURIK_LVL_AIR_POWER_LEVEL",
+    "AZURIK_LVL_FUEL_DRAIN_RATE",
+    "AZURIK_LVL_FLAP_COUNT",
+    # Input-flag bit masks.
+    "AZURIK_INPUT_JUMP_EDGE",
+    "AZURIK_INPUT_WHITE_BACK",
+})
+
+
+# Function entry-point VAs + patch-site instruction VAs.  These
+# ARE VAs but they're audited in a dedicated block below (pattern
+# check against the XBE .text section) rather than in
+# ANCHOR_EXPECTATIONS (which is for data-section constants).
+_PHYSICS_FUNCTION_VA_MACROS = frozenset({
+    "AZURIK_FUN_PLAYER_WALK_STATE_VA",
+    "AZURIK_FUN_PLAYER_CLIMB_TICK_VA",
+    "AZURIK_FUN_PLAYER_JUMP_INIT_VA",
+    "AZURIK_FUN_WING_FLAP_VA",
+    "AZURIK_FUN_PLAYER_AIRBORNE_TICK_VA",
+    "AZURIK_FUN_PLAYER_SLOPE_SLIDE_TICK_VA",
+    "AZURIK_FUN_PLAYER_SWIM_TICK_VA",
+    "AZURIK_FUN_PLAYER_PHYSICS_STATE_VA",
+    "AZURIK_FUN_FALL_DAMAGE_DISPATCH_VA",
+    "AZURIK_FUN_CONSUME_FUEL_VA",
+    "AZURIK_FUN_PLAYER_AIRBORNE_REINIT_VA",
+    "AZURIK_FUN_PLAYER_INPUT_TICK_VA",
+    "AZURIK_FUN_PLAYER_ARMOR_STATE_TICK_VA",
+    "AZURIK_FUN_XINPUT_DEVICE_POLL_VA",
+    "AZURIK_FUN_LOAD_ARMOR_PROPS_VA",
+    "AZURIK_FUN_LOAD_ATTACKS_ANIMS_VA",
+    "AZURIK_FUN_CVAR_GET_DOUBLE_VA",
+})
+
+_PHYSICS_PATCH_SITE_VA_MACROS = frozenset({
+    "AZURIK_PATCH_ROLL_FMUL_VA",
+    "AZURIK_PATCH_WALK_FLD_VA",
+    "AZURIK_PATCH_JUMP_FLD_VA",
+    "AZURIK_PATCH_FLAP_FLD_VA",
+    "AZURIK_PATCH_FLAP_SUB_FMUL_VA",
+    "AZURIK_PATCH_SLOPE_SLIDE_FMUL_VA",
+    "AZURIK_PATCH_SWIM_FMUL_VA",
+    "AZURIK_PATCH_AIR_CTRL_12_IMM32_VA",
+    "AZURIK_PATCH_AIR_CTRL_9_IMM32_VA",
+    "AZURIK_PATCH_PER_FRAME_DRAIN_VA",
+    "AZURIK_PATCH_WING_FLAP_COUNT_HOOK_VA",
+    "AZURIK_PATCH_CLIMB_FLD_PRIMARY_VA",
+    "AZURIK_PATCH_CLIMB_FLD_SECONDARY_VA",
 })
 
 
@@ -397,9 +468,15 @@ class AnchorCoverageDrift(unittest.TestCase):
             re.MULTILINE,
         )
         declared = set(pattern.findall(text))
-        # Strip non-VA constants (file offsets, strides) which don't
-        # need byte-level auditing.
+        # Strip non-VA constants (file offsets, strides, field
+        # offsets, flag masks) which don't need byte-level
+        # auditing.
         declared -= _NON_VA_CONSTANTS
+        # Strip physics function / patch-site VAs — those are
+        # code-section VAs audited separately by
+        # ``PhysicsAnchorsLandInText`` below.
+        declared -= _PHYSICS_FUNCTION_VA_MACROS
+        declared -= _PHYSICS_PATCH_SITE_VA_MACROS
 
         covered = set(ANCHOR_EXPECTATIONS.keys())
         missing = declared - covered
@@ -430,6 +507,51 @@ class AnchorCoverageDrift(unittest.TestCase):
                 msg=f"_NON_VA_CONSTANTS mentions {name!r} but it is "
                     f"not declared in azurik.h — remove from the "
                     f"exclusion set.")
+
+
+@unittest.skipUnless(_VANILLA_XBE.exists(),
+    f"vanilla XBE required at {_VANILLA_XBE}")
+class PhysicsAnchorsLandInText(unittest.TestCase):
+    """Every ``AZURIK_FUN_*_VA`` + ``AZURIK_PATCH_*_VA`` macro in
+    azurik.h resolves to a location inside the .text section.
+
+    Lightweight compared to the full VanillaFunctionAudit — we just
+    verify the anchor is reachable and points at code, not at a
+    stale / mistyped address.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.xbe, cls.secs = _load_xbe()
+
+    def test_all_physics_fun_vas_land_in_text(self):
+        if not _AZURIK_HEADER.exists():
+            self.skipTest(f"header missing at {_AZURIK_HEADER}")
+        text = _AZURIK_HEADER.read_text()
+        # Parse #define AZURIK_..._VA 0x...
+        import re
+        pattern = re.compile(
+            r"^\s*#define\s+(AZURIK_[A-Z0-9_]+_VA)\s+(0x[0-9A-Fa-f]+)u?\b",
+            re.MULTILINE,
+        )
+        header_vas = {m.group(1): int(m.group(2), 16)
+                      for m in pattern.finditer(text)}
+
+        for macro in sorted(_PHYSICS_FUNCTION_VA_MACROS
+                            | _PHYSICS_PATCH_SITE_VA_MACROS):
+            with self.subTest(macro=macro):
+                self.assertIn(
+                    macro, header_vas,
+                    msg=f"{macro} listed in the audit set but not "
+                        f"declared in azurik.h")
+                va = header_vas[macro]
+                _, sec = _read_bytes_for_va(self.xbe, self.secs, va)
+                self.assertEqual(
+                    sec, ".text",
+                    msg=f"{macro} (VA 0x{va:X}) resolves to section "
+                        f"{sec!r}, expected '.text' — either the VA "
+                        f"is wrong or the vanilla XBE has shifted "
+                        f"sections.")
 
 
 if __name__ == "__main__":

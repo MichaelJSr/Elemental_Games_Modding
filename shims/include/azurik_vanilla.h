@@ -1280,16 +1280,23 @@ unsigned char consume_fuel(float cost);
  * asset by (row, column) index.  The result is returned as an
  * x87 float10 on ST(0); Ghidra models it as ``float10``.
  *
- * Vanilla VA: 0x000B6280  (mangled: _config_cell_value@16) */
-__attribute__((stdcall))
-long double config_cell_value(void *tabl, int row, int column,
+ * __cdecl (caller cleans stack): 4 stack args (grid, row, col,
+ * default_out).  Already registered in ``vanilla_symbols.py``
+ * as name="config_cell_value" with matching ABI.
+ *
+ * Vanilla VA: 0x000D1520  (mangled: _config_cell_value) */
+__attribute__((cdecl))
+long double config_cell_value(void *grid, int row, int col,
                               double *default_out);
 
 /* Cvar value fetcher.  Called to read a cvar's current value
  * by name (e.g. "fall min velocity").  Cached-return pattern:
  * the caller maintains a static double + a ``cached`` byte;
  * when the byte is zero, this function runs the lookup and
- * fills the byte.
+ * fills the byte.  ABI: __cdecl with the cvar-struct pointer
+ * passed in ESI (register) — NOT a clean ABI we can express in
+ * portable C, but for pure intercept / read-back purposes a
+ * ``void``-signature extern suffices.
  *
  * Vanilla VA: 0x0005E620  (mangled: _cvar_get_double) */
 __attribute__((cdecl))

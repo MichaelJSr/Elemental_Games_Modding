@@ -1052,6 +1052,128 @@ _Static_assert(__builtin_offsetof(MovieContext, vtable) == 0x00,
 #define AZURIK_VANILLA_SWIM_BOOST     10.0f
 
 
+/* ==================================================================
+ * Player-physics entity field offsets — named macros
+ *
+ * Typed access for shim code that wants to read / write player
+ * fields without casting to a full struct.  Offsets are from the
+ * base of the per-frame "entity" pointer (ESI in most physics
+ * functions; same base as ``PlayerInputState *``).
+ *
+ * Each macro is meant to be used as:
+ *
+ *     float v = *(float *)((char *)entity + AZURIK_ENT_Z_VELOCITY);
+ *
+ * If you need more than a handful, declare a local struct.
+ * ================================================================== */
+
+#define AZURIK_ENT_INPUT_STATE_PTR   0x020  /* PlayerInputState * chain  */
+#define AZURIK_ENT_VELOCITY_X        0x024  /* float                     */
+#define AZURIK_ENT_VELOCITY_Y        0x028  /* float                     */
+#define AZURIK_ENT_VELOCITY_Z        0x02C  /* float (vertical)          */
+#define AZURIK_ENT_TYPE              0x030  /* int (0/0x150=cinematic)   */
+#define AZURIK_ENT_FLAGS_BYTE        0x060  /* u8 flags                  */
+#define AZURIK_ENT_STATE             0x094  /* physics state (see below) */
+#define AZURIK_ENT_FLAP_COUNTER      0x0D8  /* int (used flaps so far)   */
+#define AZURIK_ENT_MAGNITUDE         0x124  /* float (stick × boost)     */
+#define AZURIK_ENT_DIRECTION_X       0x128  /* float (unit vec)          */
+#define AZURIK_ENT_DIRECTION_Y       0x12C  /* float                     */
+#define AZURIK_ENT_DIRECTION_Z       0x130  /* float (always 0 in 2D)    */
+#define AZURIK_ENT_GRAB_TARGET       0x134  /* int (-1 = none)           */
+#define AZURIK_ENT_AIR_CONTROL       0x140  /* float (9.0 / 12.0)        */
+#define AZURIK_ENT_JUMP_HEIGHT       0x144  /* float (1.1 / 1.2)         */
+#define AZURIK_ENT_AIRBORNE_FLAG     0x150  /* u8                        */
+#define AZURIK_ENT_PEAK_Z            0x164  /* float (flap ceiling)      */
+#define AZURIK_ENT_PREV_Z            0x168  /* float (fall-damage in)    */
+#define AZURIK_ENT_MISC_FLAGS        0x16C  /* u8                        */
+
+/* Player physics state values (at AZURIK_ENT_STATE). */
+enum PlayerPhysicsState {
+    AZURIK_PPS_GROUND       = 0,  /* walking / idle            */
+    AZURIK_PPS_CLIMB        = 1,  /* climbing / hanging-ledge  */
+    AZURIK_PPS_AIRBORNE     = 2,  /* post-jump / pre-landing   */
+    AZURIK_PPS_SLOPE_SLIDE  = 3,  /* slow slope-slide          */
+    AZURIK_PPS_SLOPE_FAST   = 4,  /* fast/momentum slope-slide */
+    AZURIK_PPS_PREJUMP      = 5,  /* 1-frame transition 0 → 2  */
+    AZURIK_PPS_SWIM         = 6,  /* swimming                  */
+    AZURIK_PPS_GAMEOVER     = 7,  /* HP == 0, gameover showing */
+    AZURIK_PPS_DEAD         = 8,  /* fully dead, respawning    */
+    /* 256+ = cutscene states (not enumerated here) */
+};
+
+/* PlayerInputState flag bits (byte at [input_state + 0x20]). */
+#define AZURIK_INPUT_JUMP_EDGE      0x04  /* jump button edge-triggered */
+#define AZURIK_INPUT_WHITE_BACK     0x40  /* WHITE or BACK held (roll)  */
+
+
+/* ==================================================================
+ * ArmorMgr chain — fuel / air-power lookups
+ *
+ * Reached from an entity via:
+ *
+ *     ArmorMgr *armor_mgr =
+ *         *(ArmorMgr **)(
+ *             *(void **)(
+ *                 *(void **)((char *)entity + 0x20) + 0x154)
+ *           + 0xCC);
+ *
+ * (EDI in wing_flap / consume_fuel is the already-resolved
+ * ArmorMgr pointer.  The chain above is only needed when starting
+ * fresh from an entity.)
+ * ================================================================== */
+
+#define AZURIK_ARMOR_LEVEL_STRUCT    0x020  /* → armor level struct      */
+#define AZURIK_ARMOR_FUEL_CURRENT    0x024  /* float — drains per frame  */
+
+/* Offsets within the level-struct pointed at by
+ * ArmorMgr[+0x20].  Used by wing_flap and consume_fuel. */
+#define AZURIK_LVL_AIR_POWER_LEVEL   0x008  /* int — 1/2/3 granted, 0/4=none */
+#define AZURIK_LVL_FUEL_DRAIN_RATE   0x034  /* float — divisor in fuel drain */
+#define AZURIK_LVL_FLAP_COUNT        0x038  /* int — 1/2/5 vanilla         */
+
+
+/* ==================================================================
+ * Key physics VAs — instruction + function addresses
+ *
+ * Patch sites + entry points the session documented.  Include
+ * these rather than hard-coding magic VAs in shim code.
+ * ================================================================== */
+
+/* Function entry points. */
+#define AZURIK_FUN_PLAYER_WALK_STATE_VA         0x00085F50
+#define AZURIK_FUN_PLAYER_CLIMB_TICK_VA         0x00087F80
+#define AZURIK_FUN_PLAYER_JUMP_INIT_VA          0x00089060
+#define AZURIK_FUN_WING_FLAP_VA                 0x00089300
+#define AZURIK_FUN_PLAYER_AIRBORNE_TICK_VA      0x00089480
+#define AZURIK_FUN_PLAYER_SLOPE_SLIDE_TICK_VA   0x00089A70
+#define AZURIK_FUN_PLAYER_SWIM_TICK_VA          0x0008B700
+#define AZURIK_FUN_PLAYER_PHYSICS_STATE_VA      0x0008CCC0
+#define AZURIK_FUN_FALL_DAMAGE_DISPATCH_VA      0x0008AB70
+#define AZURIK_FUN_CONSUME_FUEL_VA              0x000842D0
+#define AZURIK_FUN_PLAYER_AIRBORNE_REINIT_VA    0x00083F90
+#define AZURIK_FUN_PLAYER_INPUT_TICK_VA         0x00084940
+#define AZURIK_FUN_PLAYER_ARMOR_STATE_TICK_VA   0x00083D80
+#define AZURIK_FUN_XINPUT_DEVICE_POLL_VA        0x000A2DF0
+#define AZURIK_FUN_LOAD_ARMOR_PROPS_VA          0x0003C700
+#define AZURIK_FUN_LOAD_ATTACKS_ANIMS_VA        0x0007E2E0
+#define AZURIK_FUN_CVAR_GET_DOUBLE_VA           0x0005E620
+
+/* Key patch sites (instruction addresses). */
+#define AZURIK_PATCH_ROLL_FMUL_VA               0x000849E4
+#define AZURIK_PATCH_WALK_FLD_VA                0x00085F62
+#define AZURIK_PATCH_JUMP_FLD_VA                0x00089160
+#define AZURIK_PATCH_FLAP_FLD_VA                0x000893AE
+#define AZURIK_PATCH_FLAP_SUB_FMUL_VA           0x000893DD
+#define AZURIK_PATCH_SLOPE_SLIDE_FMUL_VA        0x00089B76
+#define AZURIK_PATCH_SWIM_FMUL_VA               0x0008B7BF
+#define AZURIK_PATCH_AIR_CTRL_12_IMM32_VA       0x00083FAC
+#define AZURIK_PATCH_AIR_CTRL_9_IMM32_VA        0x00083FCE
+#define AZURIK_PATCH_PER_FRAME_DRAIN_VA         0x00083DE3
+#define AZURIK_PATCH_WING_FLAP_COUNT_HOOK_VA    0x00089321
+#define AZURIK_PATCH_CLIMB_FLD_PRIMARY_VA       0x00087FA7
+#define AZURIK_PATCH_CLIMB_FLD_SECONDARY_VA     0x00088357
+
+
 #ifdef __cplusplus
 }
 #endif

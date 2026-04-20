@@ -2705,6 +2705,225 @@ register(VanillaSymbol(
 
 
 # ---------------------------------------------------------------------------
+# Player physics / movement (April 2026 late RE pass)
+# ---------------------------------------------------------------------------
+#
+# These are the player per-frame physics functions dispatched from
+# player_physics_state_machine (FUN_0008CCC0).  Every shim-callable
+# function in shims/include/azurik_vanilla.h has a matching entry
+# here so tests/test_vanilla_thunks.py can enforce the contract.
+#
+# Calling-convention notes (confirmed via Ghidra call-site
+# inspection):
+#   - cdecl    → callers balance the stack (no RET N)
+#   - stdcall  → callees pop their args (RET N at exit)
+#   - fastcall → ECX + EDX carry the first 2 args; remainder on stack
+#                (stack-arg bytes only)
+#   - thiscall → ECX = this pointer; stack args caller-cleaned
+#                unless RET N (MSVC thiscall) — check per function
+
+register(VanillaSymbol(
+    name="player_walk_state",
+    va=0x00085F50,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "Main walking-state per-frame function (state 0).  Reads "
+        "CritterData.run_speed * entity.magnitude * direction "
+        "and produces horizontal velocity.  The FLD at VA 0x85F62 "
+        "(MOV EAX,[EBP+0x34]; FLD [EAX+0x40]) is the "
+        "walk_speed_scale patch target."
+    ),
+))
+
+register(VanillaSymbol(
+    name="player_jump_init",
+    va=0x00089060,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "Initial jump from ground (state 5 -> 2 transition).  "
+        "Sets entity.air_control=9.0 (imm32 at 0x890E4/0x89120) "
+        "and entity.jump_height=1.1 (imm32 at 0x890D4/0x89110), "
+        "then computes v0 = sqrt(2*gravity*jump_height).  The "
+        "FLD [0x001980A8] at VA 0x89160 is the jump_speed_scale "
+        "patch target.  Calls player_airborne_reinit on the air-"
+        "power path (overwrites air_control/jump_height with "
+        "air-power-specific values)."
+    ),
+))
+
+register(VanillaSymbol(
+    name="player_airborne_tick",
+    va=0x00089480,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "Per-frame airborne physics (state 2).  Computes "
+        "horizontal velocity = entity.air_control * "
+        "entity.magnitude and applies gravity to z.  Calls "
+        "wing_flap (FUN_00089300) when the flap-button edge is "
+        "triggered.  The FADD [0x001A25C0] at VA 0x896EA was the "
+        "pre-v2 flap_height_scale target (wrong maneuver \u2014 see "
+        "comment there)."
+    ),
+))
+
+register(VanillaSymbol(
+    name="wing_flap",
+    va=0x00089300,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc=(
+        "Wing flap / Air-power double-jump.  Gated by "
+        "([input_state+0x20] & 0x04) + armor.flap_count != 0 + "
+        "entity.flap_counter < armor.flap_count.  Consumes fuel "
+        "via consume_fuel (1.0 first flap, 100.0 subsequent > 6m "
+        "beyond peak).  v0 = sqrt(2 * 9.8 * flap_height) at "
+        "VA 0x893AE (flap_height_scale patch target), halved by "
+        "FMUL [0x001A2510]=0.5 at VA 0x893DD for subsequent flaps "
+        "(flap_subsequent_scale patch target), scaled by "
+        "FMUL [0x001A26C4]=1.5 at VA 0x893EB.  Also hosts the "
+        "wing_flap_count shim trampoline at VA 0x89321."
+    ),
+))
+
+register(VanillaSymbol(
+    name="player_airborne_reinit",
+    va=0x00083F90,
+    calling_convention="fastcall",
+    arg_bytes=0,
+    doc=(
+        "Per-frame airborne re-initialiser.  __fastcall: ECX = "
+        "&entity[+0x140] (air-control out), EAX = armor_mgr (in).  "
+        "Writes entity.air_control (12.0 if air-power-level in "
+        "[1,3] else 9.0) and entity.jump_height (1.2 / 1.1 resp.) "
+        "every frame.  This is WHY the static jump_init imm32 "
+        "writes at 0x890E4/0x89126/etc. aren't enough to patch "
+        "air-control \u2014 this function overrides them each frame.  "
+        "The 2 imm32s at VA 0x83FAC (12.0) and 0x83FCE (9.0) are "
+        "the air_control_scale secondary patch targets."
+    ),
+))
+
+register(VanillaSymbol(
+    name="player_input_tick",
+    va=0x00084940,
+    calling_convention="fastcall",
+    arg_bytes=0,
+    doc=(
+        "Per-frame input composer.  __fastcall: ECX = "
+        "PlayerInputState pointer.  Reads raw stick/buttons, "
+        "computes entity.magnitude ([entity+0x124]) and "
+        "entity.direction ([entity+0x128..0x130]).  When bit 0x40 "
+        "of [entity+0x20] is set (WHITE or BACK held), multiplies "
+        "magnitude by 3.0 at VA 0x849E4 (FMUL [0x001A25BC]).  That "
+        "FMUL is the roll_speed_scale patch target."
+    ),
+))
+
+register(VanillaSymbol(
+    name="player_climb_tick",
+    va=0x00087F80,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "Climbing-state per-frame function (state 1).  Reads "
+        "g_climb_speed_const (VA 0x001980E4 = 2.0) at two call "
+        "sites: VA 0x87FA7 (primary climb velocity) and "
+        "VA 0x88357 (secondary climb-retarget).  The constant has "
+        "EXACTLY 2 readers (both here), so climb_speed_scale "
+        "patches the constant in place."
+    ),
+))
+
+register(VanillaSymbol(
+    name="player_slope_slide_tick",
+    va=0x00089A70,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "Slope-slide states 3 & 4 per-frame function.  Entered "
+        "via player_ground_land_tick (FUN_0008AE10 transition) "
+        "when the player lands on a slope > 45\u00b0 from upright.  "
+        "State 3 uses g_slope_slide_speed_const (VA 0x001AAB68 = "
+        "2.0) \u2014 single reader at VA 0x89B76 \u2014 patched by "
+        "slope_slide_speed_scale via direct 4-byte float "
+        "overwrite.  State 4 has separate fast-slide physics "
+        "with dynamic-init globals at 0x003902A0..9C."
+    ),
+))
+
+register(VanillaSymbol(
+    name="player_swim_tick",
+    va=0x0008B700,
+    calling_convention="stdcall",
+    arg_bytes=4,
+    doc=(
+        "Swim state per-frame function (state 6).  Reads "
+        "[0x001A25B4]=10.0 (shared) at VA 0x8B7BF as the stroke "
+        "multiplier.  The FMUL there is the swim_speed_scale "
+        "patch target."
+    ),
+))
+
+register(VanillaSymbol(
+    name="fall_damage_dispatch",
+    va=0x0008AB70,
+    calling_convention="stdcall",
+    arg_bytes=8,
+    doc=(
+        "Fall-damage tiered dispatcher.  __stdcall(float "
+        "fall_height, float fall_speed).  Called from "
+        "player_airborne_tick's landing transition (VA 0x8C173).  "
+        "Reads 7 cvars from config.xbr on first call ('fall min "
+        "velocity', 'fall height 1/2/3', 'fall damage 1/2/3') "
+        "cached as static doubles at 0x00390228..290.  Applies "
+        "damage via FUN_00044640 when thresholds are breached.  "
+        "Our no_fall_damage v2 rewrites the prologue to "
+        "'XOR AL,AL ; RET 8 ; NOP' \u2014 always returns 0 without "
+        "running tier selector."
+    ),
+))
+
+register(VanillaSymbol(
+    name="consume_fuel",
+    va=0x000842D0,
+    calling_convention="thiscall",
+    arg_bytes=0,
+    doc=(
+        "Event-driven fuel consumer.  __thiscall (ECX = "
+        "armor_mgr, float cost on stack; stack arg cleaned by "
+        "callee via 'RET 4'). Decrements "
+        "armor_mgr.fuel_current ([this+0x24]) by "
+        "cost / armor.fuel_max ([[this+0x20]+0x38]) and returns 1 "
+        "on success, 0 on refuse.  ONLY 2 callers \u2014 both in "
+        "wing_flap (0x89354=1.0 cost, 0x893D4=100.0 penalty).  "
+        "Per-frame sustained drain is SEPARATE, in "
+        "player_armor_state_tick at VA 0x83DE3.  Our infinite_fuel "
+        "patch rewrites this function's prologue to "
+        "'MOV AL, 1 ; RET 4'."
+    ),
+))
+
+register(VanillaSymbol(
+    name="cvar_get_double",
+    va=0x0005E620,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "Cvar value fetcher.  Called to read a cvar's current "
+        "value by name (e.g. 'fall min velocity').  Uses a "
+        "caller-maintained cached-return pattern: caller keeps a "
+        "static double + 'cached' byte, zeroes the byte on first "
+        "call, passes the cvar-name pointer in ESI (register).  "
+        "The arg-in-ESI is a Watcom-ish convention not expressible "
+        "in portable C, so shims using this would need a wrapper."
+    ),
+))
+
+
+# ---------------------------------------------------------------------------
 # Public accessors
 # ---------------------------------------------------------------------------
 
