@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### Docs + anchor sync pass (round 11.12)
+
+Follow-up housekeeping on top of round 11.11:
+
+- **`shims/include/azurik.h`**: added two new named anchors —
+  `AZURIK_PATCH_FLAP_ENTRY_FUEL_VA` (VA 0x8934E, per-flap 1.0f
+  entry drain) and `AZURIK_SHIM_HOOK_ANIM_APPLY_VTABLE_VA` (VA
+  0x43066, vtable-commit hook inside `anim_apply_translation`).
+  Both were already in use by the Python apply functions but
+  weren't exposed as C-header constants.
+- **`tests/test_va_audit.py`**: added both new anchor names to
+  the physics allow-list so the drift audit covers them.
+- **`docs/LEARNINGS.md`**: new "Wing-flap ENTRY fuel drain +
+  `consume_fuel` threshold (round 11.11)" and "Animation
+  root-motion vtable-commit hook (round 11.11, experimental)"
+  sections documenting the full RE rationale for each.
+- **`docs/PATCHES.md`**: player_physics slider count updated
+  from 9 to 10; `animation_root_motion_scale` pack called out
+  separately; round-10 purge paragraph re-framed as "selectively
+  reversed" to reflect the round-11.8 restorations.
+- **Ghidra**: pushed plate comments at VA 0x8934D (entry-fuel
+  hook), VA 0x893CD (descent-fuel hook), and VA 0x43066
+  (vtable-commit hook) with full RE rationale + slider names.
+- **`gui/backend.py`**: dropped one unused pyflakes local
+  (`except Exception as exc:` → bare `except Exception:`) in
+  the catch-all around `redirect_stdout`.
+
+Drift audit clean: all 48 mangled names in
+`shims/include/azurik_vanilla.h` resolve in
+`azurik_mod/patching/vanilla_symbols.py`; all physics patch
+sites pinned by `AZURIK_PATCH_*_VA` macros correspond to
+currently-used VAs in the Python apply functions.
+
 ### Entry fuel cost + Apply button + vtable-hook attempt (round 11.11)
 
 **`flap_descent_fuel_cost_scale` range tightened**: changed from

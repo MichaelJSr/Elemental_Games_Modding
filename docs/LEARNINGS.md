@@ -360,6 +360,118 @@ rewrite the 4-byte immediate in place without any relocation
 or shim machinery — see `apply_flap_descent_fuel_cost` for the
 2-line apply function.
 
+### Wing-flap ENTRY fuel drain + `consume_fuel` threshold (round 11.11)
+
+The descent-penalty drain at 0x893CE is only the second of
+**two** fuel-consuming sites in `wing_flap`.  The first fires
+unconditionally on every flap:
+
+```
+00089349  PUSH 0x3F800000           ; 1.0f (the cost)
+0008934E  PUSH ESI                  ; `this`
+0008934F  CALL consume_fuel         ; returns 1 on success, 0 if blocked
+00089354  TEST AL, AL
+00089356  JZ   flap_fails           ; no fuel → flap aborts
+```
+
+The 4-byte immediate at VA `0x8934E` (bytes 1..4 after the 0x68
+PUSH opcode) is the per-flap cost.  `flap_entry_fuel_cost_scale`
+rewrites this from 1.0f to `scale * 1.0f`:
+
+| Scale | Behaviour |
+|---|---|
+| 1.0  | Vanilla (air1 = 1 flap per gauge, air3 = 5 flaps) |
+| 0.1  | ~10× more flaps per gauge |
+| 0.0  | **Infinite** flaps (`consume_fuel(this, 0.0)` is legal no-op) |
+| -1.0 | Gauge **refills** by 1 unit per flap (see below) |
+
+The `consume_fuel` implementation at FUN_000842D0 decompiles to
+roughly:
+
+```c
+int consume_fuel(this, float cost) {
+    fuel -= cost;                  // subtract (negative → refill)
+    if (cost / fuel_max > 0.???) { // some large-cost threshold
+        fuel = 0;                  // clear if cost too large
+        return 0;                  // refuse
+    }
+    if (fuel < 0) return 0;        // out of fuel
+    return 1;                      // ok
+}
+```
+
+Because `fuel_max` is a tiny integer per armor level (1 / 2 / 5
+for air1 / air2 / air3), the `cost / fuel_max` threshold trips
+the "clear to zero" branch for most *positive* descent-cost
+values.  That's why `flap_descent_fuel_cost_scale` is bounded to
+`[-0.05, +0.05]` with 0.001 steps — even 0.1× the vanilla 100.0
+descent cost (= 10.0) divided by `fuel_max = 5` gives 2.0, which
+trips the clear branch on most armor levels.  Negative values
+produce a refund because the subtract flips sign.
+
+The entry-cost site (1.0f) is much gentler on the threshold —
+`1.0 / fuel_max` for all armor tiers is well below the clear
+threshold — so `flap_entry_fuel_cost_scale` has a useful
+`[-0.05, +0.05]` window plus values out to `±1.0` for balance
+purposes.  The two sliders compose: entry-cost governs the
+cheap per-flap drain, descent-cost governs the punishment for
+trying to flap too far below peak_z.
+
+### Animation root-motion vtable-commit hook (round 11.11, experimental)
+
+Round-8 installed `root_motion_roll` / `root_motion_climb` /
+`slope_slide_speed` as post-CALL shims that scaled
+`param_1[0x6C..0x71]` *after* `anim_apply_translation`
+returned.  Player testing consistently reported no observable
+effect.  The round-11.6 forensic cleared the "slider value
+never reached the pack" theory, leaving the analysis-time
+hypothesis (vtable commit happens *inside* the function, so
+post-CALL scaling is too late) as the remaining suspect.
+
+`anim_apply_translation` (FUN_00042E40) ends with a vtable
+dispatch:
+
+```
+00043062  MOV EAX, [EBX]                 ; vtable ptr
+00043064  MOV ECX, EBX                   ; this = param_1
+00043066  CALL DWORD PTR [EAX+0xC0]      ; commit deltas  ← hook
+0004306C  POP EDI / ... / RET 0x10
+```
+
+By the time control returns to the caller (at e.g. 0x866D9 for
+roll), the vtable commit has already consumed the deltas at
+`param_1[0x6C..0x71]`.
+
+The `animation_root_motion_scale` pack hooks the CALL itself —
+the only hook site in the codebase that lands *inside* a
+vanilla function instead of at its prologue or an imm32 load.
+A 38-byte hand-assembled shim:
+
+1. Saves EDX / ESI (callee-clobber).
+2. Loads `LEA ESI, [EBX+0x1B0]` — the address of
+   `param_1[0x6C]` (index × 4).
+3. Runs a 6-iteration loop: `FLD [ESI] / FMUL [scale_va] /
+   FSTP [ESI] / ADD ESI, 4 / DEC EDX / JNZ`.
+4. Restores ESI / EDX.
+5. Replays the vanilla `CALL [EAX+0xC0]` on EAX's behalf.
+6. `RET` back to `0x4306C`.
+
+The vtable call then commits the already-scaled deltas.
+Because `anim_apply_translation` is called from ~15 sites
+(walk, roll, climb, jump, flap, airborne, swim, slope-slide
+plus non-player callers), the scale is **global** — there's no
+per-animation gating today.  A future revision could add a
+caller-set flag that the central shim consults, but the
+current experiment is "does hooking the vtable call itself
+change anything observable in-game?"
+
+The pack is marked `default_on=False` and lives outside the
+randomizer-QoL set; it's slider-controlled via the GUI's
+`animation_root_motion_scale` knob.  If it proves effective,
+the old `root_motion_roll` / `root_motion_climb` packs can
+probably be retired in favour of gated versions of this
+central shim.
+
 ### Air-control speed has TWO dominant writer sites — FUN_00083F90 (April 2026)
 
 ``entity[+0x140]`` is the airborne horizontal-control scalar

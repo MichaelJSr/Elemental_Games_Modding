@@ -421,7 +421,7 @@ def run_randomizer(
                 seed=seed,
                 log_file=log_path,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             # Catch-all for failures OUTSIDE the redirect_stdout block
             # (very rare — io setup, etc.).
             tb = traceback.format_exc()

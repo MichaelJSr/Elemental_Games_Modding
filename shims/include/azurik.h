@@ -1245,6 +1245,14 @@ enum PlayerPhysicsState {
  * from working in vanilla.  Cannot overwrite the 6.0 threshold
  * at 0x001A25B8 directly because 19 other functions read it. */
 #define AZURIK_PATCH_FLAP_DESCENT_FUEL_VA       0x000893CE
+/* 4-byte PUSH immediate (1.0f) inside ``wing_flap`` at VA
+ * 0x8934E, feeding the ``consume_fuel(this, 1.0)`` call at
+ * VA 0x89354 — the per-flap entry drain that fires every flap
+ * regardless of altitude.  Scaled by the
+ * ``flap_entry_fuel_cost_scale`` slider: 0.1 ≈ 10× more flaps,
+ * 0.0 = infinite, negative = refund.  Vanilla fuel_max is
+ * 1/2/5 (air1/2/3) so vanilla gives 1/2/5 flaps per gauge. */
+#define AZURIK_PATCH_FLAP_ENTRY_FUEL_VA         0x0008934E
 /* Historical 2-byte FLD-ST site (the v2 byte-patch attempt
  * at the `fVar2 = min(fVar1, flap_height)` cap).  Retired
  * because user testing showed no observable effect — see
@@ -1283,6 +1291,23 @@ enum PlayerPhysicsState {
  * computed from surface normal.  Hooks the FLD that loads the
  * velocity scalar into the FPU. */
 #define AZURIK_SHIM_HOOK_SLOPE_FAST_SLIDE_VA    0x0008A095
+
+/* ``animation_root_motion_scale`` (round 11.11) — the ONLY shim
+ * that hooks INSIDE a vanilla function.  Targets the vtable
+ * commit at the end of ``anim_apply_translation``:
+ *
+ *   00043062  MOV EAX, [EBX]          (sets up vtable ptr)
+ *   00043064  MOV ECX, EBX            (this = param_1)
+ *   00043066  CALL [EAX+0xC0]          ← HOOK (6 bytes)
+ *   0004306C  POP EDI / ... / RET 0x10
+ *
+ * 38-byte shim scales ``param_1[0x6C..0x71]`` (6 translation-
+ * delta floats) by the user's scale BEFORE invoking the vtable
+ * commit.  Affects EVERY caller of anim_apply_translation —
+ * walk, roll, climb, jump, flap, slide, swim, plus ~5 non-player
+ * callers.  A follow-up could add per-caller gating via a
+ * caller-set flag. */
+#define AZURIK_SHIM_HOOK_ANIM_APPLY_VTABLE_VA   0x00043066
 
 /* RE anchor only (no shim today): the peak_z FSTP in
  * ``player_jump_init``.  ``wing_flap_ceiling_scale`` hooks the
