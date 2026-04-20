@@ -2,6 +2,75 @@
 
 ## Unreleased
 
+### Entry fuel cost + Apply button + vtable-hook attempt (round 11.11)
+
+**`flap_descent_fuel_cost_scale` range tightened**: changed from
+``[-10.0, 1.0]`` step 0.05 to ``[-0.05, 0.05]`` step 0.001.  Most
+of the old range was unusable (any cost > fuel_max×2 tripped the
+clear-to-0 path); the new range stays within the "reasonable
+per-flap cost" zone while still letting users reach refund
+territory.
+
+**New `flap_entry_fuel_cost_scale` slider**: scales the
+``consume_fuel(this, 1.0)`` call at VA 0x89354 (the per-flap
+drain that fires on EVERY flap regardless of altitude).  Same
+PUSH-imm32 pattern as the descent-cost slider.
+
+- 1.0 (default) — vanilla: 1/2/5 flaps per gauge for air1/2/3
+- 0.1 — ~10× more flaps
+- 0.0 — infinite flaps
+- negative — gauge refills on every flap
+
+**Entity Editor "Apply to ISO" button**: addresses user report
+that edits didn't seem to take effect.  Pipeline audit
+(tests/test_entity_editor_keyed_flaps.py) confirmed the apply
+side IS correct, but the Build-page flow was opaque — users
+weren't sure whether their edits actually reached the build.
+
+New ⚡ Apply to ISO button on the Entity Editor toolbar:
+1. Reads pending edits from ``self._edits``.
+2. Calls ``get_pending_mod()`` to build the ``_keyed_patches`` /
+   ``sections`` JSON blob.
+3. Invokes ``cmd_patch`` directly on the user's selected ISO
+   (blocking, ~5-15s for a full ISO rebuild).
+4. Reports success/failure via messagebox.
+
+Bonus fix: ``cmd_patch`` (invoked by ``azurik-mod patch``) now
+handles ``_keyed_patches`` (previously only variant-section
+``sections`` were applied).  Users can now ``Export Mod JSON``
+from the Entity Editor and apply via the CLI as well.
+
+**Config Editor tab** renamed to "Config Viewer" with a banner
+redirecting to the Entity Editor for editing.  Making the JSON
+viewer interactive would duplicate most of the Entity Editor; a
+redirect is the honest UX.
+
+**`animation_root_motion_scale` (experimental, round 11.11)**:
+new pack taking a different approach to the root-motion problem.
+Instead of hooking per-caller (like the deprecated
+``root_motion_roll`` / ``_climb`` shims did, at 0x866D9 / 0x883FF
+AFTER the vanilla CALL returned — too late because the vtable
+commit fires inside ``anim_apply_translation``), this shim
+hooks the **vtable-commit call itself** at VA 0x43066 — inside
+``anim_apply_translation``, just before the commit.  The shim
+scales ``param_1[0x6C..0x71]`` (the 6 translation-delta floats)
+by the user scale, THEN invokes ``CALL [EAX+0xC0]`` so the
+commit sees the scaled deltas.
+
+Trade-off: scales EVERY animation-root-motion translation
+globally — roll, climb, jump-forward, swim, slide, flap, and
+any NPC / scene animation go through this hook.  That's ~15
+caller sites in the player state ticks plus a few non-player
+paths.  Users can verify the mechanism by setting the slider
+to something dramatic (2.0 or 0.5); if it works, a follow-up
+can add per-state gating via a caller-set flag.
+
+The per-caller ``root_motion_roll`` and ``root_motion_climb``
+packs stay deprecated (hidden from GUI but registered for CLI
+back-compat).
+
+910 tests pass total.
+
 ### Descriptions pass + fuel-cost math fix + deprecations (round 11.10)
 
 **Descriptions**: Added tooltip descriptions to every slider

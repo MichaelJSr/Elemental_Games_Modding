@@ -320,10 +320,12 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         #   still deleted.
         self.assertEqual(
             slider_keys,
-            [("flap_at_peak",       "flap_at_peak_scale"),
+            [("animation_root_motion_scale", "animation_root_motion_scale"),
+             ("flap_at_peak",       "flap_at_peak_scale"),
              ("player_physics",     "air_control_scale"),
              ("player_physics",     "flap_below_peak_scale"),
              ("player_physics",     "flap_descent_fuel_cost_scale"),
+             ("player_physics",     "flap_entry_fuel_cost_scale"),
              ("player_physics",     "flap_height_scale"),
              ("player_physics",     "gravity"),
              ("player_physics",     "jump_speed_scale"),
@@ -332,8 +334,9 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
              ("player_physics",     "wing_flap_ceiling_scale"),
              ("slope_slide_speed",  "slope_slide_speed_scale")])
         self.assertIn("player_physics", params)
-        self.assertEqual(len(params["player_physics"]), 9)
-        for pack_name in ("flap_at_peak", "slope_slide_speed"):
+        self.assertEqual(len(params["player_physics"]), 10)
+        for pack_name in ("flap_at_peak", "slope_slide_speed",
+                          "animation_root_motion_scale"):
             self.assertIn(pack_name, params,
                 msg=f"{pack_name} restored in round 11.8; its "
                     f"single-slider bucket must be rendered")

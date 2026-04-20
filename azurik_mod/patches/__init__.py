@@ -81,6 +81,11 @@ import azurik_mod.patches.flap_at_peak  # noqa: F401
 import azurik_mod.patches.slope_slide_speed  # noqa: F401
 import azurik_mod.patches.root_motion_roll  # noqa: F401
 import azurik_mod.patches.root_motion_climb  # noqa: F401
+# Experimental central vtable-hook scale for all animation-driven
+# translations (round 11.11).  Alternative to the per-caller
+# root_motion_roll / _climb shims (which were deprecated after
+# user testing showed they hook too late).
+import azurik_mod.patches.animation_root_motion_scale  # noqa: F401
 # ``randomize`` has no byte patches — it surfaces the randomizer
 # shuffle pools as ``Feature(category="randomize")`` entries so
 # the category-aware GUI + CLI can treat them uniformly with the

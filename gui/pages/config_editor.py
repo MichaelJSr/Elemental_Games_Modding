@@ -14,19 +14,26 @@ from ..widgets import Page
 
 
 class ConfigEditorTab(Page):
-    title = "Config Editor"
-    description = ("Browse live config.xbr values for a given section / "
-                   "entity.  Editing is a work in progress — for now the "
-                   "page is read-only and falls back to the registry JSON "
-                   "if no ISO is selected.")
+    title = "Config Viewer"
+    description = ("Read-only browser for live config.xbr values.  "
+                   "For editing + applying changes, use the "
+                   "Entity Editor tab — it supports the same "
+                   "sections plus keyed tables like armor_properties "
+                   "and has a one-click 'Apply to ISO' button.")
 
     def _build(self) -> None:
-        # WIP banner (subtle, doesn't take over the whole page).
-        banner = tk.Frame(self._body, bg="#CC8800")
+        # Banner pointing users at the Entity Editor tab, which
+        # became the authoritative editor path in round 11.11.
+        # This page stays for read-only JSON dumps because the
+        # Entity Editor's grid view can't show the full nested
+        # registry structure at a glance.
+        banner = tk.Frame(self._body, bg="#2C5F9E")
         banner.pack(fill=tk.X, pady=(0, 10))
         tk.Label(banner,
-                 text="\u26A0  This feature is a work in progress — read-only for now",
-                 bg="#CC8800", fg="white", font=("", 9, "bold"),
+                 text=("\u2139  Read-only viewer.  To EDIT values + "
+                       "apply them to an ISO, switch to the "
+                       "Entity Editor tab."),
+                 bg="#2C5F9E", fg="white", font=("", 9, "bold"),
                  pady=4).pack()
 
         # Section / entity selectors.

@@ -848,14 +848,15 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         #   - 2 secondary air-control imm32 sites (inside FUN_00083F90)
         #   - 1 flap_descent_fuel_cost imm32 (round 11.7 — always
         #     whitelisted regardless of whether it was rewritten)
+        #   - 1 flap_entry_fuel_cost imm32 (round 11.11 — same)
         #   - 6 injected-float follows (walk base, swim mult,
         #     jump gravity scalar, flap gravity scalar, roll mult,
         #     flap_subsequent halving factor)
-        # = 14 four-byte ranges total.
-        self.assertEqual(len(four_byte_ranges), 14,
-            msg="5 primary + 2 secondary air-control + 1 descent "
-                "fuel + 6 injected floats "
-                "= 14 four-byte ranges "
+        # = 15 four-byte ranges total.
+        self.assertEqual(len(four_byte_ranges), 15,
+            msg="5 primary + 2 secondary air-control + 2 fuel "
+                "cost imm32 + 6 injected floats "
+                "= 15 four-byte ranges "
                 f"(got {len(four_byte_ranges)}: {four_byte_ranges})")
         # Round 10 retired every 2-byte rewrite.
         self.assertEqual(len(two_byte_ranges), 0,

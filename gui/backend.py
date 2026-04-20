@@ -85,16 +85,17 @@ SCRIPT_DIR = REPO_ROOT
 # `run_speed_scale` / `run_scale` legacy aliases are accepted by the
 # translation as synonyms for `roll_speed_scale`.
 _PHYSICS_PARAM_TO_NAMESPACE: tuple[tuple[str, str, float], ...] = (
-    ("gravity",                     "gravity",                              9.8),
-    ("walk_speed_scale",            "player_walk_scale",                    1.0),
-    ("roll_speed_scale",            "player_roll_scale",                    1.0),
-    ("swim_speed_scale",            "player_swim_scale",                    1.0),
-    ("jump_speed_scale",            "player_jump_scale",                    1.0),
-    ("air_control_scale",           "player_air_control_scale",             1.0),
-    ("flap_height_scale",           "player_flap_scale",                    1.0),
-    ("flap_below_peak_scale",       "player_flap_below_peak_scale",         1.0),
-    ("wing_flap_ceiling_scale",     "player_wing_flap_ceiling_scale",       1.0),
-    ("flap_descent_fuel_cost_scale", "player_flap_descent_fuel_cost_scale", 1.0),
+    ("gravity",                      "gravity",                              9.8),
+    ("walk_speed_scale",             "player_walk_scale",                    1.0),
+    ("roll_speed_scale",             "player_roll_scale",                    1.0),
+    ("swim_speed_scale",             "player_swim_scale",                    1.0),
+    ("jump_speed_scale",             "player_jump_scale",                    1.0),
+    ("air_control_scale",            "player_air_control_scale",             1.0),
+    ("flap_height_scale",            "player_flap_scale",                    1.0),
+    ("flap_below_peak_scale",        "player_flap_below_peak_scale",         1.0),
+    ("wing_flap_ceiling_scale",      "player_wing_flap_ceiling_scale",       1.0),
+    ("flap_descent_fuel_cost_scale", "player_flap_descent_fuel_cost_scale",  1.0),
+    ("flap_entry_fuel_cost_scale",   "player_flap_entry_fuel_cost_scale",    1.0),
 )
 
 

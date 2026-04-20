@@ -266,19 +266,33 @@ def cmd_patch(args):
         print("ERROR: --output must differ from --iso")
         sys.exit(1)
 
-    # Collect all patches from all mods, separating config vs level patches
+    # Collect all patches from all mods, separating config vs level patches.
+    #
+    # Three shapes of config-side patches we support:
+    #   * ``sections`` — variant records (go through config_registry
+    #     → resolve_prop → write_value at the registered file offset).
+    #   * ``_keyed_patches`` — keyed-table cells (go through
+    #     keyed_tables → get_value → struct.pack double at
+    #     cell_offset + 8).  Round 11.11 added this shape to
+    #     ``cmd_patch`` so Entity Editor "Export Mod JSON" output
+    #     actually applies through ``azurik-mod patch`` (previously
+    #     only ``randomize-full`` consumed _keyed_patches).
     all_config_patches = []
+    all_keyed_mods = []  # list of mods that carry _keyed_patches
     all_level_mods = []  # list of (level_name, level_patches_list)
     for mod_path in args.mod:
         mod = load_mod(mod_path)
         print(f"  Mod: {mod.get('name', mod_path)}")
         all_config_patches.extend(flatten_mod(mod, registry))
+        if mod.get("_keyed_patches"):
+            all_keyed_mods.append(mod["_keyed_patches"])
         if "level_patches" in mod and "level" in mod:
             all_level_mods.append((mod["level"], mod["level_patches"]))
 
     has_config = len(all_config_patches) > 0
+    has_keyed = len(all_keyed_mods) > 0
     has_level = len(all_level_mods) > 0
-    total_steps = 1 + int(has_config) + int(has_level) + 1  # extract + patches + repack
+    total_steps = 1 + int(has_config or has_keyed) + int(has_level) + 1
 
     with tempfile.TemporaryDirectory(prefix="azurik_mod_") as tmpdir:
         extract_dir = Path(tmpdir) / "game"
@@ -294,21 +308,31 @@ def cmd_patch(args):
             print("  ERROR: Extracted folder missing default.xbe — not a valid game ISO")
             sys.exit(1)
 
-        # Patch config.xbr if there are config patches
-        if has_config:
+        # Patch config.xbr if there are config patches or keyed
+        # patches.  Both flavours live in the same file; open it
+        # once, apply both kinds, write it back.
+        if has_config or has_keyed:
             step += 1
             config_xbr = extract_dir / CONFIG_XBR_REL
             if not config_xbr.exists():
                 print(f"  ERROR: {CONFIG_XBR_REL} not found in extracted game")
                 sys.exit(1)
 
-            print(f"[{step}/{total_steps}] Patching config.xbr ({len(all_config_patches)} changes)...")
+            total_changes = len(all_config_patches) + sum(
+                len(p)
+                for keyed in all_keyed_mods
+                for ents in keyed.values()
+                for p in ents.values())
+            print(f"[{step}/{total_steps}] Patching config.xbr "
+                  f"({total_changes} changes)...")
             data = bytearray(config_xbr.read_bytes())
             if data[:4] != b"xobx":
                 print("  ERROR: config.xbr has bad magic")
                 sys.exit(1)
 
             applied = errors = 0
+
+            # Variant-record patches (via config_registry).
             for p in all_config_patches:
                 path = f"{p['section']}/{p['entity']}/{p['property']}"
                 prop = resolve_prop(registry, p["section"], p["entity"], p["property"])
@@ -330,6 +354,49 @@ def cmd_patch(args):
                 print(f"    {path}: "
                       f"{format_value(old, tf)} -> {format_value(new, tf)}")
                 applied += 1
+
+            # Keyed-table patches (direct cell offsets for double
+            # cells).  Same apply logic ``cmd_randomize_full`` uses
+            # at its config-mod stage.
+            if has_keyed:
+                from azurik_mod.config import keyed_tables as ktp
+                all_sections: set[str] = set()
+                for keyed in all_keyed_mods:
+                    all_sections.update(keyed.keys())
+                tables = ktp.load_all_tables(
+                    str(config_xbr), sections=list(all_sections))
+                for keyed in all_keyed_mods:
+                    for section_key, entities in keyed.items():
+                        table = tables.get(section_key)
+                        if table is None:
+                            print(f"    ERROR: keyed section "
+                                  f"'{section_key}' not found")
+                            errors += len([
+                                1 for ents in entities.values()
+                                for _ in ents])
+                            continue
+                        for entity_name, props in entities.items():
+                            for prop_name, value in props.items():
+                                cell = table.get_value(
+                                    entity_name, prop_name)
+                                path = (f"{section_key}/{entity_name}/"
+                                        f"{prop_name}")
+                                if cell is None or cell[0] != "double":
+                                    print(f"    SKIP: {path} is "
+                                          f"{cell[0] if cell else 'missing'} "
+                                          f"(only 'double' cells are "
+                                          f"editable right now)")
+                                    errors += 1
+                                    continue
+                                cell_off = cell[2]
+                                old_val = cell[1]
+                                struct.pack_into(
+                                    "<d", data, cell_off + 8,
+                                    float(value))
+                                print(f"    {path}: {old_val:g} -> "
+                                      f"{float(value):g}  "
+                                      f"(@ 0x{cell_off + 8:X})")
+                                applied += 1
 
             config_xbr.write_bytes(data)
             print(f"  {applied} applied, {errors} errors")

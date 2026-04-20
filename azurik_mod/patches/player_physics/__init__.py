@@ -515,23 +515,62 @@ FLAP_DESCENT_FUEL_COST_SCALE = ParametricPatch(
     size=0,
     original=b"",
     default=1.0,
-    slider_min=-10.0,
-    slider_max=1.0,
-    slider_step=0.05,
+    # Useful range is [-0.05, 0.05]: vanilla fuel_max is 1 / 2 /
+    # 5 (air1 / air2 / air3), and the ``cost / fuel_max`` must
+    # stay under ``fuel_max × 2`` to avoid tripping the clear-
+    # on-low-fuel path in consume_fuel.  At scale=1.0 (vanilla
+    # 100.0 cost), cost/fuel_max is huge → always clears.  At
+    # scale=0.01 (cost 1.0, same as first-flap), cost/fuel_max
+    # is 1.0 for air1 / 0.5 for air2 / 0.2 for air3 — reasonable.
+    # Negative values refund fuel.  Keep default=1.0 (vanilla);
+    # the entry box still accepts out-of-range values for
+    # expert tuning.
+    slider_min=-0.05,
+    slider_max=0.05,
+    slider_step=0.001,
     unit="x",
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
     description=(
-        "Scales the fuel cost of the descent-penalty flap "
-        "(fires when you've fallen >6m below peak).  Vanilla "
-        "cost = 100.0 fuel, but vanilla fuel_max is just 1-5 "
-        "(per armor air-level), so any positive scale triggers "
-        "the 'clear on low fuel' path and empties the gauge in "
-        "one flap.  Set to 0.0 to disable the drain entirely — "
-        "the first-flap cost of 1.0 still applies.  NEGATIVE "
-        "values refund fuel on every descent flap (scale=-1 "
-        "adds 100 fuel back), which effectively lets the gauge "
-        "refill mid-flight."
+        "Scales the descent-penalty fuel cost (fires when "
+        "you've fallen >6m below peak).  Vanilla cost = 100 "
+        "but fuel_max is only 1-5, so the clear-to-0 path "
+        "trips for any noticeable positive scale.  Useful "
+        "settings: 0.01 ≈ same as a normal flap, 0.0 = no "
+        "drain, negative = REFUND (descent flaps add fuel).  "
+        "Default 1.0 keeps vanilla."
+    ),
+)
+
+# Near-peak fuel cost (the `consume_fuel(this, 1.0)` at the flap
+# ENTRY path, fires every flap regardless of altitude).  Same
+# PUSH-imm32 pattern as the descent-cost site — just a different
+# VA.  0.0 = no cost (infinite flaps on a single fuel charge).
+FLAP_ENTRY_FUEL_COST_SCALE = ParametricPatch(
+    name="flap_entry_fuel_cost_scale",
+    label="Wing-flap per-flap fuel cost",
+    va=0,
+    size=0,
+    original=b"",
+    default=1.0,
+    # Vanilla cost = 1.0, fuel_max = 1 / 2 / 5 (air1/2/3).  The
+    # slider useful range is [-0.05, 0.05] (same reasoning as the
+    # descent slider).  At scale=1.0 (vanilla): air1 drains full
+    # gauge in 1 flap, air2 in 2, air3 in 5.  At scale=0.1:
+    # ~10x more flaps.  At scale=0.0: infinite flaps.  Negative:
+    # fuel refilled on every flap.
+    slider_min=-0.05,
+    slider_max=0.05,
+    slider_step=0.001,
+    unit="x",
+    encode=lambda v: struct.pack("<d", float(v)),
+    decode=lambda b: struct.unpack("<d", b)[0],
+    description=(
+        "Scales the per-flap fuel cost (fires on every flap, "
+        "regardless of altitude).  Vanilla = 1.0, giving "
+        "1 / 2 / 5 flaps per gauge for air1 / air2 / air3.  "
+        "0.1 ≈ 10× more flaps; 0.0 = infinite; negative "
+        "refunds fuel.  Default 1.0 = vanilla."
     ),
 )
 
@@ -872,6 +911,17 @@ _FLAP_DESCENT_FUEL_COST_VA = 0x000893CE
 _FLAP_DESCENT_FUEL_COST_VANILLA = bytes.fromhex("0000c842")   # 100.0f
 _VANILLA_FLAP_DESCENT_FUEL_COST = 100.0
 
+# Entry-path fuel cost inside ``wing_flap``.  VA 0x8934D executes
+# ``PUSH 0x3F800000 (= 1.0f)`` as the ``cost`` argument to the
+# ``consume_fuel(this, 1.0)`` call at VA 0x89354.  This call fires
+# on EVERY flap attempt and its return decides whether the flap
+# actually happens (if it returns 0 due to empty fuel, the flap
+# silently fails).  Same 4-byte PUSH-imm32 pattern as the descent
+# cost above — rewrite the 4 bytes after the 0x68 opcode.
+_FLAP_ENTRY_FUEL_COST_VA = 0x0008934E
+_FLAP_ENTRY_FUEL_COST_VANILLA = bytes.fromhex("0000803f")     # 1.0f
+_VANILLA_FLAP_ENTRY_FUEL_COST = 1.0
+
 # Vanilla runtime value of CritterData.run_speed (+0x40) for the
 # player entity.  Confirmed via lldb at VA 0x00085F65 — the FLD
 # [EAX+0x40] immediately after MOV EAX, [EBP+0x34] in FUN_00085F50.
@@ -908,6 +958,7 @@ def apply_player_physics(
     slope_slide_scale: float | None = None,
     wing_flap_ceiling_scale: float | None = None,
     flap_descent_fuel_cost_scale: float | None = None,
+    flap_entry_fuel_cost_scale: float | None = None,
     # Back-compat alias: callers that still pass run_scale get
     # transparently routed to roll_scale (the new name).
     run_scale: float | None = None,
@@ -974,6 +1025,12 @@ def apply_player_physics(
     if fdfc != 1.0:
         apply_flap_descent_fuel_cost(
             xbe_data, fuel_cost_scale=fdfc)
+
+    fefc = (1.0 if flap_entry_fuel_cost_scale is None
+            else float(flap_entry_fuel_cost_scale))
+    if fefc != 1.0:
+        apply_flap_entry_fuel_cost(
+            xbe_data, fuel_cost_scale=fefc)
 
 
 def apply_player_speed(
@@ -1463,6 +1520,48 @@ def apply_flap_descent_fuel_cost(
     return True
 
 
+def apply_flap_entry_fuel_cost(
+    xbe_data: bytearray,
+    *,
+    fuel_cost_scale: float = 1.0,
+) -> bool:
+    """Scale the fuel cost of the wing-flap entry / per-flap drain.
+
+    Overwrites the 4-byte ``PUSH 1.0f`` immediate at VA 0x8934E
+    feeding ``consume_fuel(this, 1.0)`` at VA 0x89354.  This call
+    fires on EVERY flap regardless of altitude and its return
+    decides whether the flap actually happens (empty fuel → flap
+    silently refused).  Scaling this is orthogonal to
+    ``flap_descent_fuel_cost_scale`` (which only affects the
+    >6m-below-peak drain).
+
+    Useful values:
+    - 1.0 (default) — vanilla: 1/2/5 flaps per gauge for air1/2/3
+    - 0.1 — ~10× more flaps per gauge
+    - 0.0 — infinite flaps (gauge never drains from flapping)
+    - negative — gauge refills on every flap
+
+    Returns ``True`` on apply, ``False`` on no-op / drift.
+    """
+    if fuel_cost_scale == 1.0:
+        return False
+
+    off = va_to_file(_FLAP_ENTRY_FUEL_COST_VA)
+    current = bytes(xbe_data[off:off + 4])
+    if current != _FLAP_ENTRY_FUEL_COST_VANILLA:
+        print(f"  WARNING: flap_entry_fuel_cost — site at VA "
+              f"0x{_FLAP_ENTRY_FUEL_COST_VA:X} drifted (got "
+              f"{current.hex()}); skipping.")
+        return False
+
+    new_cost = _VANILLA_FLAP_ENTRY_FUEL_COST * float(fuel_cost_scale)
+    xbe_data[off:off + 4] = struct.pack("<f", new_cost)
+    print(f"  Wing-flap entry fuel cost: {fuel_cost_scale:.3f}x "
+          f"vanilla  ({_VANILLA_FLAP_ENTRY_FUEL_COST:.1f} -> "
+          f"{new_cost:.3f} at VA 0x{_FLAP_ENTRY_FUEL_COST_VA:X})")
+    return True
+
+
 def apply_slope_slide_speed(
     xbe_data: bytearray,
     *,
@@ -1700,6 +1799,14 @@ def _player_speed_dynamic_whitelist(
     except Exception:  # noqa: BLE001
         pass
 
+    # Wing-flap entry fuel-cost site (round 11.11).  4-byte PUSH
+    # immediate at VA 0x8934E, same pattern as the descent site.
+    try:
+        fefc_off = va_to_file(_FLAP_ENTRY_FUEL_COST_VA)
+        ranges.append((fefc_off, fefc_off + 4))
+    except Exception:  # noqa: BLE001
+        pass
+
     return ranges
 
 
@@ -1717,6 +1824,7 @@ PLAYER_PHYSICS_SITES = [
     FLAP_BELOW_PEAK_SCALE,
     WING_FLAP_CEILING_SCALE,
     FLAP_DESCENT_FUEL_COST_SCALE,
+    FLAP_ENTRY_FUEL_COST_SCALE,
 ]
 """Registered Patches-page sites (9 working sliders).
 
@@ -1762,6 +1870,7 @@ def _custom_apply(
     slope_slide_speed_scale: float | None = None,
     wing_flap_ceiling_scale: float | None = None,
     flap_descent_fuel_cost_scale: float | None = None,
+    flap_entry_fuel_cost_scale: float | None = None,
     # Back-compat: the old kwarg spellings.  New callers should use
     # the *_speed_scale forms, but CLI / serialized configs that
     # predate the rename still work.
@@ -1814,6 +1923,7 @@ def _custom_apply(
         slope_slide_scale=slope_slide_speed_scale,
         wing_flap_ceiling_scale=wing_flap_ceiling_scale,
         flap_descent_fuel_cost_scale=flap_descent_fuel_cost_scale,
+        flap_entry_fuel_cost_scale=flap_entry_fuel_cost_scale,
     )
 
 
@@ -1853,10 +1963,12 @@ __all__ = [
     "WALK_SPEED_SCALE",
     "WING_FLAP_CEILING_SCALE",
     "FLAP_DESCENT_FUEL_COST_SCALE",
+    "FLAP_ENTRY_FUEL_COST_SCALE",
     "apply_air_control_speed",
     "apply_climb_speed",
     "apply_flap_at_peak",
     "apply_flap_descent_fuel_cost",
+    "apply_flap_entry_fuel_cost",
     "apply_flap_height",
     "apply_flap_subsequent",
     "apply_jump_speed",
