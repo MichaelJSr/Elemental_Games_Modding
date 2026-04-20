@@ -298,11 +298,17 @@ def main() -> None:
     p_full.add_argument("--player-flap-scale", type=float,
                         metavar="X",
                         help="Player wing-flap (Air-power double-"
-                             "jump) vertical-impulse multiplier "
+                             "jump) vertical-velocity multiplier "
                              "(default 1.0, range 0.1-10.0).  "
-                             "Rewrites FADD [0x001A25C0] at VA "
-                             "0x896EA so the flap adds 8.0 * "
-                             "flap_scale to velocity.z.")
+                             "v2: rewrites FLD [0x001980A8] at VA "
+                             "0x893AE inside FUN_00089300 (the "
+                             "real wing-flap function), injecting "
+                             "9.8 * flap_scale² so v0 scales "
+                             "linearly.  Earlier versions targeted "
+                             "VA 0x896EA (airborne FADD) — that "
+                             "site turned out to be a different "
+                             "maneuver and never affected the "
+                             "wing flap.")
     p_full.add_argument("--player-climb-scale", type=float,
                         metavar="X",
                         help="Player climbing-state speed "
@@ -311,6 +317,33 @@ def main() -> None:
                              "at VA 0x001980E4 (single-purpose "
                              "float used only by FUN_00087F80 — "
                              "the climbing/hanging-ledge state).")
+    p_full.add_argument("--no-fall-damage", dest="no_fall_damage",
+                        action="store_true",
+                        help="Disable fall damage.  Flips the "
+                             "top-level conditional branch in "
+                             "FUN_0008AB70 so every landing "
+                             "routes to the 'no damage' return "
+                             "path.  Leaves HP / other damage "
+                             "systems untouched.")
+    p_full.add_argument("--infinite-fuel", dest="infinite_fuel",
+                        action="store_true",
+                        help="Elemental powers never consume "
+                             "fuel.  Rewrites FUN_000842D0's "
+                             "prologue to ``MOV AL,1 ; RET 4``.")
+    p_full.add_argument("--flaps-air-1", dest="flaps_air_1",
+                        type=int, metavar="N",
+                        help="Wing flaps granted per jump at "
+                             "Air Power level 1 (vanilla: 1).  "
+                             "Installs the wing_flap_count shim "
+                             "at VA 0x89321.")
+    p_full.add_argument("--flaps-air-2", dest="flaps_air_2",
+                        type=int, metavar="N",
+                        help="Wing flaps granted per jump at "
+                             "Air Power level 2 (vanilla: 2).")
+    p_full.add_argument("--flaps-air-3", dest="flaps_air_3",
+                        type=int, metavar="N",
+                        help="Wing flaps granted per jump at "
+                             "Air Power level 3 (vanilla: 5).")
 
     # apply-physics (standalone physics slider runner)
     p_physics = sub.add_parser(
@@ -367,10 +400,12 @@ def main() -> None:
              "MOV [reg+0x140], 9.0 imm32 writes feeding "
              "FUN_00089480's per-frame mid-air steering FMUL.")
     p_physics.add_argument("--flap-height", type=float, metavar="X",
-        help="Player wing-flap / Air-power double-jump vertical "
-             "impulse multiplier (default 1.0; range 0.1-10.0).  "
-             "Rewrites FADD [0x001A25C0] at VA 0x896EA so each "
-             "flap press adds 8.0*flap_scale to velocity.z.")
+        help="Player wing-flap / Air-power double-jump v0 "
+             "multiplier (default 1.0; range 0.1-10.0).  v2: "
+             "rewrites FLD [0x001980A8] at VA 0x893AE (the real "
+             "wing-flap function inside FUN_00089300) to "
+             "reference an injected 9.8 * flap_scale^2 constant; "
+             "linear v0 × linear flap height.")
     p_physics.add_argument("--climb-speed", type=float, metavar="X",
         help="Player climbing-state speed multiplier "
              "(default 1.0; range 0.1-10.0).  Overwrites the "

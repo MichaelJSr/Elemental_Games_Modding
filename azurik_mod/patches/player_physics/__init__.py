@@ -457,24 +457,60 @@ _AIR_CONTROL_SITE_VAS = [
 _VANILLA_AIR_CONTROL = 9.0
 _AIR_CONTROL_IMM32_VANILLA = struct.pack("<f", _VANILLA_AIR_CONTROL)
 
-# Wing-flap (air-power double jump) vertical impulse: the
-# 6-byte ``FADD dword [0x001A25C0]`` at VA 0x000896EA inside
-# FUN_00089480 (airborne per-frame physics).  Adds 8.0 to the
-# vertical velocity component when BOTH input-flag bit 0x04
-# (flap button) AND bit 0x40 (roll/air-boost flag, which the
-# apply_player_speed force-always-on patch already enables) are
-# set — giving the player an additional vertical impulse when
-# they trigger the Air-power double jump / wing flap.  Shared
-# constant ``0x001A25C0`` has 5 readers total; only this one
-# player site is player-movement-related, so rewriting the FADD
-# target to our injected ``8.0 × flap_scale`` float leaves the
-# other callers untouched.
-_FLAP_SITE_VA = 0x000896EA
+# April 2026 v2 — the 5 sites above only run during specific
+# jump-entry paths.  The DOMINANT air-control setter during
+# normal gameplay is inside FUN_00083F90 (the per-frame
+# airborne re-initialiser called from FUN_00089060's default
+# path and FUN_00089300's wing-flap path).  That function
+# writes TWO different air-control values based on the active
+# air-power level:
+#
+#   VA 0x00083FAA   MOV [ECX], 0x41400000   ; 12.0 (air_power 1-3)
+#   VA 0x00083FCC   MOV [ECX], 0x41100000   ; 9.0  (no air power / level 4)
+#
+# Both imm32s live at offset+2 of the 6-byte instruction.
+# Each is a MOV DWORD [ECX], imm32 (opcode ``C7 01 <imm32>``).
+# We scale the imm32 value read from the site by
+# ``air_control_scale`` and write it back so BOTH air-power
+# and no-air-power paths stay in sync with the slider.
+_AIR_CONTROL_SECONDARY_SITE_VAS = [
+    0x00083FAC,   # imm32 of MOV [ECX], 0x41400000 = 12.0
+    0x00083FCE,   # imm32 of MOV [ECX], 0x41100000 = 9.0
+]
+
+# Wing-flap (air-power double jump) vertical impulse — v2.
+#
+# Pre-v2 we targeted VA 0x000896EA (``FADD [0x001A25C0]`` inside
+# FUN_00089480 = airborne per-frame physics).  User testing
+# confirmed that patch landed correctly but had no observable
+# gameplay effect — the FADD there guards a different airborne
+# maneuver (WHITE + JUMP mid-air dive boost), NOT the Air-power
+# wing flap.  The REAL wing flap is computed inside
+# ``FUN_00089300`` at VA 0x000893AE:
+#
+#    000893AE   D9 05 A8 80 19 00   FLD  [0x001980A8]    ; gravity
+#    000893B4   D8 C9              FMUL ST1              ; × flap_height
+#    000893B6   DC C0              FADD ST, ST           ; × 2
+#    000893B8   D9 FA              FSQRT                 ; sqrt(2×g×h)
+#
+# Same ``v0 = sqrt(2gh)`` form as the initial jump at VA 0x89160,
+# so we apply the same trick: rewrite the FLD to load an
+# injected ``9.8 × flap_scale²`` constant so the sqrt scales
+# v0 linearly by ``flap_scale``.
+#
+# Unlike 0x896EA (no-op when WHITE isn't wired), 0x893AE is
+# the ONLY vertical-velocity source during wing flaps, so
+# users will see the slider take effect every time they
+# double-jump.
+_FLAP_SITE_VA = 0x000893AE
 _FLAP_SITE_VANILLA = bytes([
-    0xD8, 0x05,
-    0xC0, 0x25, 0x1A, 0x00,    # FADD dword [0x001A25C0]
+    0xD9, 0x05,
+    0xA8, 0x80, 0x19, 0x00,    # FLD dword [0x001980A8] (gravity)
 ])
-_VANILLA_FLAP_IMPULSE = 8.0
+_VANILLA_FLAP_IMPULSE = 8.0   # legacy constant name; retained for
+                              # test back-compat.  The actual
+                              # scaling factor used by the math
+                              # below is ``_VANILLA_JUMP_GRAVITY``.
 
 # Vanilla runtime value of CritterData.run_speed (+0x40) for the
 # player entity.  Confirmed via lldb at VA 0x00085F65 — the FLD
@@ -784,30 +820,40 @@ def apply_air_control_speed(
     *,
     air_control_scale: float = 1.0,
 ) -> bool:
-    """Patch ``default.xbe`` to scale the airborne horizontal-
-    control speed.
+    """Patch ``default.xbe`` to scale airborne horizontal-control speed.
 
-    The player entity's ``+0x140`` field is the per-frame
-    mid-air horizontal steering velocity (FUN_00089480 reads it
-    as ``local_16c = entity[+0x140] × magnitude`` every airborne
-    frame).  Vanilla stores ``9.0`` into this field on jump
-    entry via five ``MOV DWORD [reg+0x140], 0x41100000`` imm32
-    writes — we rewrite each imm32 to ``9.0 × air_control_scale``.
+    v2 (April 2026) — now patches 7 sites total:
 
-    Does NOT affect jump HEIGHT (that's computed from
-    ``sqrt(2 × 9.8 × entity[+0x144])`` at VA 0x89160, targeted
-    by ``apply_jump_speed``).  Only affects horizontal motion
-    while in the air.
+    1. Five ``MOV DWORD [reg+0x140], 0x41100000`` imm32 writes
+       (VAs 0x84ED3, 0x856D4, 0x890EA, 0x89126, 0x8D322) used
+       during specific jump-entry paths.
+    2. Two dominant imm32s inside ``FUN_00083F90`` (the per-
+       frame airborne re-initialiser called from ``FUN_00089060``
+       and ``FUN_00089300``): VA 0x83FAC writes ``12.0`` when
+       air power is 1-3, VA 0x83FCE writes ``9.0`` otherwise.
+       Both are scaled by the same slider so gameplay with air
+       power equipped responds correctly (previously only the
+       5 static sites were patched, leaving 83F90's writes
+       vanilla — which is why users with air-power reported
+       "air control slider does nothing").
 
-    Returns True on apply, False on no-op or when ALL sites
-    drifted (a warning is printed per-drifted site).
+    Each imm32 is independently scaled: ``new = current × scale``
+    (reading the current value at patch time, so 12.0 stays at
+    ``12 × scale`` and 9.0 stays at ``9 × scale``).
+
+    Returns True on any successful write, False on no-op / all-
+    drifted (with per-site warnings in the drift case).
     """
     if air_control_scale == 1.0:
         return False
 
-    new_imm = struct.pack("<f",
-                          _VANILLA_AIR_CONTROL * float(air_control_scale))
     patched = 0
+    scale = float(air_control_scale)
+
+    # Path 1: the 5 `MOV [reg+0x140], 0x41100000` imm32 writes.
+    # All share the vanilla 9.0 imm32 so we recognise drift
+    # against a fixed expected value.
+    new_imm_9 = struct.pack("<f", _VANILLA_AIR_CONTROL * scale)
     for site_va in _AIR_CONTROL_SITE_VAS:
         off = va_to_file(site_va)
         current = bytes(xbe_data[off:off + 4])
@@ -816,17 +862,38 @@ def apply_air_control_speed(
                   f"0x{site_va:X} drifted (got {current.hex()}); "
                   f"skipping.")
             continue
-        xbe_data[off:off + 4] = new_imm
+        xbe_data[off:off + 4] = new_imm_9
+        patched += 1
+
+    # Path 2: the 2 `MOV [ECX], imm32` sites in FUN_00083F90.
+    # 12.0 and 9.0 are different imm32s so scale-from-current
+    # preserves the distinction (12 × scale vs 9 × scale).
+    for site_va in _AIR_CONTROL_SECONDARY_SITE_VAS:
+        off = va_to_file(site_va)
+        current_bytes = bytes(xbe_data[off:off + 4])
+        try:
+            current_val = struct.unpack("<f", current_bytes)[0]
+        except Exception:  # noqa: BLE001
+            print(f"  WARNING: air_control — secondary imm32 at "
+                  f"VA 0x{site_va:X} unreadable; skipping.")
+            continue
+        # Safety: reject if the value looks wildly off (drift /
+        # already patched).  Vanilla values are 12.0 and 9.0.
+        if not (3.0 <= current_val <= 30.0):
+            print(f"  WARNING: air_control — secondary imm32 at "
+                  f"VA 0x{site_va:X} looks non-vanilla "
+                  f"({current_val:.3f}); skipping.")
+            continue
+        new_val = current_val * scale
+        xbe_data[off:off + 4] = struct.pack("<f", new_val)
         patched += 1
 
     if patched == 0:
         return False
 
-    print(f"  Player air-control speed: "
-          f"{air_control_scale:.3f}x vanilla  "
-          f"({patched}/{len(_AIR_CONTROL_SITE_VAS)} sites "
-          f"rewritten, imm32 = "
-          f"{_VANILLA_AIR_CONTROL * air_control_scale:.3f})")
+    total = len(_AIR_CONTROL_SITE_VAS) + len(_AIR_CONTROL_SECONDARY_SITE_VAS)
+    print(f"  Player air-control speed: {air_control_scale:.3f}x "
+          f"vanilla  ({patched}/{total} sites rewritten)")
     return True
 
 
@@ -838,23 +905,21 @@ def apply_flap_height(
     """Patch ``default.xbe`` to scale the wing-flap (Air-power
     double-jump) vertical impulse.
 
-    ``FUN_00089480`` (airborne per-frame physics) adds ``8.0``
-    to the player's vertical velocity when BOTH input-flag bit
-    0x04 (the flap-button / second-jump trigger) AND bit 0x40
-    (the roll/air-boost flag that ``apply_player_speed``'s
-    force-always-on already enables) are set.  The FADD lives
-    at VA ``0x000896EA`` as ``FADD dword [0x001A25C0]`` — we
-    rewrite it to ``FADD dword [inject_va]`` where ``inject_va``
-    holds ``8.0 × flap_scale`` in the shim landing.  The shared
-    ``8.0`` at VA ``0x001A25C0`` has 5 total readers, most
-    unrelated to player movement, so only this one player site
-    is modified.
+    v2 (April 2026) — retargets the patch from the ineffective
+    ``FADD [0x001A25C0]`` site to the real wing-flap ``sqrt(2gh)``
+    FLD inside ``FUN_00089300`` at VA 0x000893AE.  The mechanism
+    mirrors the jump-height patch: the vanilla ``FLD [0x001980A8]``
+    (gravity 9.8) is rewritten to ``FLD [inject_va]`` where the
+    injected constant equals ``9.8 × flap_scale²``.  After the
+    subsequent ``FMUL × flap_height``, ``FADD ST,ST`` (×2), and
+    ``FSQRT``, the result becomes ``flap_scale × vanilla_v0`` —
+    linear scaling of the wing-flap's initial vertical velocity.
 
-    At ``flap_scale = 2.0``, the wing flap adds ``16.0`` to
-    velocity.z per press — roughly doubling the double-jump
-    height gained per flap.
+    At ``flap_scale = 2.0``, peak wing-flap height is ~4× vanilla
+    (linear v0 × linear ~= quadratic height, per projectile
+    motion).  At ``flap_scale = 0.5``, it's 1/4 vanilla.
 
-    Returns True on apply, False on no-op or site drift.
+    Returns True on apply, False on no-op / site drift.
     """
     if flap_scale == 1.0:
         return False
@@ -869,16 +934,20 @@ def apply_flap_height(
               f"{current.hex()}); skipping.")
         return False
 
-    inject_value = _VANILLA_FLAP_IMPULSE * float(flap_scale)
+    # Inject 9.8 × flap_scale² so the sqrt-based v0 formula
+    # scales linearly by flap_scale.  Same math as apply_jump_speed.
+    scale_sq = float(flap_scale) ** 2
+    inject_value = _VANILLA_JUMP_GRAVITY * scale_sq
     inject_bytes = struct.pack("<f", inject_value)
     _, inject_va = _carve_shim_landing(xbe_data, inject_bytes)
 
-    # FADD dword [abs inject_va]   encoded as D8 05 <va>
-    xbe_data[off:off + 6] = b"\xD8\x05" + struct.pack("<I", inject_va)
+    # FLD dword [abs inject_va]   encoded as D9 05 <va>
+    xbe_data[off:off + 6] = b"\xD9\x05" + struct.pack("<I", inject_va)
 
-    print(f"  Player wing-flap impulse: {flap_scale:.3f}x vanilla  "
-          f"(injected impulse = {inject_value:.3f} at VA "
-          f"0x{inject_va:X})")
+    print(f"  Player wing-flap height: {flap_scale:.3f}x vanilla  "
+          f"(injected gravity scalar = {inject_value:.3f} at VA "
+          f"0x{inject_va:X}, produces v0 = {flap_scale:.3f}× "
+          f"vanilla_v0)")
     return True
 
 
@@ -926,14 +995,16 @@ def _player_speed_dynamic_whitelist(
                        va_to_file(_CLIMB_CONST_VA) + 4))
     except Exception:  # noqa: BLE001
         pass
-    # Air-control: 5 imm32 sites (4 bytes each).
-    for site_va in _AIR_CONTROL_SITE_VAS:
+    # Air-control: 5 static imm32 sites + 2 dominant secondary
+    # sites in FUN_00083F90 (4 bytes each).
+    for site_va in (list(_AIR_CONTROL_SITE_VAS)
+                    + list(_AIR_CONTROL_SECONDARY_SITE_VAS)):
         try:
             ac_off = va_to_file(site_va)
             ranges.append((ac_off, ac_off + 4))
         except Exception:  # noqa: BLE001
             continue
-    # Flap: 6-byte FADD rewrite site.
+    # Flap: 6-byte FLD rewrite site (v2 — was FADD pre-v2).
     try:
         fl_off = va_to_file(_FLAP_SITE_VA)
         ranges.append((fl_off, fl_off + 6))
@@ -961,10 +1032,9 @@ def _player_speed_dynamic_whitelist(
     except Exception:  # noqa: BLE001
         pass
     try:
-        # Flap site uses FADD [abs32] (opcode D8 05) — same prefix
-        # as FLD/FMUL in terms of addressing form; follow the
-        # abs32 to whitelist the injected float.
-        follow_sites.append((va_to_file(_FLAP_SITE_VA), b"\xD8\x05"))
+        # v2: Flap site now uses FLD [abs32] (D9 05) same as the
+        # jump site — we rewrote a gravity FLD, not a FADD.
+        follow_sites.append((va_to_file(_FLAP_SITE_VA), b"\xD9\x05"))
     except Exception:  # noqa: BLE001
         pass
 

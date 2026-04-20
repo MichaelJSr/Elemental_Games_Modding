@@ -1299,6 +1299,19 @@ def cmd_randomize_full(args):
             getattr(args, 'player_air_control_scale', None) or 1.0)
         flap_scale = float(getattr(args, 'player_flap_scale', None) or 1.0)
         climb_scale = float(getattr(args, 'player_climb_scale', None) or 1.0)
+        want_no_fall_damage = bool(getattr(args, 'no_fall_damage', False))
+        want_infinite_fuel = bool(getattr(args, 'infinite_fuel', False))
+        flaps_air_1 = getattr(args, 'flaps_air_1', None)
+        flaps_air_2 = getattr(args, 'flaps_air_2', None)
+        flaps_air_3 = getattr(args, 'flaps_air_3', None)
+        want_wing_flap_count = any(
+            v is not None and int(v) != vanilla
+            for v, vanilla in (
+                (flaps_air_1, 1),
+                (flaps_air_2, 2),
+                (flaps_air_3, 5),
+            )
+        )
         player_char = getattr(args, 'player_character', None)
         xbe_path = extract_dir / "default.xbe"
 
@@ -1319,6 +1332,9 @@ def cmd_randomize_full(args):
                                or air_control_scale != 1.0
                                or flap_scale != 1.0
                                or climb_scale != 1.0),
+            "no_fall_damage": want_no_fall_damage,
+            "infinite_fuel": want_infinite_fuel,
+            "wing_flap_count": want_wing_flap_count,
         }
 
         needs_xbe = any(_FLAG_PACKS.values()) or bool(player_char)
@@ -1340,6 +1356,14 @@ def cmd_randomize_full(args):
                     "air_control_scale": air_control_scale,
                     "flap_height_scale": flap_scale,
                     "climb_speed_scale": climb_scale,
+                },
+                "wing_flap_count": {
+                    "flaps_air_power_1": (
+                        int(flaps_air_1) if flaps_air_1 is not None else 1),
+                    "flaps_air_power_2": (
+                        int(flaps_air_2) if flaps_air_2 is not None else 2),
+                    "flaps_air_power_3": (
+                        int(flaps_air_3) if flaps_air_3 is not None else 5),
                 },
             }
 
@@ -1826,8 +1850,8 @@ def cmd_inspect_physics(args):
                 _SWIM_SITE_VA, _SWIM_SITE_VANILLA, b"\xD8\x0D")
     _check_site("jump (FLD)",
                 _JUMP_SITE_VA, _JUMP_SITE_VANILLA, b"\xD9\x05")
-    _check_site("flap (FADD)",
-                _FLAP_SITE_VA, _FLAP_SITE_VANILLA, b"\xD8\x05")
+    _check_site("flap (FLD)",
+                _FLAP_SITE_VA, _FLAP_SITE_VANILLA, b"\xD9\x05")
 
     # Roll + climb: direct-constant patches (4-byte floats).
     def _check_constant(label, va, vanilla_bytes, vanilla_value):
@@ -1851,21 +1875,118 @@ def cmd_inspect_physics(args):
     _check_constant("climb", _CLIMB_CONST_VA,
                     _CLIMB_CONST_VANILLA, _VANILLA_CLIMB_SPEED)
 
-    # Air-control: 5 imm32 sites.  Each either has the vanilla 9.0
-    # imm32 or has been rewritten to 9.0 × air_control_scale.
+    # Air-control: 5 primary imm32 sites (all vanilla 9.0) + 2
+    # secondary imm32 sites inside FUN_00083F90 (12.0 and 9.0).
     print()
-    print("Air-control speed (5 imm32 sites at entity+0x140):")
+    print("Air-control speed (primary sites, 5× imm32 at entity+0x140):")
     for site_va in _AIR_CONTROL_SITE_VAS:
         off = va_to_file(site_va)
         current = bytes(xbe_bytes[off:off + 4])
         if current == _AIR_CONTROL_IMM32_VANILLA:
-            print(f"  VA 0x{site_va:06X} [VANILLA]  "
-                  f"imm32 = 9.0")
+            print(f"  VA 0x{site_va:06X} [VANILLA]  imm32 = 9.0")
         else:
             val = _struct.unpack("<f", current)[0]
             print(f"  VA 0x{site_va:06X} [PATCHED]  "
+                  f"imm32 = {val:.4f}  (= {val / 9.0:.3f}× vanilla)")
+
+    from azurik_mod.patches.player_physics import (
+        _AIR_CONTROL_SECONDARY_SITE_VAS,
+    )
+    print("Air-control speed (secondary sites in FUN_00083F90):")
+    for site_va, vanilla_val in zip(
+            _AIR_CONTROL_SECONDARY_SITE_VAS, (12.0, 9.0)):
+        off = va_to_file(site_va)
+        current = bytes(xbe_bytes[off:off + 4])
+        val = _struct.unpack("<f", current)[0]
+        if abs(val - vanilla_val) < 1e-4:
+            print(f"  VA 0x{site_va:06X} [VANILLA]  "
+                  f"imm32 = {val:.1f}")
+        else:
+            print(f"  VA 0x{site_va:06X} [PATCHED]  "
                   f"imm32 = {val:.4f}  (= "
-                  f"{val / 9.0:.3f}× vanilla)")
+                  f"{val / vanilla_val:.3f}× vanilla {vanilla_val:.1f})")
+
+    # Other player packs (no_fall_damage, infinite_fuel,
+    # wing_flap_count).  Each is a distinct pack but naturally
+    # belongs in the player-physics inspection.
+    print()
+    print("Other player packs:")
+
+    from azurik_mod.patches.no_fall_damage import (
+        NO_FALL_DAMAGE_SPEC, NO_FALL_DAMAGE_VA,
+    )
+    off = va_to_file(NO_FALL_DAMAGE_VA)
+    current = bytes(xbe_bytes[off:off + 6])
+    if current == NO_FALL_DAMAGE_SPEC.original:
+        print(f"  no_fall_damage    [VANILLA]  "
+              f"VA 0x{NO_FALL_DAMAGE_VA:X} (JNP rel32)")
+    elif current == NO_FALL_DAMAGE_SPEC.patch:
+        print(f"  no_fall_damage    [PATCHED]  "
+              f"VA 0x{NO_FALL_DAMAGE_VA:X} (JMP rel32 — fall damage disabled)")
+    else:
+        print(f"  no_fall_damage    [DRIFTED]  "
+              f"got {current.hex()}")
+
+    from azurik_mod.patches.infinite_fuel import (
+        AZURIK_CONSUME_FUEL_VA, INFINITE_FUEL_SPEC,
+    )
+    off = va_to_file(AZURIK_CONSUME_FUEL_VA)
+    current = bytes(xbe_bytes[off:off + 5])
+    if current == INFINITE_FUEL_SPEC.original:
+        print(f"  infinite_fuel     [VANILLA]  "
+              f"VA 0x{AZURIK_CONSUME_FUEL_VA:X}")
+    elif current == INFINITE_FUEL_SPEC.patch:
+        print(f"  infinite_fuel     [PATCHED]  "
+              f"VA 0x{AZURIK_CONSUME_FUEL_VA:X} (MOV AL,1 ; RET 4)")
+    else:
+        print(f"  infinite_fuel     [DRIFTED]  got {current.hex()}")
+
+    from azurik_mod.patches.wing_flap_count import (
+        _WING_FLAP_HOOK_VA, _WING_FLAP_HOOK_VANILLA,
+    )
+    off = va_to_file(_WING_FLAP_HOOK_VA)
+    current = bytes(xbe_bytes[off:off + 5])
+    if current == _WING_FLAP_HOOK_VANILLA:
+        print(f"  wing_flap_count   [VANILLA]  "
+              f"hook VA 0x{_WING_FLAP_HOOK_VA:X}")
+    elif current[:1] == b"\xE9":
+        # Follow the trampoline into the shim and report per-
+        # level flap counts.
+        rel32 = _struct.unpack("<i", current[1:5])[0]
+        shim_va = _WING_FLAP_HOOK_VA + 5 + rel32
+        _, secs = parse_xbe_sections(xbe_bytes)
+        shim_fo = None
+        for s in secs:
+            if s["vaddr"] <= shim_va < s["vaddr"] + s["vsize"]:
+                shim_fo = s["raw_addr"] + (shim_va - s["vaddr"])
+                break
+        if shim_fo is None:
+            print(f"  wing_flap_count   [INSTALLED?] hook bytes "
+                  f"= {current.hex()}, shim VA 0x{shim_va:X} "
+                  f"not in any section")
+        else:
+            body = bytes(xbe_bytes[shim_fo:shim_fo + 50])
+            print(f"  wing_flap_count   [PATCHED]  "
+                  f"shim @ VA 0x{shim_va:X}")
+            for off_idx, level in ((14, 1), (26, 2), (38, 3)):
+                if body[off_idx] == 0xA1:
+                    flap_va = _struct.unpack(
+                        "<I", body[off_idx + 1:off_idx + 5])[0]
+                    fo = None
+                    for s in secs:
+                        if (s["vaddr"] <= flap_va
+                                < s["vaddr"] + s["vsize"]):
+                            fo = s["raw_addr"] + (
+                                flap_va - s["vaddr"])
+                            break
+                    if fo is not None:
+                        val = _struct.unpack(
+                            "<i",
+                            xbe_bytes[fo:fo + 4])[0]
+                        print(f"    air power {level} → {val} "
+                              f"flap(s) (@ VA 0x{flap_va:X})")
+    else:
+        print(f"  wing_flap_count   [DRIFTED]  got {current.hex()}")
 
     print()
 

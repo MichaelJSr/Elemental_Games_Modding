@@ -53,6 +53,9 @@ register_category(Category(
 | `rand_gems`          | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_barriers`      | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_connections`   | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
+| `no_fall_damage`     | 1     | no         | `player`       | cheat, movement | [azurik_mod/patches/no_fall_damage/](../azurik_mod/patches/no_fall_damage/) |
+| `infinite_fuel`      | 1     | no         | `player`       | cheat, powers | [azurik_mod/patches/infinite_fuel/](../azurik_mod/patches/infinite_fuel/) |
+| `wing_flap_count`    | 1+3   | no         | `player`       | cheat, movement, air-power | [azurik_mod/patches/wing_flap_count/](../azurik_mod/patches/wing_flap_count/) |
 
 ---
 

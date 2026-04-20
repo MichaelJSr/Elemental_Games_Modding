@@ -298,6 +298,9 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         browser = PackBrowser(self._root, all_packs(), {},
                               pack_params=params)
         slider_keys = sorted(browser.sliders().keys())
+        # player_physics still owns its 8 sliders; wing_flap_count
+        # contributes 3 more (per-air-power-level flap counts) in
+        # the same Player tab but as a distinct pack.
         self.assertEqual(
             slider_keys,
             [("player_physics", "air_control_scale"),
@@ -307,10 +310,15 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
              ("player_physics", "jump_speed_scale"),
              ("player_physics", "roll_speed_scale"),
              ("player_physics", "swim_speed_scale"),
-             ("player_physics", "walk_speed_scale")])
+             ("player_physics", "walk_speed_scale"),
+             ("wing_flap_count", "flaps_air_power_1"),
+             ("wing_flap_count", "flaps_air_power_2"),
+             ("wing_flap_count", "flaps_air_power_3")])
         # Initial values mirrored into pack_params.
         self.assertIn("player_physics", params)
         self.assertEqual(len(params["player_physics"]), 8)
+        self.assertIn("wing_flap_count", params)
+        self.assertEqual(len(params["wing_flap_count"]), 3)
 
     def test_plugin_category_gets_its_own_tab(self):
         """Simulate a plugin: register a category + a pack referencing

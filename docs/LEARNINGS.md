@@ -124,6 +124,119 @@ patches that layer on top of `CritterData.run_speed` must either
 preserve vanilla at scale=1 or clearly document the non-identity
 semantics.
 
+### Wing flap = FUN_00089300, NOT FUN_00089480 (April 2026)
+
+The mid-air "wing flap" (Air-power double-jump) is its own
+function: ``FUN_00089300``.  Entry conditions:
+
+1. Input-flag bit 0x04 of ``PlayerInputState.flags`` is set
+   (the JUMP button was pressed THIS frame, edge-triggered).
+2. ``armor.flap_count`` (``[EDX+0x38]``) is non-zero.
+3. ``entity.flap_counter`` (``[ESI+0xD8]``) is less than
+   ``armor.flap_count``.
+
+When all three hold, the function:
+- Calls ``FUN_00083F90(&entity[0x140])`` which WRITES
+  ``[ESI+0x140] = 12.0`` (air control) and
+  ``[ESI+0x144] = 1.2`` (flap height) when the air-power
+  level is 1-3, else ``9.0`` / ``1.1``.
+- Consumes fuel via ``FUN_000842D0(this, 1.0)``.
+- Increments ``entity.flap_counter``.
+- Computes ``v0 = sqrt(2 × 9.8 × flap_height)`` at VA 0x893AE.
+- Scales by ~1.5 at VA 0x893EB (shared `FMUL [0x001A26C4]`).
+- Adds to ``entity.z_velocity`` and caps at the v0 ceiling.
+- Sets state = 2 (airborne) and plays "fx/sound/player/jump".
+
+**Pre-April-2026 patch target (VA 0x896EA, `FADD [0x001A25C0]`)
+was inside FUN_00089480 (airborne per-frame physics), NOT
+FUN_00089300.**  That FADD runs only when input flags have BOTH
+bit 0x40 (WHITE/roll) AND bit 0x04 (JUMP) set, so our
+user-facing "flap_height" slider appeared to do nothing —
+typical xemu input configs don't route WHITE to bit 0x40.
+
+The v2 patch at VA 0x893AE mirrors the initial-jump pattern:
+rewrite the gravity FLD to reference an injected
+``9.8 × flap_scale²`` so the sqrt yields ``flap_scale × v0``.
+
+### Air-control speed has TWO dominant writer sites — FUN_00083F90 (April 2026)
+
+``entity[+0x140]`` is the airborne horizontal-control scalar
+consumed every frame by ``FUN_00089480``'s horizontal physics.
+Static jump-entry code (FUN_00089060 and 4 sibling paths)
+writes it with `MOV [reg+0x140], 0x41100000` = 9.0.
+
+But during normal gameplay (player has air power, or triggers
+a wing flap), the DOMINANT writer is ``FUN_00083F90`` — a
+per-frame re-initialiser called from both the main jump and
+the wing flap.  It writes 12.0 when ``air_power_level ∈ [1, 3]``
+or 9.0 otherwise via:
+
+```asm
+00083FAA  C7 01 00 00 40 41   MOV [ECX], 0x41400000    ; 12.0
+00083FCC  C7 01 00 00 10 41   MOV [ECX], 0x41100000    ; 9.0
+```
+
+Pre-April-2026 the `air_control_scale` slider only patched the
+5 static sites — users with air power equipped saw no effect
+because FUN_00083F90 kept overwriting ``entity[+0x140]`` every
+frame.  The April-2026 fix scales both `+0x140` writers
+simultaneously (12.0 → 12 × scale, 9.0 → 9 × scale) so the
+slider is observable regardless of which code path set the
+field.
+
+### Flap count lives in armor_properties[level][0xE]
+
+The number of wing flaps per jump is loaded from
+``config/armor_properties.tabl``'s ``"Flaps"`` column at boot
+into offset ``0xE * 4 = 0x38`` of the per-armor-slot struct
+at ``DAT_0038C4D4``.  The runtime slot is indexed by the
+active armor type.  ``FUN_00089300`` reads it fresh at VA
+0x89321 (``MOV EAX, [EDX+0x38]``), compares against
+``entity.flap_counter`` (``[ESI+0xD8]``), and enforces the
+per-jump budget.
+
+**Key insight for modding:** because the read is fresh at
+each flap attempt (not cached in the entity), we can hook
+the 5-byte `MOV EAX, [EDX+0x38] ; TEST EAX, EAX` with a
+trampoline + dispatch shim that consults
+``DAT_001A7AE4`` (the current air-power level, 1/2/3/4) and
+substitutes a user-chosen value.  That's how the
+``wing_flap_count`` pack gives per-level flap control without
+touching the .tabl config file.
+
+### Fall damage lives in FUN_0008AB70
+
+Fall damage reads 7 cvars from `config.xbr` at first call
+("fall min velocity", "fall height 1/2/3", "fall damage
+1/2/3") and caches them as runtime doubles.  The top-level
+conditional at VA 0x8AC77 is:
+
+```asm
+0008AC66  FLD    [ESP+0x14]                ; fall_speed param
+0008AC6A  FABS
+0008AC6C  FCOMP  [0x00390290]               ; vs fall_min_velocity
+0008AC74  TEST   AH, 5
+0008AC77  JNP    0x0008ADFC                 ; skip damage if softer than threshold
+```
+
+``0x0008ADFC`` is the `XOR AL,AL ; RET 8` "no damage dealt"
+tail.  Forcing `JNP → JMP` (via a 6-byte rewrite that
+compensates for the 1-byte-shorter JMP instruction length)
+routes EVERY landing to that tail — infinite immunity.  No
+inner state needs to change.
+
+### Fuel consumption is a single short function (FUN_000842D0)
+
+``FUN_000842D0(__thiscall, float cost)`` is called by every
+elemental-power action to decrement ``armor.fuel_current``.
+The guarded write at VA 0x84300 does
+``[ECX+0x24] -= cost / fuel_max``.  Caller checks the return
+value — 0 means "out of fuel, action refused", 1 means
+"consumed, action proceeds".  Rewriting the prologue to
+``MOV AL, 1 ; RET 4`` (5 bytes) short-circuits to "always
+succeed without consuming", yielding infinite fuel for every
+power uniformly.
+
 ### Roll v3 — the rolling-GROUND-state constant at VA 0x001AAB68 (April 2026)
 
 The v2 roll approach (FMUL rewrite at 0x849E4 + force-on bit

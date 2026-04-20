@@ -64,6 +64,25 @@ from azurik_mod.patches.qol_skip_save_signature import (
     SKIP_SAVE_SIG_SITES,
     apply_skip_save_signature_patch,
 )
+from azurik_mod.patches.no_fall_damage import (
+    NO_FALL_DAMAGE_SITES,
+    NO_FALL_DAMAGE_SPEC,
+    NO_FALL_DAMAGE_VA,
+    apply_no_fall_damage_patch,
+)
+from azurik_mod.patches.infinite_fuel import (
+    AZURIK_CONSUME_FUEL_VA,
+    INFINITE_FUEL_SITES,
+    INFINITE_FUEL_SPEC,
+    apply_infinite_fuel_patch,
+)
+from azurik_mod.patches.wing_flap_count import (
+    FLAPS_AIR_1,
+    FLAPS_AIR_2,
+    FLAPS_AIR_3,
+    WING_FLAP_COUNT_SITES,
+    apply_wing_flap_count,
+)
 
 # ``randomize`` has no byte patches — it surfaces the randomizer
 # shuffle pools as ``Feature(category="randomize")`` entries so
@@ -114,9 +133,18 @@ __all__ = [
     "OTHER_POPUP_OFFSETS",
     "PICKUP_ANIM_SPEC",
     "AIR_CONTROL_SCALE",
+    "AZURIK_CONSUME_FUEL_VA",
     "CLIMB_SPEED_SCALE",
     "FLAP_HEIGHT_SCALE",
+    "FLAPS_AIR_1",
+    "FLAPS_AIR_2",
+    "FLAPS_AIR_3",
+    "INFINITE_FUEL_SITES",
+    "INFINITE_FUEL_SPEC",
     "JUMP_SPEED_SCALE",
+    "NO_FALL_DAMAGE_SITES",
+    "NO_FALL_DAMAGE_SPEC",
+    "NO_FALL_DAMAGE_VA",
     "PLAYER_PHYSICS_SITES",
     "QOL_PATCH_SITES",
     "ROLL_SPEED_SCALE",
@@ -127,12 +155,15 @@ __all__ = [
     "SKIP_SAVE_SIG_SITES",
     "SWIM_SPEED_SCALE",
     "WALK_SPEED_SCALE",
+    "WING_FLAP_COUNT_SITES",
     "apply_air_control_speed",
     "apply_climb_speed",
     "apply_flap_height",
     "apply_fps_patches",
     "apply_gem_popups_patch",
+    "apply_infinite_fuel_patch",
     "apply_jump_speed",
+    "apply_no_fall_damage_patch",
     "apply_other_popups_patch",
     "apply_pickup_anim_patch",
     "apply_player_character_patch",
@@ -142,4 +173,5 @@ __all__ = [
     "apply_skip_logo_patch",
     "apply_skip_save_signature_patch",
     "apply_swim_speed",
+    "apply_wing_flap_count",
 ]

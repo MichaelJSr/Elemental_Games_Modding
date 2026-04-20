@@ -626,14 +626,21 @@ class ApplyFlapHeightBehaviour(unittest.TestCase):
             msg=f"flap site at VA 0x{_FLAP_SITE_VA:X} drifted "
                 f"(got {current.hex()})")
 
-    def test_scale_2_injects_16(self):
+    def test_scale_2_injects_gravity_scalar(self):
+        """v2: flap now rewrites FLD [0x001980A8] (gravity) at VA
+        0x893AE to reference an injected ``9.8 × flap_scale²``
+        constant.  The sqrt formula (2 × g × h) then yields a
+        v0 scaled linearly by ``flap_scale``.
+        """
+        from azurik_mod.patches.player_physics import (
+            _VANILLA_JUMP_GRAVITY,
+        )
         data = bytearray(self.orig)
         self.assertTrue(apply_flap_height(data, flap_scale=2.0))
         off = va_to_file(_FLAP_SITE_VA)
         patch = bytes(data[off:off + 6])
-        self.assertEqual(patch[:2], b"\xD8\x05",
-            msg="flap site must become FADD [abs32] "
-                "(opcode D8 05)")
+        self.assertEqual(patch[:2], b"\xD9\x05",
+            msg="flap site must become FLD [abs32] (opcode D9 05)")
         inject_va = struct.unpack("<I", patch[2:6])[0]
         from azurik_mod.patching.xbe import parse_xbe_sections
         _, secs = parse_xbe_sections(bytes(data))
@@ -645,29 +652,23 @@ class ApplyFlapHeightBehaviour(unittest.TestCase):
         self.assertIsNotNone(inject_fo)
         value = struct.unpack("<f",
                               bytes(data[inject_fo:inject_fo + 4]))[0]
+        # 9.8 × 2.0² = 39.2
         self.assertAlmostEqual(
-            value, _VANILLA_FLAP_IMPULSE * 2.0, places=3)
-
-    def test_shared_constant_is_untouched(self):
-        """0x001A25C0 has 4 non-player readers.  apply_flap_height
-        must leave the shared constant at 8.0."""
-        data = bytearray(self.orig)
-        self.assertTrue(apply_flap_height(data, flap_scale=3.0))
-        fo = 0x188000 + (0x001A25C0 - 0x18F3A0)
-        shared = struct.unpack("<f", bytes(data[fo:fo + 4]))[0]
-        self.assertAlmostEqual(shared, 8.0, places=3,
-            msg="shared flap constant at 0x001A25C0 must NOT be "
-                "modified — 4 other readers depend on it.")
+            value, _VANILLA_JUMP_GRAVITY * 4.0, places=3)
 
     def test_does_not_touch_jump_walk_or_air_control_sites(self):
+        """v2 regression: flap patch must NOT touch the jump FLD,
+        walk FLD, or air-control imm32 sites (it should only
+        modify the one FLD at VA 0x893AE)."""
         data = bytearray(self.orig)
         self.assertTrue(apply_flap_height(data, flap_scale=2.5))
-        for va, vanilla in (
-            (_JUMP_SITE_VA, _JUMP_SITE_VANILLA),
-            (_WALK_SITE_VA, _WALK_SITE_VANILLA),
-        ):
-            off = va_to_file(va)
-            self.assertEqual(bytes(data[off:off + 6]), vanilla)
+        # Walk remains vanilla
+        off = va_to_file(_WALK_SITE_VA)
+        self.assertEqual(bytes(data[off:off + 6]), _WALK_SITE_VANILLA)
+        # Jump remains vanilla (both sites are distinct FLD [abs32]
+        # rewrites — flap_scale must not influence the jump).
+        off = va_to_file(_JUMP_SITE_VA)
+        self.assertEqual(bytes(data[off:off + 6]), _JUMP_SITE_VANILLA)
         for va in _AIR_CONTROL_SITE_VAS:
             off = va_to_file(va)
             self.assertEqual(
@@ -680,9 +681,9 @@ class ApplyFlapHeightBehaviour(unittest.TestCase):
         data = bytearray(self.orig)
         apply_player_physics(data, flap_scale=2.0)
         off = va_to_file(_FLAP_SITE_VA)
-        self.assertEqual(bytes(data[off:off + 2]), b"\xD8\x05",
+        self.assertEqual(bytes(data[off:off + 2]), b"\xD9\x05",
             msg="apply_player_physics(flap_scale=...) must "
-                "rewrite the FADD site")
+                "rewrite the FLD site (v2 — was FADD pre-v2)")
 
 
 @unittest.skipUnless(_XBE_PATH,
@@ -752,11 +753,14 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
     """The pack's ``dynamic_whitelist_from_xbe`` callback powers
     ``verify-patches --strict``.
 
-    v3 (April 2026) range layout on a vanilla XBE:
+    v3 (April 2026) + post-April-2026 flap/air-control v2
+    range layout on a vanilla XBE:
 
-     - 3 × 6-byte instruction-site ranges (walk-FLD, swim-FMUL,
-       jump-FLD) + 1 × 6-byte (flap-FADD) = 4 six-byte ranges
-     - 5 × 4-byte imm32 ranges (air-control sites)
+     - 4 × 6-byte instruction-site ranges (walk-FLD, swim-FMUL,
+       jump-FLD, flap-FLD)
+     - 5 × 4-byte imm32 ranges (primary air-control sites)
+     - 2 × 4-byte imm32 ranges (secondary air-control sites
+       inside FUN_00083F90 — ``12.0`` and ``9.0``)
      - 2 × 4-byte direct-constant ranges (roll + climb)
     """
 
@@ -783,10 +787,12 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
             self.assertIn((ac_off, ac_off + 4), ranges,
                 msg=f"air-control site 0x{ac_va:X} missing "
                     f"from whitelist")
-        # 4 instr sites (walk/swim/jump/flap) + 5 air-control imm32 +
-        # 2 direct-const (roll, climb) = 11 on vanilla.  After apply,
-        # up to 4 extra 4-byte follows for injected floats land.
-        self.assertIn(len(ranges), (11, 12, 13, 14, 15),
+        # 4 instr sites (walk/swim/jump/flap)
+        # + 5 primary air-control imm32 + 2 secondary air-control imm32
+        # + 2 direct-const (roll, climb) = 13 on vanilla.
+        # After apply, up to 4 extra 4-byte follows for injected
+        # floats land.
+        self.assertIn(len(ranges), (13, 14, 15, 16, 17),
             msg=f"unexpected range count {len(ranges)}: {ranges}")
 
     def test_patched_xbe_adds_injected_float_ranges(self):
@@ -816,14 +822,16 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         self.assertEqual(len(six_byte_ranges), 4,
             msg="4 instr-site rewrites (walk/swim/jump/flap)")
         # 4-byte ranges:
-        #   - 5 air-control imm32 sites
+        #   - 5 primary air-control imm32 sites
+        #   - 2 secondary air-control imm32 sites (inside FUN_00083F90)
         #   - 2 direct-constant sites (roll + climb)
         #   - 4 injected-float follows (walk base, swim mult,
-        #     jump gravity scalar, flap impulse)
-        # = 11 four-byte ranges total.
-        self.assertEqual(len(four_byte_ranges), 11,
-            msg="5 air-control + 2 direct-const (roll/climb) "
-                "+ 4 injected floats = 11 four-byte ranges "
+        #     jump gravity scalar, flap gravity scalar)
+        # = 13 four-byte ranges total.
+        self.assertEqual(len(four_byte_ranges), 13,
+            msg="5 primary + 2 secondary air-control + 2 direct-"
+                "const (roll/climb) + 4 injected floats = 13 "
+                "four-byte ranges "
                 f"(got {len(four_byte_ranges)}: {four_byte_ranges})")
         # No two-byte ranges anymore (roll no longer uses edge-lock
         # or force-on patches).

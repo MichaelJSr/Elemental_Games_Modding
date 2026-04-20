@@ -2,6 +2,101 @@
 
 ## Unreleased
 
+### New player packs + player_physics flap/air-control fixes
+
+Five user-driven additions focused on the Air-power / wing-flap
+system and general movement quality-of-life.
+
+**Fixes to existing player_physics sliders:**
+
+1. **`air_control_scale` now patches 7 sites (up from 5).**  The
+   5 original `MOV [reg+0x140], 0x41100000` writes only fire
+   during specific jump-entry paths.  The DOMINANT air-control
+   setter during normal gameplay is inside `FUN_00083F90` — a
+   per-frame airborne re-initialiser called from the main jump
+   and the wing flap.  Its two `MOV [ECX], imm32` writes (12.0
+   for air-power 1-3, 9.0 for no-air-power) at VAs 0x83FAC /
+   0x83FCE are now scaled too.  Previously users with air power
+   equipped saw no effect from the slider because FUN_00083F90
+   kept overwriting `entity[+0x140]` with vanilla 12.0 / 9.0
+   every frame.  Each imm32 is now scaled *from its current
+   value* so 12.0 stays distinct from 9.0 (just both scaled
+   together).
+
+2. **`flap_height_scale` retargeted to the REAL wing-flap site.**
+   Pre-v2 the slider rewrote `FADD [0x001A25C0]` at VA 0x896EA
+   inside `FUN_00089480` (airborne per-frame physics).  User
+   testing confirmed the bytes landed correctly but had no
+   observable gameplay effect — that FADD turned out to gate a
+   different airborne maneuver (not the Air-power wing flap).
+   The real wing flap lives in `FUN_00089300` at VA 0x893AE as
+   a `FLD [0x001980A8]` gravity load inside a sqrt(2gh) v0
+   formula.  v2 rewrites that FLD to reference an injected
+   `9.8 × flap_scale²` — mirror of how jump_height_scale works.
+   `flap_scale` now linearly scales the wing flap's initial
+   vertical velocity (quadratic effect on peak flap height).
+
+**Three new packs in the Player category:**
+
+3. **`no_fall_damage` (new pack).**  Single-site 6-byte patch
+   at VA 0x8AC77: flips the top-level `JNP rel32` conditional
+   in `FUN_0008AB70` to an unconditional `JMP rel32 + NOP`.
+   The target address (0x8ADFC — the `XOR AL,AL ; RET 8` "no
+   damage dealt" tail) is unchanged.  Every landing now takes
+   the no-damage path regardless of fall velocity.  Splat SFX
+   and damage rumbles never fire; HP max / other damage
+   systems are untouched.  Idempotent.
+
+4. **`infinite_fuel` (new pack).**  Single-site 5-byte patch
+   at VA 0x842D0: replaces the prologue of `FUN_000842D0` (the
+   fuel consumer called by every elemental power) with
+   `MOV AL, 1 ; RET 4`.  Always returns success without
+   decrementing `armor.fuel_current`.  Works uniformly for
+   water / fire / air / earth powers.
+
+5. **`wing_flap_count` (new pack).**  Three per-air-power-level
+   sliders (Air Power 1 / 2 / 3; vanilla values 1 / 2 / 5
+   respectively, range 0-99 each).  Installs a 5-byte JMP
+   trampoline at VA 0x89321 (inside `FUN_00089300`'s
+   flap-count check) into a 50-byte dispatch shim that:
+   (a) replays the vanilla `MOV EAX, [EDX+0x38]`,
+   (b) reads `[0x001A7AE4]` (current air-power level),
+   (c) overwrites EAX with the user-selected int for levels
+       1 / 2 / 3,
+   (d) replays the clobbered `TEST EAX, EAX` and JMPs back.
+   Values at vanilla defaults (1 / 2 / 5) produce a byte-
+   identity no-op.  Per-level independence preserves the air-
+   power-upgrade sense of progression while letting users
+   tune flap counts freely.
+
+   **Bug caught in development:** `_carve_shim_landing`'s
+   zero-trailer back-scan was stomping the trailing zero bytes
+   of small ints (e.g. flap count 50 = `32 00 00 00` — the
+   three zeros got overwritten by the next allocation).  Fix:
+   the 3 ints are packed into a single 16-byte allocation with
+   a trailing 4-byte `0xFF FF FF FF` sentinel.
+
+**Diagnostic:** `azurik-mod inspect-physics` now reports:
+- Air-control primary sites (5 × imm32 at entity+0x140) AND
+  secondary sites inside FUN_00083F90 separately (so you can
+  verify both paths landed).
+- Fall-damage flag: `[VANILLA]` / `[PATCHED]` / `[DRIFTED]`.
+- Infinite-fuel flag: ditto.
+- Wing-flap-count trampoline + per-level counts.
+
+**Tests:** +22 new unit tests in `tests/test_new_player_packs.py`
+(775 total, all passing).  Existing dynamic-whitelist counts
+updated to account for the 2 new air-control secondary sites
+(13 4-byte ranges on vanilla, was 11).
+
+**Camera zoom slider:** Requested but deferred.  The camera
+distance / FOV parameters don't appear to live in `default.xbe`
+as a static .rdata float — no obvious "zoom" / FOV string
+cross-references an isolated constant.  They're likely in a
+config .xbr (probably `camera.xbr` / `cinematic.xbr`) loaded at
+runtime, which would require an .xbr-side mod or a config-
+file-rewrite pack rather than an XBE patch.  Open follow-up.
+
 ### player_physics v3 — roll redesigned, climb added, dev-menu retired
 
 Three-part user-driven revamp of the player-movement system.
