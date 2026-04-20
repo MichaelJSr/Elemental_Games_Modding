@@ -2,6 +2,88 @@
 
 ## Unreleased
 
+### Player packs — round 5 (flap-at-peak + fall-damage second path)
+
+Another user report cycle surfaced two issues:
+
+1. **Wing-flap "subsequent at peak" was still weak.**  The
+   existing `flap_subsequent_scale` (now renamed
+   `flap_below_peak_scale`) only addresses the 0.5-halving
+   below 6m.  At peak the real cap is the
+   `fVar2 = min(peak_z + flap_height - current_z, flap_height)`
+   expression in `wing_flap` (FUN_00089300).  After the first
+   flap, `current_z` drifts above `peak_z` by some tiny delta,
+   so `remaining = flap_height - delta` is small, yielding
+   weak v0.
+
+   **Fix — new `flap_at_peak_scale` slider.**  Any value != 1.0
+   NOPs the 3-byte `FSUB [EBX+0x5C]` at VA 0x89381, making
+   `fVar1 = peak_z + flap_height` (a large positive number).
+   `fVar2 = min(fVar1, flap_height)` collapses to `flap_height`,
+   so every subsequent flap gets FULL `sqrt(2g * flap_height)`
+   v0.  Side effect: the below-6m halving check trips more
+   often, so combine with `flap_below_peak_scale = 2.0` to
+   un-halve it.
+
+   **Rename**: `flap_subsequent_scale` → `flap_below_peak_scale`
+   (back-compat alias and CLI flag kept for pre-late-April-2026
+   callers).
+
+2. **`no_fall_damage` left light damage enabled.**  User
+   reported "instant death prevented, but light damage still
+   fires."  Investigation found `FUN_00044640` (damage apply)
+   has TWO callers in the landing code:
+
+   - `fall_damage_dispatch` (FUN_0008AB70) at VA 0x8AD9B — the
+     tiered "fall damage 1/2/3" path.  v1 patch bypasses this.
+   - `FUN_0008BE00` at VA 0x8BF59 — the **no-surface landing**
+     path.  Fires when `[entity+0x38]` (surface contact slot)
+     is null, checks the cached "fall height 4" cvar, calls
+     `FUN_00044640` if fall magnitude exceeds threshold.  v1
+     patch NEVER touched this.
+
+   **Fix — patch both prologues.**  `no_fall_damage` now
+   rewrites BOTH function entries to `XOR AL,AL ; RET <N>`:
+
+   - `FUN_0008AB70`: `XOR AL,AL ; RET 8 ; NOP` (6 bytes, __stdcall 2 args)
+   - `FUN_0008BE00`: `XOR AL,AL ; RET 4` (5 bytes, __stdcall 1 arg)
+
+   This closes the second path — no more "light damage" on
+   unusual landings.
+
+3. **Open issues acknowledged (not yet fixed)**:
+
+   - **`roll_speed_scale`** — bytes land correctly at VA 0x849E4
+     (FMUL rewrite with injected `3.0 × roll_scale`), but
+     user still reports no observable effect.  The FMUL is
+     gated on bit 0x40 of PlayerInputState.flags, set by
+     FUN_00084F90 based on `g_armor_state_per_controller[0xb]`
+     or `[0xf]` (WHITE / BACK button pressures).  In modern
+     xemu with default input bindings, these buttons may not
+     be wired through to that flag bit, so the FMUL never
+     executes in gameplay.  Workaround: verify with
+     `azurik-mod inspect-physics --iso <iso>` that the bytes
+     landed, then investigate input routing with lldb or
+     xemu's input panel.
+
+   - **`climb_speed_scale`** — 2.0 → N overwrite at VA 0x001980E4.
+     Function `player_climb_tick` (FUN_00087F80) references
+     this constant in two places, both reached when
+     `stick_magnitude != 0`.  The climb-up/down sound strings
+     (`fx/sound/player/climb*`) are ONLY xref'd from this
+     function, confirming it IS the real climbing handler.
+     Bytes land.  If the user observes no speed change, the
+     climbing they're testing may go through a different state
+     (slope walking, ledge grab) rather than state 1 (climb).
+
+   - **`slope_slide_speed_scale`** — 2.0 → N overwrite at VA
+     0x001AAB68.  This constant is ONLY the "slow slope slide"
+     (state 3) velocity scalar.  State 4 (fast slide,
+     `velocity > DAT_001aab74`) uses a dynamically-computed
+     500× multiplier (`DAT_003902A0`) not targeted here.  If
+     the user's test scenario triggers fast slides (common on
+     steep descending slopes), our state-3 patch has no effect.
+
 ### Player packs — round 4 (infinite_fuel per-frame drain + slope_slide slider + shim header coverage)
 
 **1. `infinite_fuel` — v2 (adds per-frame drain site).**

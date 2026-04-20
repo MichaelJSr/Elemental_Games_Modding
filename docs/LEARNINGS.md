@@ -158,6 +158,38 @@ The v2 patch at VA 0x893AE mirrors the initial-jump pattern:
 rewrite the gravity FLD to reference an injected
 ``9.8 × flap_scale²`` so the sqrt yields ``flap_scale × v0``.
 
+### Wing-flap v0 has a `min(remaining, flap_height)` cap (late April 2026)
+
+After the player starts flapping, ``peak_z`` keeps rising each
+flap.  Vanilla `wing_flap` computes, at VAs 0x89368-0x89393:
+
+```
+fVar1 = peak_z + flap_height - current_z
+if fVar1 <= 0: fVar1 = 0
+fVar2 = min(fVar1, flap_height)
+v0 = sqrt(2 × g × fVar2)
+```
+
+When the player is at peak (`current_z ≈ peak_z`),
+``fVar2 = flap_height`` giving full v0.  BUT the first flap
+raises `current_z` above `peak_z` by some small delta before
+the game updates `peak_z` itself, so subsequent flaps see
+``fVar2 = flap_height - delta`` — yielding weak v0.  User
+observation: "subsequent flaps at peak are weak even with
+flap_subsequent_scale = 2.0."  That slider only cancels the
+below-6m halving, not this cap.
+
+**Patch**: NOP the 3-byte `FSUB [EBX+0x5C]` at VA 0x89381 so
+the current-z subtract is skipped.  Then ``fVar1 = peak_z +
+flap_height`` (large positive), ``fVar2 = flap_height``
+always, and every subsequent flap gets full v0.  Combine with
+`flap_below_peak_scale = 2.0` to un-halve subsequent flaps
+(which now trip the below-6m check since `fVar1` is large).
+
+Packaged as the new `flap_at_peak_scale` slider — a binary
+toggle (slider value != 1.0 enables), kept in slider form
+for UI consistency with other flap scales.
+
 ### Air-control speed has TWO dominant writer sites — FUN_00083F90 (April 2026)
 
 ``entity[+0x140]`` is the airborne horizontal-control scalar
@@ -204,26 +236,40 @@ substitutes a user-chosen value.  That's how the
 ``wing_flap_count`` pack gives per-level flap control without
 touching the .tabl config file.
 
-### Fall damage lives in FUN_0008AB70
+### Fall damage lives in TWO paths — FUN_0008AB70 AND FUN_0008BE00
 
-Fall damage reads 7 cvars from `config.xbr` at first call
-("fall min velocity", "fall height 1/2/3", "fall damage
-1/2/3") and caches them as runtime doubles.  The top-level
-conditional at VA 0x8AC77 is:
+Fall damage enters via `FUN_0008C080` (player_landing), which
+branches on `[entity+0x38]` (surface contact slot):
 
-```asm
-0008AC66  FLD    [ESP+0x14]                ; fall_speed param
-0008AC6A  FABS
-0008AC6C  FCOMP  [0x00390290]               ; vs fall_min_velocity
-0008AC74  TEST   AH, 5
-0008AC77  JNP    0x0008ADFC                 ; skip damage if softer than threshold
-```
+1. **With surface** → `fall_damage_dispatch` (FUN_0008AB70).
+   Reads 7 cvars from `config.xbr` on first call
+   ("fall min velocity", "fall height 1/2/3", "fall damage
+   1/2/3"), tiers damage by fall height, calls `FUN_00044640`
+   (damage apply) for each tier that fires.
 
-``0x0008ADFC`` is the `XOR AL,AL ; RET 8` "no damage dealt"
-tail.  Forcing `JNP → JMP` (via a 6-byte rewrite that
-compensates for the 1-byte-shorter JMP instruction length)
-routes EVERY landing to that tail — infinite immunity.  No
-inner state needs to change.
+2. **Without surface** → `FUN_0008BE00` (added to LEARNINGS
+   late April 2026 after user-reported "light damage still
+   fires").  Fires on no-floor landings (falling off map,
+   water splash at low surface).  Reads the cached "fall
+   height 4" cvar, computes fall magnitude from velocity and
+   height drop, calls `FUN_00044640` if magnitude exceeds
+   threshold.  Plays "fx/sound/player/fallingdeath" SFX and
+   sets entity death flag (0x01 at offset 0x16C).
+
+**Both paths call FUN_00044640**, so a complete "no fall
+damage" patch MUST bypass both.  v1 of the pack only addressed
+path 1, leaving path 2 active — hence the "instant-death
+prevented but light damage still fires" user report.  v2
+(late April 2026) rewrites BOTH function prologues to
+`XOR AL, AL ; RET <N>`:
+
+- `FUN_0008AB70` prologue (6 bytes, __stdcall 2 args → RET 8)
+- `FUN_0008BE00` prologue (5 bytes, __stdcall 1 arg → RET 4)
+
+Pre-v2 the patch flipped `JNP → JMP` at VA 0x8AC77 — that
+only covered the fall-height gate and left both the cvar
+init chain and FUN_0008BE00 untouched.  The prologue rewrite
+is cleaner and covers both.
 
 ### Fuel consumption is a single short function (FUN_000842D0)
 

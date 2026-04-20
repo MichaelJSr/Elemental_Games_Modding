@@ -24,6 +24,8 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from azurik_mod.patches.no_fall_damage import (  # noqa: E402
+    AZURIK_FALL_DEATH_VA,
+    FALL_DEATH_SPEC,
     NO_FALL_DAMAGE_SPEC,
     NO_FALL_DAMAGE_VA,
     apply_no_fall_damage_patch,
@@ -106,6 +108,30 @@ class NoFallDamageApply(unittest.TestCase):
         off = va_to_file(NO_FALL_DAMAGE_VA)
         self.assertEqual(bytes(data[off:off + 6]),
                          NO_FALL_DAMAGE_SPEC.patch)
+
+    def test_fall_death_site_matches_vanilla(self):
+        """Drift-guard: the 5 bytes at VA 0x0008BE00 (the second
+        fall-damage path, added late April 2026) must match what
+        FALL_DEATH_SPEC.original expects."""
+        off = va_to_file(AZURIK_FALL_DEATH_VA)
+        self.assertEqual(bytes(self.orig[off:off + 5]),
+                         FALL_DEATH_SPEC.original)
+
+    def test_apply_rewrites_fall_death_prologue(self):
+        """apply_no_fall_damage_patch must patch BOTH fall-damage
+        paths — FUN_0008AB70 (fall_damage_dispatch) AND
+        FUN_0008BE00 (no-surface fall damage).  Pre-late-April-2026
+        only the first was patched, leading to user reports of
+        "light damage still fires."
+        """
+        data = bytearray(self.orig)
+        apply_no_fall_damage_patch(data)
+        off = va_to_file(AZURIK_FALL_DEATH_VA)
+        self.assertEqual(bytes(data[off:off + 5]),
+                         FALL_DEATH_SPEC.patch,
+            msg="FUN_0008BE00 prologue must be rewritten to "
+                "XOR AL,AL ; RET 4 so the no-surface fall path "
+                "stops calling FUN_00044640 (damage apply).")
 
 
 # ---------------------------------------------------------------------------

@@ -42,7 +42,7 @@ register_category(Category(
 | Pack                 | Sites | Default-on | Category       | Tags          | Folder |
 |----------------------|-------|------------|----------------|---------------|--------|
 | `fps_unlock`         | 50    | no         | `performance`  | fps           | [azurik_mod/patches/fps_unlock/](../azurik_mod/patches/fps_unlock/) |
-| `player_physics`     | 8     | no         | `player`       | physics       | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
+| `player_physics`     | 11    | no         | `player`       | physics       | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
 | `qol_skip_logo`      | 1     | no         | `boot`         | c-shim        | [azurik_mod/patches/qol_skip_logo/](../azurik_mod/patches/qol_skip_logo/) |
 | `qol_gem_popups`     | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_gem_popups/](../azurik_mod/patches/qol_gem_popups/) |
 | `qol_other_popups`   | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_other_popups/](../azurik_mod/patches/qol_other_popups/) |
@@ -53,7 +53,7 @@ register_category(Category(
 | `rand_gems`          | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_barriers`      | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_connections`   | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
-| `no_fall_damage`     | 1     | no         | `player`       | cheat, movement | [azurik_mod/patches/no_fall_damage/](../azurik_mod/patches/no_fall_damage/) |
+| `no_fall_damage`     | 2     | no         | `player`       | cheat, movement | [azurik_mod/patches/no_fall_damage/](../azurik_mod/patches/no_fall_damage/) |
 | `infinite_fuel`      | 1     | no         | `player`       | cheat, powers | [azurik_mod/patches/infinite_fuel/](../azurik_mod/patches/infinite_fuel/) |
 | `wing_flap_count`    | 1+3   | no         | `player`       | cheat, movement, air-power | [azurik_mod/patches/wing_flap_count/](../azurik_mod/patches/wing_flap_count/) |
 
@@ -347,7 +347,12 @@ deprecated aliases for `--player-roll-scale` / `--roll-speed`.
 
 ### GUI
 
-The Patches page renders 8 `ParametricSlider` widgets under the `player_physics` section (gravity, walk, roll, climb, swim, jump, air-control, flap).  Slider values live on `AppState.pack_params["player_physics"]` and are forwarded to `cmd_randomize_full` / `cmd_apply_physics` by `gui/backend.run_randomizer`.  The sliders support typing values beyond the min/max bounds in the text box (with a `[!]` badge) for expert tuning.
+The Patches page renders 11 `ParametricSlider` widgets under the `player_physics` section (gravity, walk, roll, climb, swim, jump, air-control, flap-height, flap-below-peak, flap-at-peak, slope-slide).  Slider values live on `AppState.pack_params["player_physics"]` and are forwarded to `cmd_randomize_full` / `cmd_apply_physics` by `gui/backend.run_randomizer`.  The sliders support typing values beyond the min/max bounds in the text box (with a `[!]` badge) for expert tuning.
+
+The wing-flap controls are split across three sliders:
+- `flap_height_scale` — scales the FIRST flap's v0 (VA 0x893AE FLD rewrite).
+- `flap_below_peak_scale` (née `flap_subsequent_scale`) — scales the 0.5-halving factor for 2nd+ flaps more than 6m below peak (VA 0x893DD FMUL rewrite).
+- `flap_at_peak_scale` — binary toggle (any value != 1.0 enables) that NOPs the 3-byte `FSUB [EBX+0x5C]` at VA 0x89381, making `fVar2 = flap_height` always.  Gives full-strength subsequent flaps near peak.  Combine with `flap_below_peak_scale = 2.0` to cancel the halving too.
 
 ### Diagnostics
 

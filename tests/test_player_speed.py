@@ -787,6 +787,7 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
 
     def test_vanilla_xbe_includes_all_static_sites(self):
         from azurik_mod.patches.player_physics import (
+            _FLAP_PEAK_CAP_SITE_VA,
             _FLAP_SUBSEQUENT_SITE_VA,
             _ROLL_FMUL_VA,
             _player_speed_dynamic_whitelist,
@@ -801,12 +802,15 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         jump_off = va_to_file(_JUMP_SITE_VA)
         flap_off = va_to_file(_FLAP_SITE_VA)
         flap_sub_off = va_to_file(_FLAP_SUBSEQUENT_SITE_VA)
+        flap_peak_off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
         self.assertIn((walk_off, walk_off + 6), ranges)
         self.assertIn((swim_off, swim_off + 6), ranges)
         self.assertIn((jump_off, jump_off + 6), ranges)
         self.assertIn((flap_off, flap_off + 6), ranges)
         self.assertIn((roll_off, roll_off + 6), ranges)
         self.assertIn((flap_sub_off, flap_sub_off + 6), ranges)
+        self.assertIn((flap_peak_off, flap_peak_off + 3), ranges,
+            msg="flap-at-peak 3-byte NOP site missing from whitelist")
         self.assertIn((climb_off, climb_off + 4), ranges)
         self.assertIn((slope_off, slope_off + 4), ranges)
         for ac_va in _AIR_CONTROL_SITE_VAS:
@@ -817,10 +821,11 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         # 6 instr sites (walk/swim/jump/flap/roll-FMUL/
         #                flap_subsequent-FMUL)
         # + 5 primary air-control imm32 + 2 secondary air-control imm32
-        # + 2 direct-const (climb, slope_slide) = 15 on vanilla.
+        # + 2 direct-const (climb, slope_slide)
+        # + 1 three-byte NOP site (flap-at-peak) = 16 on vanilla.
         # After apply, up to 6 extra 4-byte follows for injected
         # floats land.
-        self.assertIn(len(ranges), (15, 16, 17, 18, 19, 20, 21),
+        self.assertIn(len(ranges), (16, 17, 18, 19, 20, 21, 22),
             msg=f"unexpected range count {len(ranges)}: {ranges}")
 
     def test_patched_xbe_adds_injected_float_ranges(self):
@@ -1001,6 +1006,70 @@ class SliderSemantics(unittest.TestCase):
         self.assertIsNotNone(base)
         self.assertTrue(math.isfinite(base),
             msg="injected walk base must be finite")
+
+
+@unittest.skipUnless(_XBE_PATH,
+    "vanilla default.xbe fixture not available")
+class ApplyFlapAtPeakBehaviour(unittest.TestCase):
+    """``apply_flap_at_peak`` is a binary toggle — any value !=
+    1.0 NOPs the 3-byte FSUB [EBX+0x5C] at VA 0x89381 so that
+    2nd+ wing flaps near peak get FULL v0 = sqrt(2g * flap_height)
+    regardless of how far above peak the player has risen.
+    """
+
+    def test_scale_1_is_noop(self):
+        from azurik_mod.patches.player_physics import (
+            _FLAP_PEAK_CAP_SITE_VA,
+            _FLAP_PEAK_CAP_SITE_VANILLA,
+            apply_flap_at_peak,
+        )
+        data = bytearray(_XBE_PATH.read_bytes())
+        self.assertFalse(apply_flap_at_peak(data, at_peak_scale=1.0))
+        off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
+        self.assertEqual(bytes(data[off:off + 3]),
+                         _FLAP_PEAK_CAP_SITE_VANILLA,
+            msg="scale=1.0 must leave bytes vanilla")
+
+    def test_scale_not_one_nops_fsub(self):
+        from azurik_mod.patches.player_physics import (
+            _FLAP_PEAK_CAP_PATCH,
+            _FLAP_PEAK_CAP_SITE_VA,
+            apply_flap_at_peak,
+        )
+        for scale in (0.5, 2.0, 5.0):
+            with self.subTest(scale=scale):
+                data = bytearray(_XBE_PATH.read_bytes())
+                self.assertTrue(
+                    apply_flap_at_peak(data, at_peak_scale=scale))
+                off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
+                self.assertEqual(bytes(data[off:off + 3]),
+                                 _FLAP_PEAK_CAP_PATCH,
+                    msg=f"scale={scale} must NOP the FSUB")
+
+    def test_patch_does_not_touch_surrounding_bytes(self):
+        """Exactly 3 bytes at 0x89381 flip; the FLD/MOV/FADD/INC
+        before and FCOM/FNSTSW/... after must stay vanilla."""
+        from azurik_mod.patches.player_physics import (
+            _FLAP_PEAK_CAP_SITE_VA,
+            apply_flap_at_peak,
+        )
+        orig = _XBE_PATH.read_bytes()
+        data = bytearray(orig)
+        self.assertTrue(apply_flap_at_peak(data, at_peak_scale=2.0))
+        off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
+        self.assertEqual(data[:off], orig[:off])
+        self.assertEqual(data[off + 3:], orig[off + 3:])
+
+    def test_routed_via_apply_player_physics(self):
+        from azurik_mod.patches.player_physics import (
+            _FLAP_PEAK_CAP_PATCH,
+            _FLAP_PEAK_CAP_SITE_VA,
+        )
+        data = bytearray(_XBE_PATH.read_bytes())
+        apply_player_physics(data, flap_at_peak_scale=2.0)
+        off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
+        self.assertEqual(bytes(data[off:off + 3]),
+                         _FLAP_PEAK_CAP_PATCH)
 
 
 if __name__ == "__main__":

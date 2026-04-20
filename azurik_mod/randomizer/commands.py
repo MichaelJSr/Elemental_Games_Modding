@@ -1298,8 +1298,14 @@ def cmd_randomize_full(args):
         air_control_scale = float(
             getattr(args, 'player_air_control_scale', None) or 1.0)
         flap_scale = float(getattr(args, 'player_flap_scale', None) or 1.0)
-        flap_subsequent_scale = float(
-            getattr(args, 'player_flap_subsequent_scale', None) or 1.0)
+        # New name wins over the legacy alias.
+        flap_below_peak_scale = float(
+            getattr(args, 'player_flap_below_peak_scale', None)
+            or getattr(args, 'player_flap_subsequent_scale', None)
+            or 1.0)
+        flap_subsequent_scale = flap_below_peak_scale
+        flap_at_peak_scale = float(
+            getattr(args, 'player_flap_at_peak_scale', None) or 1.0)
         climb_scale = float(getattr(args, 'player_climb_scale', None) or 1.0)
         slope_slide_scale = float(
             getattr(args, 'player_slope_slide_scale', None) or 1.0)
@@ -1335,7 +1341,8 @@ def cmd_randomize_full(args):
                                or jump_scale != 1.0
                                or air_control_scale != 1.0
                                or flap_scale != 1.0
-                               or flap_subsequent_scale != 1.0
+                               or flap_below_peak_scale != 1.0
+                               or flap_at_peak_scale != 1.0
                                or climb_scale != 1.0
                                or slope_slide_scale != 1.0),
             "no_fall_damage": want_no_fall_damage,
@@ -1362,6 +1369,8 @@ def cmd_randomize_full(args):
                     "air_control_scale": air_control_scale,
                     "flap_height_scale": flap_scale,
                     "flap_subsequent_scale": flap_subsequent_scale,
+                    "flap_below_peak_scale": flap_below_peak_scale,
+                    "flap_at_peak_scale": flap_at_peak_scale,
                     "climb_speed_scale": climb_scale,
                     "slope_slide_speed_scale": slope_slide_scale,
                 },
@@ -1789,6 +1798,8 @@ def cmd_inspect_physics(args):
     from azurik_mod.patches.player_physics import (
         _AIR_CONTROL_IMM32_VANILLA, _AIR_CONTROL_SITE_VAS,
         _CLIMB_CONST_VA, _CLIMB_CONST_VANILLA,
+        _FLAP_PEAK_CAP_PATCH, _FLAP_PEAK_CAP_SITE_VA,
+        _FLAP_PEAK_CAP_SITE_VANILLA,
         _FLAP_SITE_VA, _FLAP_SITE_VANILLA,
         _FLAP_SUBSEQUENT_SITE_VA, _FLAP_SUBSEQUENT_SITE_VANILLA,
         _JUMP_SITE_VA, _JUMP_SITE_VANILLA,
@@ -1864,9 +1875,24 @@ def cmd_inspect_physics(args):
                 _FLAP_SITE_VA, _FLAP_SITE_VANILLA, b"\xD9\x05")
     _check_site("roll (FMUL)",
                 _ROLL_FMUL_VA, _ROLL_FMUL_VANILLA, b"\xD8\x0D")
-    _check_site("flap_sub (FMUL)",
+    _check_site("flap<peak FMUL",
                 _FLAP_SUBSEQUENT_SITE_VA,
                 _FLAP_SUBSEQUENT_SITE_VANILLA, b"\xD8\x0D")
+
+    # Flap at peak: 3-byte FSUB NOP at VA 0x89381 (binary toggle).
+    fpc_off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
+    fpc_cur = bytes(xbe_bytes[fpc_off:fpc_off + 3])
+    if fpc_cur == _FLAP_PEAK_CAP_SITE_VANILLA:
+        print(f"  {'flap@peak NOP':14s} [VANILLA]  "
+              f"FSUB present at VA 0x{_FLAP_PEAK_CAP_SITE_VA:X} "
+              f"(weak 2nd+ flaps near peak)")
+    elif fpc_cur == _FLAP_PEAK_CAP_PATCH:
+        print(f"  {'flap@peak NOP':14s} [PATCHED]  "
+              f"FSUB NOPed at VA 0x{_FLAP_PEAK_CAP_SITE_VA:X} "
+              f"(full v0 for 2nd+ flaps near peak)")
+    else:
+        print(f"  {'flap@peak NOP':14s} [DRIFTED]  "
+              f"got {fpc_cur.hex()}")
 
     # Roll + climb: direct-constant patches (4-byte floats).
     def _check_constant(label, va, vanilla_bytes, vanilla_value):
@@ -2038,8 +2064,12 @@ def cmd_apply_physics(args):
     air_control_scale = float(
         getattr(args, "air_control_speed", None) or 1.0)
     flap_scale = float(getattr(args, "flap_height", None) or 1.0)
-    flap_subsequent_scale = float(
-        getattr(args, "flap_subsequent", None) or 1.0)
+    flap_below_peak_scale = float(
+        getattr(args, "flap_below_peak", None)
+        or getattr(args, "flap_subsequent", None)
+        or 1.0)
+    flap_at_peak_scale = float(
+        getattr(args, "flap_at_peak", None) or 1.0)
     climb_scale = float(getattr(args, "climb_speed", None) or 1.0)
     slope_slide_scale = float(
         getattr(args, "slope_slide_speed", None) or 1.0)
@@ -2051,14 +2081,16 @@ def cmd_apply_physics(args):
             and jump_scale == 1.0
             and air_control_scale == 1.0
             and flap_scale == 1.0
-            and flap_subsequent_scale == 1.0
+            and flap_below_peak_scale == 1.0
+            and flap_at_peak_scale == 1.0
             and climb_scale == 1.0
             and slope_slide_scale == 1.0):
         print("No physics changes requested.  "
               "Pass --gravity, --walk-speed, --roll-speed (or "
               "legacy --run-speed), --swim-speed, --jump-speed, "
               "--air-control-speed, --flap-height, "
-              "--flap-subsequent, --climb-speed, and/or "
+              "--flap-below-peak (or legacy --flap-subsequent), "
+              "--flap-at-peak, --climb-speed, and/or "
               "--slope-slide-speed.")
         return
 
@@ -2074,9 +2106,12 @@ def cmd_apply_physics(args):
             air_control_scale=(air_control_scale
                                if air_control_scale != 1.0 else None),
             flap_scale=flap_scale if flap_scale != 1.0 else None,
-            flap_subsequent_scale=(flap_subsequent_scale
-                                   if flap_subsequent_scale != 1.0
+            flap_below_peak_scale=(flap_below_peak_scale
+                                   if flap_below_peak_scale != 1.0
                                    else None),
+            flap_at_peak_scale=(flap_at_peak_scale
+                                if flap_at_peak_scale != 1.0
+                                else None),
             climb_scale=climb_scale if climb_scale != 1.0 else None,
             slope_slide_scale=(slope_slide_scale
                                if slope_slide_scale != 1.0 else None),

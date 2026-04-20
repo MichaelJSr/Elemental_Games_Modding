@@ -313,9 +313,27 @@ FLAP_HEIGHT_SCALE = ParametricPatch(
     decode=lambda b: struct.unpack("<d", b)[0],
 )
 
-FLAP_SUBSEQUENT_SCALE = ParametricPatch(
-    name="flap_subsequent_scale",
-    label="Wing-flap subsequent-flap height",
+FLAP_BELOW_PEAK_SCALE = ParametricPatch(
+    name="flap_below_peak_scale",
+    label="Wing-flap height (2nd+ flaps, >6m below peak)",
+    va=0,
+    size=0,
+    original=b"",
+    default=1.0,
+    slider_min=0.1,
+    slider_max=10.0,
+    slider_step=0.05,
+    unit="x",
+    encode=lambda v: struct.pack("<d", float(v)),
+    decode=lambda b: struct.unpack("<d", b)[0],
+)
+
+# Back-compat alias — the old name pre-rename (late April 2026).
+FLAP_SUBSEQUENT_SCALE = FLAP_BELOW_PEAK_SCALE
+
+FLAP_AT_PEAK_SCALE = ParametricPatch(
+    name="flap_at_peak_scale",
+    label="Wing-flap height (2nd+ flaps, near peak)",
     va=0,
     size=0,
     original=b"",
@@ -602,6 +620,52 @@ _FLAP_SUBSEQUENT_SITE_VANILLA = bytes([
 ])
 _VANILLA_FLAP_SUBSEQUENT = 0.5
 
+# -----------------------------------------------------------
+# Wing-flap AT peak cap (late April 2026 user-reported fix).
+#
+# Inside ``wing_flap`` the per-flap v0 is derived from the cap
+#
+#     fVar1 = peak_z + flap_height - current_z
+#     if fVar1 <= 0 then fVar1 = 0
+#     fVar2 = min(fVar1, flap_height)
+#     v0 = sqrt(2 * gravity * fVar2)
+#
+# When the player is AT peak (current_z ≈ peak_z), fVar1 ≈
+# flap_height, so v0 is full.  BUT once they've started flapping,
+# each flap RAISES peak_z (the sprite keeps rising), making
+# remaining = peak_z + flap_height - current_z ≈ flap_height.
+#
+# So after the first flap, the player is typically just above
+# peak_z by some delta d < flap_height.  Then:
+#   remaining = peak_z + flap_height - (peak_z + d) = flap_height - d
+# which is SMALLER than flap_height, giving fVar2 < flap_height
+# and thus v0 < full.  User observation: "subsequent flaps at
+# peak are weak."
+#
+# Fix: NOP the ``FSUB [EBX+0x5C]`` at VA 0x89381 (3 bytes) so
+# fVar1 = peak_z + flap_height (the subtract is skipped).  Then:
+#   fVar1 = peak_z + flap_height  (a large positive number)
+#   clamp: fVar1 > 0, no clamp needed
+#   fVar2 = min(large, flap_height) = flap_height
+#   v0 = sqrt(2 * gravity * flap_height)  — FULL V0
+#
+# Every subsequent flap near peak now gives full first-flap v0.
+# Side effect: the "below peak" halving fires more often (since
+# the halving check also compares fVar1 vs 6.0), so combine with
+# ``flap_below_peak_scale = 2.0`` to keep those strong too.
+#
+# Semantics:
+#   flap_at_peak_scale == 1.0 → vanilla (weak subsequent at peak)
+#   flap_at_peak_scale != 1.0 → NOP the subtract, full cap
+# (binary effect, slider kept for UI consistency with other
+# scales; the actual scale value isn't used for computation,
+# only its not-equal-to-1.0 trips the patch).
+_FLAP_PEAK_CAP_SITE_VA = 0x00089381
+_FLAP_PEAK_CAP_SITE_VANILLA = bytes([
+    0xD8, 0x63, 0x5C,          # FSUB dword [EBX+0x5C] (3 bytes)
+])
+_FLAP_PEAK_CAP_PATCH = bytes([0x90, 0x90, 0x90])   # 3 NOPs
+
 # Vanilla runtime value of CritterData.run_speed (+0x40) for the
 # player entity.  Confirmed via lldb at VA 0x00085F65 — the FLD
 # [EAX+0x40] immediately after MOV EAX, [EBP+0x34] in FUN_00085F50.
@@ -632,6 +696,8 @@ def apply_player_physics(
     air_control_scale: float | None = None,
     flap_scale: float | None = None,
     flap_subsequent_scale: float | None = None,
+    flap_below_peak_scale: float | None = None,
+    flap_at_peak_scale: float | None = None,
     climb_scale: float | None = None,
     slope_slide_scale: float | None = None,
     # Back-compat alias: callers that still pass run_scale get
@@ -673,10 +739,20 @@ def apply_player_physics(
     if f != 1.0:
         apply_flap_height(xbe_data, flap_scale=f)
 
-    fsub = (1.0 if flap_subsequent_scale is None
-            else float(flap_subsequent_scale))
+    # flap_below_peak_scale is the new name; flap_subsequent_scale
+    # is the old alias (late April 2026 rename).  Prefer the new
+    # name when both provided.
+    fbelow = flap_below_peak_scale
+    if fbelow is None:
+        fbelow = flap_subsequent_scale
+    fsub = 1.0 if fbelow is None else float(fbelow)
     if fsub != 1.0:
         apply_flap_subsequent(xbe_data, subsequent_scale=fsub)
+
+    fatp = (1.0 if flap_at_peak_scale is None
+            else float(flap_at_peak_scale))
+    if fatp != 1.0:
+        apply_flap_at_peak(xbe_data, at_peak_scale=fatp)
 
     c = 1.0 if climb_scale is None else float(climb_scale)
     if c != 1.0:
@@ -1107,17 +1183,77 @@ def apply_slope_slide_speed(
     return True
 
 
+def apply_flap_at_peak(
+    xbe_data: bytearray,
+    *,
+    at_peak_scale: float = 1.0,
+) -> bool:
+    """Patch ``default.xbe`` to give subsequent wing flaps FULL
+    v0 when the player is near their jump peak.
+
+    Vanilla behaviour: each subsequent wing flap computes
+    ``fVar1 = peak_z + flap_height - current_z``, clamps to >=0,
+    then caps ``fVar2 = min(fVar1, flap_height)``.  The v0 is
+    ``sqrt(2 * g * fVar2)``.
+
+    After the first flap, the player is typically just above
+    the peak_z they had pre-flap, so fVar1 = flap_height - delta
+    (small), giving a weak v0.  Hence the "subsequent flaps at
+    peak are weak" user report.
+
+    Fix: NOP the 3-byte ``FSUB [EBX+0x5C]`` at VA 0x89381 so
+    fVar1 = peak_z + flap_height (skips the current_z subtract).
+    The clamp "if fVar1 <= 0" never fires.  The cap yields
+    ``fVar2 = min(peak_z + flap_height, flap_height)`` — since
+    peak_z is always >= 0 in gameplay, fVar1 > flap_height, so
+    fVar2 = flap_height, giving FULL v0 every flap.
+
+    This binary patch uses the slider in a "not 1.0 = apply"
+    pattern (slider value itself isn't used for computation):
+
+    - ``1.0`` (default): vanilla behavior (weak subsequent near peak)
+    - anything else:     full v0 cap on every subsequent flap
+
+    Side effect: the below-peak halving check (VA 0x893C0,
+    ``fVar1 > 6.0``) fires MORE often because fVar1 is now
+    always peak_z + flap_height (typically > 6m).  Combine with
+    ``flap_below_peak_scale = 2.0`` to cancel the halving
+    entirely; then every subsequent flap near peak gets full v0.
+
+    Returns True on apply, False on no-op / drift.
+    """
+    if at_peak_scale == 1.0:
+        return False
+
+    off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
+    current = bytes(xbe_data[off:off + 3])
+    if current != _FLAP_PEAK_CAP_SITE_VANILLA:
+        print(f"  WARNING: flap_at_peak — site at VA "
+              f"0x{_FLAP_PEAK_CAP_SITE_VA:X} drifted (got "
+              f"{current.hex()}); skipping.")
+        return False
+
+    xbe_data[off:off + 3] = _FLAP_PEAK_CAP_PATCH
+    print(f"  Wing-flap (at peak) cap: force-full  "
+          f"(NOPed FSUB at VA 0x{_FLAP_PEAK_CAP_SITE_VA:X} — "
+          f"subsequent flaps always get flap_height v0)")
+    return True
+
+
 def apply_flap_subsequent(
     xbe_data: bytearray,
     *,
     subsequent_scale: float = 1.0,
 ) -> bool:
-    """Patch ``default.xbe`` to scale subsequent-flap v0.
+    """Patch ``default.xbe`` to scale subsequent-flap v0 when
+    the player is > 6m below their peak.
 
     After the first wing flap, ``FUN_00089300`` halves v0 via
     ``FMUL [0x001A2510] = 0.5`` at VA 0x893DD when the player
     has fallen > 6m below their peak.  This is why the second
-    and later flaps feel weaker than the first.
+    and later flaps feel weaker than the first — IF the player
+    is way below the peak.  For flaps near peak, see
+    :func:`apply_flap_at_peak`.
 
     We rewrite the FMUL to reference an injected ``0.5 ×
     subsequent_scale``:
@@ -1233,6 +1369,12 @@ def _player_speed_dynamic_whitelist(
         ranges.append((fls_off, fls_off + 6))
     except Exception:  # noqa: BLE001
         pass
+    # Flap at peak: 3-byte FSUB NOP at VA 0x89381 (late April 2026).
+    try:
+        fpc_off = va_to_file(_FLAP_PEAK_CAP_SITE_VA)
+        ranges.append((fpc_off, fpc_off + 3))
+    except Exception:  # noqa: BLE001
+        pass
 
     # Dynamic: if a site has been rewritten to `FLD/FMUL [abs32]`,
     # follow the abs32 pointer through the section table and whitelist
@@ -1296,7 +1438,8 @@ PLAYER_PHYSICS_SITES = [
     JUMP_SPEED_SCALE,
     AIR_CONTROL_SCALE,
     FLAP_HEIGHT_SCALE,
-    FLAP_SUBSEQUENT_SCALE,
+    FLAP_BELOW_PEAK_SCALE,
+    FLAP_AT_PEAK_SCALE,
     CLIMB_SPEED_SCALE,
     SLOPE_SLIDE_SPEED_SCALE,
 ]
@@ -1323,6 +1466,8 @@ def _custom_apply(
     air_control_scale: float | None = None,
     flap_height_scale: float | None = None,
     flap_subsequent_scale: float | None = None,
+    flap_below_peak_scale: float | None = None,
+    flap_at_peak_scale: float | None = None,
     climb_speed_scale: float | None = None,
     slope_slide_speed_scale: float | None = None,
     # Back-compat: the old kwarg spellings.  New callers should use
@@ -1371,6 +1516,8 @@ def _custom_apply(
         air_control_scale=air_control_scale,
         flap_scale=flap,
         flap_subsequent_scale=flap_subsequent_scale,
+        flap_below_peak_scale=flap_below_peak_scale,
+        flap_at_peak_scale=flap_at_peak_scale,
         climb_scale=climb,
         slope_slide_scale=slope_slide_speed_scale,
     )
@@ -1399,6 +1546,8 @@ FEATURE = register_feature(Feature(
 __all__ = [
     "AIR_CONTROL_SCALE",
     "CLIMB_SPEED_SCALE",
+    "FLAP_AT_PEAK_SCALE",
+    "FLAP_BELOW_PEAK_SCALE",
     "FLAP_HEIGHT_SCALE",
     "FLAP_SUBSEQUENT_SCALE",
     "GRAVITY_BASELINE",
@@ -1412,6 +1561,7 @@ __all__ = [
     "WALK_SPEED_SCALE",
     "apply_air_control_speed",
     "apply_climb_speed",
+    "apply_flap_at_peak",
     "apply_flap_height",
     "apply_flap_subsequent",
     "apply_jump_speed",

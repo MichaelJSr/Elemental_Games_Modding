@@ -83,6 +83,14 @@ from azurik_mod.patching.spec import PatchSpec
 # VA of the FUN_0008AB70 function prologue (fall damage dispatcher).
 NO_FALL_DAMAGE_VA = 0x0008AB70
 
+# VA of FUN_0008BE00 — the "no-surface landing" damage path.
+# This is the SECOND fall-damage path that fires when the player
+# lands without a surface contact slot populated (e.g., falling
+# off the world edge, water splash, etc.).  It also calls
+# FUN_00044640 (damage apply).  Added late April 2026 after the
+# user reported "light damage still fires with no_fall_damage on."
+AZURIK_FALL_DEATH_VA = 0x0008BE00
+
 
 NO_FALL_DAMAGE_SPEC = PatchSpec(
     label="Disable fall damage (XOR AL,AL ; RET 8 at FUN_0008AB70 entry)",
@@ -96,7 +104,23 @@ NO_FALL_DAMAGE_SPEC = PatchSpec(
 )
 
 
-NO_FALL_DAMAGE_SITES: list[PatchSpec] = [NO_FALL_DAMAGE_SPEC]
+FALL_DEATH_SPEC = PatchSpec(
+    label="Disable no-surface fall damage "
+          "(XOR AL,AL ; RET 4 at FUN_0008BE00 entry)",
+    va=AZURIK_FALL_DEATH_VA,
+    # Vanilla prologue: SUB ESP, 0x20 ; PUSH EBX ; PUSH EBP.
+    original=bytes.fromhex("83ec205355"),
+    # XOR AL, AL ; RET 4 — 5-byte always-return-0 (__stdcall, 1 arg).
+    patch=bytes.fromhex("32c0c20400"),
+    is_data=False,
+    safety_critical=False,
+)
+
+
+NO_FALL_DAMAGE_SITES: list[PatchSpec] = [
+    NO_FALL_DAMAGE_SPEC,
+    FALL_DEATH_SPEC,
+]
 
 
 def apply_no_fall_damage_patch(xbe_data: bytearray) -> None:
@@ -131,6 +155,8 @@ FEATURE = register_feature(Feature(
 
 
 __all__ = [
+    "AZURIK_FALL_DEATH_VA",
+    "FALL_DEATH_SPEC",
     "NO_FALL_DAMAGE_SITES",
     "NO_FALL_DAMAGE_SPEC",
     "NO_FALL_DAMAGE_VA",

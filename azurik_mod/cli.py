@@ -307,15 +307,29 @@ def main() -> None:
                              "scales linearly.")
     p_full.add_argument("--player-flap-subsequent-scale", type=float,
                         metavar="X",
+                        help="(Back-compat alias for "
+                             "--player-flap-below-peak-scale.)")
+    p_full.add_argument("--player-flap-below-peak-scale", type=float,
+                        metavar="X",
                         help="Player wing-flap v0 scale for the "
-                             "SECOND + subsequent flaps per jump "
-                             "(default 1.0, range 0.1-10.0).  "
-                             "After the first flap, Azurik halves "
-                             "v0 via FMUL [0x001A2510]=0.5 at VA "
-                             "0x893DD when the player has fallen "
-                             "> 6m below their peak.  Set to 2.0 "
-                             "to cancel the halving; 4.0 to "
-                             "double it instead.")
+                             "SECOND + subsequent flaps WHEN > 6m "
+                             "below peak (default 1.0, range "
+                             "0.1-10.0).  Azurik halves v0 via "
+                             "FMUL [0x001A2510]=0.5 at VA 0x893DD "
+                             "when the player has fallen > 6m "
+                             "below their peak.  Set to 2.0 to "
+                             "cancel the halving; 4.0 to double.")
+    p_full.add_argument("--player-flap-at-peak-scale", type=float,
+                        metavar="X",
+                        help="Player wing-flap v0 strength NEAR "
+                             "peak for 2nd+ flaps (default 1.0).  "
+                             "Vanilla caps v0 at sqrt(2g * "
+                             "min(remaining_height, flap_height)), "
+                             "so flaps right at peak are weak.  "
+                             "Any value != 1.0 enables the fix: "
+                             "NOPs FSUB [EBX+0x5C] at VA 0x89381 "
+                             "so v0 = sqrt(2g * flap_height) "
+                             "(full first-flap v0 every flap).")
     p_full.add_argument("--player-climb-scale", type=float,
                         metavar="X",
                         help="Player climbing-state speed "
@@ -423,11 +437,20 @@ def main() -> None:
              "Rewrites FLD [0x001980A8] at VA 0x893AE.")
     p_physics.add_argument("--flap-subsequent", type=float,
         metavar="X",
-        help="Player wing-flap v0 scale for 2nd+ flaps per "
-             "jump (default 1.0; range 0.1-10.0).  Scales the "
-             "0.5 halving factor at VA 0x893DD.  Set 2.0 to "
-             "cancel the halving, 4.0 to double subsequent "
-             "flap height.")
+        help="(Back-compat alias for --flap-below-peak.)")
+    p_physics.add_argument("--flap-below-peak", type=float,
+        metavar="X",
+        help="Player wing-flap v0 scale for 2nd+ flaps when "
+             ">6m below peak (default 1.0; range 0.1-10.0).  "
+             "Scales the 0.5 halving factor at VA 0x893DD.  "
+             "Set 2.0 to cancel halving, 4.0 to double height.")
+    p_physics.add_argument("--flap-at-peak", type=float,
+        metavar="X",
+        help="Wing-flap v0 NEAR peak for 2nd+ flaps (default "
+             "1.0; binary toggle: !=1.0 enables).  NOPs FSUB "
+             "[EBX+0x5C] at VA 0x89381 so v0 stays at full "
+             "sqrt(2g * flap_height) regardless of how far "
+             "above peak the player has risen.")
     p_physics.add_argument("--climb-speed", type=float, metavar="X",
         help="Player climbing-state speed multiplier "
              "(default 1.0; range 0.1-10.0).  Overwrites the "
