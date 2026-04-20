@@ -20,16 +20,10 @@ Tests cover:
 
 from __future__ import annotations
 
-import os
 import struct
-import sys
 import unittest
-from pathlib import Path
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.dirname(_THIS_DIR)
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
+from tests._xbe_fixture import XBE_PATH, require_xbe  # noqa: E402
 
 from azurik_mod.patches.flap_at_peak import (  # noqa: E402
     FLAP_AT_PEAK_SHIM_SLIDER,
@@ -43,15 +37,6 @@ from azurik_mod.patches.flap_at_peak import (  # noqa: E402
     apply_flap_at_peak,
 )
 from azurik_mod.patching.xbe import va_to_file  # noqa: E402
-
-_XBE_CANDIDATES = [
-    Path("/Users/michaelsrouji/Documents/Xemu/tools/"
-         "Azurik - Rise of Perathia (USA).xiso/default.xbe"),
-    Path(_REPO_ROOT).parent /
-        "Azurik - Rise of Perathia (USA).xiso" / "default.xbe",
-    Path(_REPO_ROOT) / "tests" / "fixtures" / "default.xbe",
-]
-_XBE_PATH = next((p for p in _XBE_CANDIDATES if p.exists()), None)
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +97,7 @@ class FlapAtPeakShimShape(unittest.TestCase):
         # Arbitrary but stable VAs for deterministic output.
         self.k_va = 0x001001D0
         self.shim_va = 0x0039F000
-        self.body = _build_shim_body(self.k_va, self.shim_va)
+        self.body = _build_shim_body(self.shim_va, self.k_va)
 
     def test_body_is_43_bytes(self):
         self.assertEqual(len(self.body), 43)
@@ -173,11 +158,10 @@ class FlapAtPeakShimShape(unittest.TestCase):
 # Apply on vanilla XBE
 # ---------------------------------------------------------------------------
 
-@unittest.skipUnless(_XBE_PATH,
-    "vanilla default.xbe fixture not available")
+@require_xbe
 class FlapAtPeakApply(unittest.TestCase):
     def setUp(self):
-        self.orig = _XBE_PATH.read_bytes()
+        self.orig = XBE_PATH.read_bytes()
 
     def test_vanilla_bytes_match_ghidra(self):
         """Drift-guard: the 6 bytes at VA 0x89409 must match

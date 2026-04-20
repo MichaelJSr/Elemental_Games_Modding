@@ -63,6 +63,14 @@ from __future__ import annotations
 import struct
 
 from azurik_mod.patching.registry import Feature, register_feature
+from azurik_mod.patching.shim_builder import (
+    HandShimSpec,
+    emit_call_rel32,
+    emit_fld_abs32,
+    install_hand_shim,
+    whitelist_for_hand_shim,
+    with_sentinel,
+)
 from azurik_mod.patching.spec import ParametricPatch
 
 # ---------------------------------------------------------------------------
@@ -82,6 +90,15 @@ _ROLL_FLAG_MASK = 0x40
 
 # Shim body size (computed precisely in _build_shim_body).
 _SHIM_BODY_SIZE = 134
+
+_SPEC = HandShimSpec(
+    hook_va=_HOOK_VA,
+    hook_vanilla=_HOOK_VANILLA,
+    trampoline_mode="call",
+    hook_pad_nops=0,
+    hook_return_va=_HOOK_RETURN_VA,
+    body_size=_SHIM_BODY_SIZE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +135,7 @@ ROLL_SPEED_SITES: list[ParametricPatch] = [ROLL_SPEED_SHIM_SLIDER]
 # Shim assembly
 # ---------------------------------------------------------------------------
 
-def _build_shim_body(scale_va: int, shim_va: int) -> bytes:
+def _build_shim_body(shim_va: int, scale_va: int) -> bytes:
     """Hand-assemble the root_motion_roll shim body.
 
     The shim wraps ``FUN_00042E40``: re-push the 4 stack args,
@@ -189,10 +206,8 @@ def _build_shim_body(scale_va: int, shim_va: int) -> bytes:
     parts.append(b"\x8B\xCF")                     # MOV ECX, EDI  (2) — restore this
 
     # CALL vanilla FUN_00042E40.  rel32 relative to end-of-CALL.
-    call_origin = shim_va + len(b"".join(parts))
-    call_end = call_origin + 5
-    call_rel32 = _FUN_00042E40_VA - call_end
-    parts.append(b"\xE8" + struct.pack("<i", call_rel32))  # (5)
+    call_origin_after = shim_va + len(b"".join(parts)) + 5
+    parts.append(emit_call_rel32(call_origin_after, _FUN_00042E40_VA))
 
     # Gate check: PlayerInputState.flags & 0x40 (EBP+0x20).
     parts.append(b"\xF6\x45\x20\x40")             # TEST [EBP+0x20], 0x40  (4)
@@ -208,7 +223,7 @@ def _build_shim_body(scale_va: int, shim_va: int) -> bytes:
     parts.append(b"\x74" + bytes([scale_block_size]))  # JZ +92  (2)
 
     # FLD scale — ST0 = scale.
-    parts.append(b"\xD9\x05" + struct.pack("<I", scale_va))   # 6
+    parts.append(emit_fld_abs32(scale_va))   # 6
 
     # 6 scaled slots on param_1: offsets 0x1B0 .. 0x1C4 (stride 4).
     for disp in (0x1B0, 0x1B4, 0x1B8, 0x1BC, 0x1C0, 0x1C4):
@@ -244,45 +259,28 @@ def apply_root_motion_roll(
 ) -> bool:
     """Install the root-motion-roll shim.
 
-    Returns ``True`` on install.  Scale 1.0 is technically
-    byte-identical to vanilla (x * 1.0 == x) but we install
-    unconditionally so slider changes take effect on rebuild.
+    Returns ``True`` on install / already-applied.  Scale 1.0 is
+    technically byte-identical to vanilla (x * 1.0 == x) but we
+    install unconditionally so slider changes take effect on
+    rebuild.
     """
     scale = float(scale)
     if scale <= 0:
         scale = 1e-4
 
-    from azurik_mod.patching.apply import _carve_shim_landing
+    result = install_hand_shim(
+        xbe_data, _SPEC,
+        data_block=with_sentinel(struct.pack("<f", scale)),
+        build_body=_build_shim_body,
+        label=f"Root-motion roll scale: {scale:.3f}x",
+    )
+    if result is not None:
+        return True
+    # Already applied? Detect our own CALL trampoline.
     from azurik_mod.patching.xbe import va_to_file
-
-    hook_off = va_to_file(_HOOK_VA)
-    current = bytes(xbe_data[hook_off:hook_off + 5])
-    if current != _HOOK_VANILLA:
-        if current[0] == 0xE8:
-            # Previously applied (or user hand-patched).
-            print(f"  root_motion_roll (already applied / existing CALL trampoline)")
-            return True
-        print(f"  WARNING: root_motion_roll — hook site at VA "
-              f"0x{_HOOK_VA:X} drifted (got {current.hex()}); skipping.")
-        return False
-
-    scale_block = struct.pack("<f", scale) + b"\xFF\xFF\xFF\xFF"
-    _, scale_va = _carve_shim_landing(xbe_data, scale_block)
-
-    placeholder = b"\xCC" * _SHIM_BODY_SIZE
-    body_off, shim_va = _carve_shim_landing(xbe_data, placeholder)
-    body = _build_shim_body(scale_va, shim_va)
-    xbe_data[body_off:body_off + _SHIM_BODY_SIZE] = body
-
-    # Replace the 5-byte vanilla CALL with a CALL to our shim.
-    rel32 = shim_va - (_HOOK_VA + 5)
-    trampoline = b"\xE8" + struct.pack("<i", rel32)
-    xbe_data[hook_off:hook_off + 5] = trampoline
-
-    print(f"  Root-motion roll scale: {scale:.3f}x  "
-          f"(shim @ VA 0x{shim_va:X}, +{_SHIM_BODY_SIZE} bytes; "
-          f"scale @ VA 0x{scale_va:X})")
-    return True
+    off = va_to_file(_HOOK_VA)
+    return xbe_data[off] == 0xE8 and (
+        bytes(xbe_data[off:off + 5]) != _HOOK_VANILLA)
 
 
 # ---------------------------------------------------------------------------
@@ -292,28 +290,14 @@ def apply_root_motion_roll(
 def _root_motion_roll_dynamic_whitelist(
     xbe: bytes,
 ) -> list[tuple[int, int]]:
-    from azurik_mod.patching.xbe import resolve_va_to_file, va_to_file
-
-    try:
-        hook_off = va_to_file(_HOOK_VA)
-    except Exception:  # noqa: BLE001
-        return []
-
-    ranges: list[tuple[int, int]] = [(hook_off, hook_off + 5)]
-    if len(xbe) >= hook_off + 5 and xbe[hook_off] == 0xE8:
-        rel32 = struct.unpack("<i", xbe[hook_off + 1:hook_off + 5])[0]
-        shim_va = _HOOK_VA + 5 + rel32
-        shim_off = resolve_va_to_file(xbe, shim_va)
-        if shim_off is not None:
-            ranges.append((shim_off, shim_off + _SHIM_BODY_SIZE))
-            # FLD [scale_va] lives at shim offset 37 — D9 05 <abs32>.
-            body = xbe[shim_off:shim_off + _SHIM_BODY_SIZE]
-            if len(body) >= 43 and body[37:39] == b"\xD9\x05":
-                scale_va = struct.unpack("<I", body[39:43])[0]
-                off = resolve_va_to_file(xbe, scale_va)
-                if off is not None:
-                    ranges.append((off, off + 8))
-    return ranges
+    """FLD [scale_va] lives at shim offset 37 (after prologue +
+    arg-duplication + CALL vanilla + TEST-and-JZ gate)."""
+    return whitelist_for_hand_shim(
+        xbe, _SPEC,
+        data_abs32_offsets=(37,),
+        data_abs32_opcode=b"\xD9\x05",
+        data_whitelist_size=8,
+    )
 
 
 # ---------------------------------------------------------------------------

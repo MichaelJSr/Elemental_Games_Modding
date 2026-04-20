@@ -2,6 +2,65 @@
 
 ## Unreleased
 
+### Shim infrastructure + cleanup pass (round 9)
+
+Follow-up to the round-8 shim revival: extract the boilerplate
+every hand-assembled pack was carrying, clean up dead code, fix
+stale docs.
+
+**New shared shim-authoring helper** at
+[`azurik_mod/patching/shim_builder.py`](azurik_mod/patching/shim_builder.py).
+Packages the install pipeline (vanilla-drift check + idempotent
+re-apply detection + carve scale/data block with 0xFF sentinel +
+carve body placeholder + assemble + install E8/E9 rel32
+trampoline + trailing NOP pad) plus a matching
+`whitelist_for_hand_shim` callback and small emitters
+(`emit_fld_abs32`, `emit_fmul_abs32`, `emit_fstp_abs32`,
+`emit_jmp_rel32`, `emit_call_rel32`, `with_sentinel`).
+
+Before the refactor each of the 5 hand-assembled packs carried
+~80-150 LoC of pipeline boilerplate.  After: the 4 round-8 packs
+(`flap_at_peak`, `slope_slide_speed`, `root_motion_roll`,
+`root_motion_climb`) express their unique logic — the body
+builder — and delegate everything else.  Net reduction of ~250
+LoC across the four.  `wing_flap_count` stays on its own
+hand-rolled path for now (retired + slightly different data-
+block shape).
+
+**New docs** in [`docs/SHIM_AUTHORING.md`](docs/SHIM_AUTHORING.md)
+§ "Hand-assembled (Python) shims vs C shims" — when to pick
+which approach, the blessed pattern, and the `__thiscall`
+detour pattern with stack-shift arithmetic for wrapping a
+vanilla CALL from inside a shim.
+
+**Test fixture consolidation**.  Five test modules used to
+duplicate the same ``_XBE_CANDIDATES`` + ``_XBE_PATH`` + skip-
+decorator block.  Centralised in
+[`tests/_xbe_fixture.py`](tests/_xbe_fixture.py) with a single
+``require_xbe`` decorator; net saves ~50 LoC across tests.
+
+**Cleanup**:
+
+- Removed `_VANILLA_FLAPS = {1:1, 2:2, 3:5}` (dead constant in
+  `wing_flap_count`).
+- Removed unused `parse_xbe_sections` import in
+  `wing_flap_count`'s whitelist function.
+- Fixed stale docstring sizes: `root_motion_climb` body was
+  labelled 130 B (actual 128), `wing_flap_count` whitelist
+  doc said 50 B (actual 47).
+- Fixed misleading "C shim" label in `flap_at_peak`
+  description (it's a hand-assembled x86 shim, not a C shim).
+- Reconciled `docs/LEARNINGS.md` § "Wing-flap v0 cap" — the
+  section still read as "retired, write a C shim"; now
+  correctly reflects the round-8 shipped shim at 0x89409 and
+  frames the cap as intentional vanilla design.
+- Updated `docs/PATCHES.md` retired-slider paragraph to point
+  at the shim-backed revival table instead of the old
+  "byte patches have no effect" text.
+
+**Test suite**: 859 pass (was 845), 775 subtests (was 775).
+The +14 net tests are all new coverage for `shim_builder`.
+
 ### Player packs — round 8 (shim revival of 4 retired sliders)
 
 Four of the previously-retired physics sliders are now shipping

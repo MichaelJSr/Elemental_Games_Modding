@@ -53,9 +53,19 @@ from __future__ import annotations
 import struct
 
 from azurik_mod.patching.registry import Feature, register_feature
+from azurik_mod.patching.shim_builder import (
+    HandShimSpec,
+    emit_fld_abs32,
+    emit_fmul_abs32,
+    emit_jmp_rel32,
+    install_hand_shim,
+    whitelist_for_hand_shim,
+    with_sentinel,
+)
 from azurik_mod.patching.spec import ParametricPatch
 
-# Hook site: FLD [0x003902A0] at VA 0x8A095.  6 bytes.
+# Hook site: FLD [0x003902A0] at VA 0x8A095.  6 bytes (5-byte JMP
+# + 1-byte NOP trampoline cleanly replaces it).
 _HOOK_VA = 0x0008A095
 _HOOK_VANILLA = bytes.fromhex("d905a0023900")
 _HOOK_RETURN_VA = 0x0008A09B   # the FMUL [EDI+0x4] that follows
@@ -65,6 +75,15 @@ _VANILLA_SLOPE_DAT_VA = 0x003902A0
 
 # Shim body size (3 instructions: FLD, FMUL, JMP).
 _SHIM_BODY_SIZE = 17
+
+_SPEC = HandShimSpec(
+    hook_va=_HOOK_VA,
+    hook_vanilla=_HOOK_VANILLA,
+    trampoline_mode="jmp",
+    hook_pad_nops=1,
+    hook_return_va=_HOOK_RETURN_VA,
+    body_size=_SHIM_BODY_SIZE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -107,16 +126,13 @@ def _build_shim_body(scale_va: int, shim_va: int) -> bytes:
     (user ``scale`` value).  ``shim_va`` is the absolute VA the
     shim body lands at — used to compute the closing JMP rel32.
     """
-    parts: list[bytes] = []
-    # 0-5: FLD [0x003902A0] — replay the vanilla read.
-    parts.append(b"\xD9\x05" + struct.pack("<I", _VANILLA_SLOPE_DAT_VA))
-    # 6-11: FMUL [scale_va] — multiply ST0 by user scale.
-    parts.append(b"\xD8\x0D" + struct.pack("<I", scale_va))
-    # 12-16: JMP <rel32> back to HOOK_RETURN_VA.
-    jmp_origin_after = shim_va + _SHIM_BODY_SIZE
-    rel32 = _HOOK_RETURN_VA - jmp_origin_after
-    parts.append(b"\xE9" + struct.pack("<i", rel32))
-    body = b"".join(parts)
+    body = (
+        emit_fld_abs32(_VANILLA_SLOPE_DAT_VA)       # 6 B: replay FLD
+        + emit_fmul_abs32(scale_va)                 # 6 B: × user scale
+        + emit_jmp_rel32(                           # 5 B: back to vanilla
+            from_origin_after=shim_va + _SHIM_BODY_SIZE,
+            to_va=_HOOK_RETURN_VA)
+    )
     assert len(body) == _SHIM_BODY_SIZE
     return body
 
@@ -132,47 +148,34 @@ def apply_slope_slide_speed_shim(
 ) -> bool:
     """Install the slope-slide state-4 velocity shim.
 
-    Returns ``True`` on install.  ``scale=1.0`` is a byte-identity
-    operation (``x * 1.0 == x``), but the shim still installs so
-    any future slider change takes effect immediately.
+    Returns ``True`` on install / already-applied.  ``scale=1.0``
+    is a byte-identity op (``x * 1.0 == x``), but the shim still
+    installs so any future slider change takes effect immediately.
     """
     scale = float(scale)
     if scale <= 0:
         scale = 1e-4
 
-    from azurik_mod.patching.apply import _carve_shim_landing
+    result = install_hand_shim(
+        xbe_data, _SPEC,
+        data_block=with_sentinel(struct.pack("<f", scale)),
+        build_body=_build_shim_body,
+        label=f"Slope-slide (state-4) speed: scale={scale:.3f}x",
+    )
+    # None means either "already applied" (which is also success) or
+    # "drift" (which is failure).  The helper prints the appropriate
+    # diagnostic; we just translate to bool.
+    return result is not None or _is_already_applied(xbe_data)
+
+
+def _is_already_applied(xbe_data: bytearray) -> bool:
+    """Re-check the hook: ``install_hand_shim`` returns ``None``
+    both on already-applied AND on drift.  To distinguish, sniff
+    the hook bytes: valid trampoline shape = already applied."""
     from azurik_mod.patching.xbe import va_to_file
-
-    hook_off = va_to_file(_HOOK_VA)
-    current = bytes(xbe_data[hook_off:hook_off + 6])
-    if current != _HOOK_VANILLA:
-        if current[0] == 0xE9 and current[5] == 0x90:
-            print(f"  slope_slide_speed (already applied)")
-            return True
-        print(f"  WARNING: slope_slide_speed — hook site at VA "
-              f"0x{_HOOK_VA:X} drifted (got {current.hex()}); "
-              f"skipping.")
-        return False
-
-    # Carve the 4-byte scale float + 4-byte 0xFF sentinel.
-    scale_block = struct.pack("<f", scale) + b"\xFF\xFF\xFF\xFF"
-    _, scale_va = _carve_shim_landing(xbe_data, scale_block)
-
-    # Carve the shim body.
-    placeholder = b"\xCC" * _SHIM_BODY_SIZE
-    body_off, shim_va = _carve_shim_landing(xbe_data, placeholder)
-    body = _build_shim_body(scale_va, shim_va)
-    xbe_data[body_off:body_off + _SHIM_BODY_SIZE] = body
-
-    # Trampoline: 5-byte JMP + 1 NOP covering the 6-byte FLD.
-    rel32 = shim_va - (_HOOK_VA + 5)
-    trampoline = b"\xE9" + struct.pack("<i", rel32) + b"\x90"
-    xbe_data[hook_off:hook_off + 6] = trampoline
-
-    print(f"  Slope-slide (state-4) speed: scale={scale:.3f}x  "
-          f"(shim @ VA 0x{shim_va:X}, +{_SHIM_BODY_SIZE} bytes; "
-          f"scale @ VA 0x{scale_va:X})")
-    return True
+    off = va_to_file(_HOOK_VA)
+    b = xbe_data[off:off + 6]
+    return len(b) == 6 and b[0] == 0xE9 and b[5] == 0x90
 
 
 # ---------------------------------------------------------------------------
@@ -180,30 +183,14 @@ def apply_slope_slide_speed_shim(
 # ---------------------------------------------------------------------------
 
 def _slope_slide_dynamic_whitelist(xbe: bytes) -> list[tuple[int, int]]:
-    from azurik_mod.patching.xbe import resolve_va_to_file, va_to_file
-
-    try:
-        hook_off = va_to_file(_HOOK_VA)
-    except Exception:  # noqa: BLE001
-        return []
-
-    ranges: list[tuple[int, int]] = [(hook_off, hook_off + 6)]
-    if len(xbe) >= hook_off + 6:
-        tramp = xbe[hook_off:hook_off + 6]
-        if tramp[0] == 0xE9 and tramp[5] == 0x90:
-            rel32 = struct.unpack("<i", tramp[1:5])[0]
-            shim_va = _HOOK_VA + 5 + rel32
-            shim_off = resolve_va_to_file(xbe, shim_va)
-            if shim_off is not None:
-                ranges.append((shim_off, shim_off + _SHIM_BODY_SIZE))
-                body = xbe[shim_off:shim_off + _SHIM_BODY_SIZE]
-                # FMUL [scale_va] at offset 6: D8 0D <abs32>
-                if len(body) >= 12 and body[6:8] == b"\xD8\x0D":
-                    scale_va = struct.unpack("<I", body[8:12])[0]
-                    off = resolve_va_to_file(xbe, scale_va)
-                    if off is not None:
-                        ranges.append((off, off + 8))
-    return ranges
+    # Body layout: FLD [const] @ 0 ; FMUL [scale_va] @ 6 ; JMP @ 12.
+    # Offset 6 uses opcode D8 0D (FMUL m32fp) — that's the scale ref.
+    return whitelist_for_hand_shim(
+        xbe, _SPEC,
+        data_abs32_offsets=(6,),
+        data_abs32_opcode=b"\xD8\x0D",
+        data_whitelist_size=8,
+    )
 
 
 # ---------------------------------------------------------------------------

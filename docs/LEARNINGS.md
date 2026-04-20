@@ -158,7 +158,7 @@ The v2 patch at VA 0x893AE mirrors the initial-jump pattern:
 rewrite the gravity FLD to reference an injected
 ``9.8 × flap_scale²`` so the sqrt yields ``flap_scale × v0``.
 
-### Wing-flap v0 cap — near-peak fix abandoned (late April 2026)
+### Wing-flap v0 cap — vanilla anti-infinite-altitude design
 
 Vanilla `wing_flap` (FUN_00089300) at VAs 0x89368-0x89393:
 
@@ -169,30 +169,38 @@ fVar2 = min(fVar1, flap_height)
 v0 = sqrt(2 × g × fVar2)
 ```
 
-User-observed ceiling: `peak_z` is latched to the initial-flap
-z, so **subsequent flaps can never exceed
-`initial_flap_z + flap_height`**.  Falling below that height
-works (each flap restores some altitude) but flaps AT the
-ceiling give zero v0 because `fVar1 <= 0` triggers the clamp.
+``peak_z`` is latched to ``z_at_jump + flap_height`` in
+`player_jump_init` at VA 0x8915A and is **never refreshed** by
+`player_airborne_tick`.  Consequence: **subsequent flaps
+cannot exceed `initial_flap_z + flap_height`**.  Below-peak
+flaps are a supported recovery mechanic — the 0.5× halving at
+`flap_below_peak_scale` is a clean byte-patch of a real
+vanilla constant.  At-or-above-peak flaps are **intentional
+anti-infinite-altitude design**: once the player has recovered
+their altitude budget, further flaps produce zero v0.
 
-Two byte-patch attempts, both abandoned:
+Two byte-patch attempts at the cap formula, both abandoned:
 
-- v1 NOPed `FSUB [EBX+0x5C]` at 0x89381 so `fVar1 = peak+fh`
-  (always large).  Landed cleanly but `fVar1 > 6m` tripped
-  the halving path at 0x893C0 AND `consume_fuel(100)` at
-  0x893D4 — fuel drained to zero within 1–2 flaps and the
-  fuel gate refused further flaps.
-- v2 rewrote `FLD ST(1)` → `FLD ST(0)` at 0x8939F so the
+- **v1** NOPed `FSUB [EBX+0x5C]` at 0x89381 so `fVar1 = peak+fh`
+  (always large).  Landed cleanly but `fVar1 > 6m` tripped the
+  halving path at 0x893C0 AND `consume_fuel(100)` at 0x893D4
+  — fuel drained to zero within 1-2 flaps.
+- **v2** rewrote `FLD ST(1)` → `FLD ST(0)` at 0x8939F so the
   `min(fVar1, fh)` compare became `min(fh, fh)`.  Byte-level
   verification showed the patch landed; in-game testing
-  reported no observable effect.  The engine likely
-  re-derives `fVar2` downstream after the FSQRT we can't
-  reach with a single-instruction rewrite.
+  reported no observable effect.  The engine re-derives the
+  cap downstream.
 
-`flap_at_peak_scale` is retired.  Workarounds: raise
-`flap_height_scale` + `jump_speed_scale` to increase the
-ceiling, or write a C shim that intercepts `wing_flap`'s v0
-write (`FSTP [ESP+0x1C]` at 0x893BA).
+**Shipped fix (round 8)**: `flap_at_peak` **shim** at VA
+0x89409 (the final `FSTP [ESI+0x2C]` that writes
+``entity.z_velocity``).  43-byte hand-assembled trampoline
+wraps the write with
+``max(vanilla_v0, sqrt(2g * flap_height) * scale)``.  The cap
+still computes as vanilla; the shim merely *enforces a
+minimum* so every 2nd+ flap reaches at least the user-scaled
+first-flap v0.  This is a **workaround**, not a bug fix —
+above-ceiling flight is not a vanilla-supported mode.  See
+``azurik_mod/patches/flap_at_peak/`` for the implementation.
 
 ### Air-control speed has TWO dominant writer sites — FUN_00083F90 (April 2026)
 

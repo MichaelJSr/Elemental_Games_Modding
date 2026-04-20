@@ -353,9 +353,9 @@ deprecated aliases for `--player-roll-scale` / `--roll-speed`.
 
 The Patches page renders 7 working `ParametricSlider` widgets under `player_physics`: `gravity`, `walk_speed_scale`, `swim_speed_scale`, `jump_speed_scale`, `air_control_scale`, `flap_height_scale` (1st flap), `flap_below_peak_scale` (2nd+ flaps when >6m below peak).  Slider values live on `AppState.pack_params["player_physics"]` and carry a long-form description rendered under the label; sliders accept out-of-range values via the text box for expert tuning.
 
-**Retired sliders** (kept as module symbols for back-compat + tests, no longer surfaced): `roll_speed_scale`, `climb_speed_scale`, `slope_slide_speed_scale`, `flap_at_peak_scale`.  All four have byte patches that land cleanly but produce no observable in-game effect — the actions they target are driven by animation root motion or engine-internal state-derived velocity that byte rewrites can't reach.  See `docs/LEARNINGS.md` § "Retired physics patches" for root-cause analysis + shim-level workaround sketches.
+**Revived via shim (round 8)**: four sliders that were previously byte-patch-retired now ship as their own shim-backed packs: `flap_at_peak`, `slope_slide_speed`, `root_motion_roll`, `root_motion_climb`.  Each hand-assembles a trampoline at a code-flow point byte patches couldn't reach (see `docs/LEARNINGS.md` § "Revived via shim" for the table).
 
-**Retired packs** (same reason, same recourse — use the config editor): `no_fall_damage`, `infinite_fuel`, `wing_flap_count`.  Concrete workarounds:
+**Retired packs** (byte patches land but gameplay-side evidence suggests other paths dominate — use the config editor): `no_fall_damage`, `infinite_fuel`, `wing_flap_count`.  Concrete workarounds:
 - **No fall damage** → `config.xbr` / `damage` section: raise fall-height thresholds.  Or `critters_damage` → bump player row's `hitPoints`.
 - **Infinite fuel** → `config.xbr` / `armor_properties`: set `fuel_max` to a large number; or `attacks_anims`: zero every `Fuel multiplier`.
 - **Wing-flap count** → `config.xbr` / `armor_properties`: edit the `Flaps` column per armor row (fire1..3 / water1..3 / air1..3 / earth1..3) — read fresh each flap so changes land immediately.

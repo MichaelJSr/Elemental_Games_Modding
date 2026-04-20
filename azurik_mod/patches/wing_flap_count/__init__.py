@@ -184,8 +184,6 @@ WING_FLAP_COUNT_SITES: list[ParametricPatch] = [
 # Apply
 # ---------------------------------------------------------------------------
 
-_VANILLA_FLAPS = {1: 1, 2: 2, 3: 5}
-
 
 def _build_shim_body(
     shim_va: int,
@@ -382,10 +380,10 @@ def _wing_flap_count_dynamic_whitelist(
 
     Always whitelists the 5-byte trampoline slot at VA 0x89321.
     Follows the trampoline to the shim body when installed and
-    whitelists the 50-byte body + its 3 × 4-byte injected int
+    whitelists the 47-byte body + its 3 × 4-byte injected int
     constants.
     """
-    from azurik_mod.patching.xbe import parse_xbe_sections, va_to_file
+    from azurik_mod.patching.xbe import va_to_file
 
     try:
         hook_off = va_to_file(_WING_FLAP_HOOK_VA)

@@ -536,7 +536,137 @@ One env var covers every shim-backed pack.  No per-pack
 
 ---
 
-## 8. See also
+## 8. Hand-assembled (Python) shims vs C shims
+
+For trampolines that either (a) need precise x87 stack management at
+the hook, (b) must invoke a `__thiscall` vanilla function with
+duplicated stack args, or (c) carry a float constant whose value is
+chosen at apply time — a full C shim can be awkward.  The repo
+ships a second authoring path: **hand-assembled machine-code shims
+driven from Python**, centralised in
+[`azurik_mod/patching/shim_builder.py`](../azurik_mod/patching/shim_builder.py).
+
+**Choose a C shim when**:
+- The shim is straightforward C that calls a registered
+  vanilla function with normal cdecl / stdcall args (the skip-logo
+  pattern).
+- All constants the shim needs are compile-time known.
+- You want the LLVM toolchain to handle register allocation.
+
+**Choose a hand-assembled shim when**:
+- The hook interrupts an x87 FPU compute and you must preserve /
+  consume ST(0..n) precisely (e.g. `flap_at_peak` comparing
+  floors to vanilla v0 on the FP stack).
+- The shim must invoke a `__thiscall` vanilla function with stack
+  args that are already pushed on the caller's frame (e.g.
+  `root_motion_roll` / `_climb` wrapping `anim_apply_translation`).
+- Per-apply slider values need to be baked into a carved data
+  slot (e.g. `scale * scale * 2g` for flap_at_peak).
+
+### Blessed pattern
+
+```python
+from azurik_mod.patching.shim_builder import (
+    HandShimSpec, install_hand_shim, whitelist_for_hand_shim,
+    emit_fld_abs32, emit_fmul_abs32, emit_jmp_rel32, with_sentinel,
+)
+
+_SPEC = HandShimSpec(
+    hook_va         = 0x0008A095,                  # the target instruction
+    hook_vanilla    = bytes.fromhex("d905a0023900"),
+    trampoline_mode = "jmp",                        # or "call"
+    hook_pad_nops   = 1,                            # total hook width = 5 + 1
+    hook_return_va  = 0x0008A09B,                   # resume VA for JMP shims
+    body_size       = 17,
+)
+
+def _build_shim_body(shim_va: int, data_va: int) -> bytes:
+    """(shim_va, data_va) — always this order.  Return exactly
+    spec.body_size bytes."""
+    body = (
+        emit_fld_abs32(_VANILLA_DAT_VA)
+        + emit_fmul_abs32(data_va)
+        + emit_jmp_rel32(
+            from_origin_after=shim_va + _SPEC.body_size,
+            to_va=_SPEC.hook_return_va)
+    )
+    assert len(body) == _SPEC.body_size
+    return body
+
+def apply_pack(xbe_data, scale):
+    install_hand_shim(
+        xbe_data, _SPEC,
+        data_block=with_sentinel(struct.pack("<f", scale)),
+        build_body=_build_shim_body,
+        label=f"slope_slide scale={scale:.2f}x",
+    )
+
+def dynamic_whitelist(xbe):
+    return whitelist_for_hand_shim(
+        xbe, _SPEC,
+        data_abs32_offsets=(6,),
+        data_abs32_opcode=b"\xD8\x0D",   # FMUL m32fp
+        data_whitelist_size=8,
+    )
+```
+
+The helper handles: (1) vanilla-byte drift detection,
+(2) idempotent re-apply detection (returns `None` so you
+don't double-install), (3) carving the scale-block and
+shim-body placeholder via `_carve_shim_landing`, (4) emitting
+the trampoline opcode + rel32 at the hook.  Your code only
+needs to define the hook spec and the body builder.
+
+### Worked examples
+
+Four packs use the hand-assembled pattern — read them alongside
+this doc for end-to-end context:
+
+| Pack | Hook | Shim size | Notes |
+|------|------|-----------|-------|
+| [`azurik_mod/patches/slope_slide_speed`](../azurik_mod/patches/slope_slide_speed/__init__.py) | VA 0x8A095 (FLD) | 17 B | Simplest: FLD→FMUL→JMP. |
+| [`azurik_mod/patches/flap_at_peak`](../azurik_mod/patches/flap_at_peak/__init__.py) | VA 0x89409 (FSTP) | 43 B | x87 compare-max + instruction replay. |
+| [`azurik_mod/patches/root_motion_roll`](../azurik_mod/patches/root_motion_roll/__init__.py) | VA 0x866D9 (CALL) | 134 B | Wraps `__thiscall` vanilla with flag-gated post-scale. |
+| [`azurik_mod/patches/root_motion_climb`](../azurik_mod/patches/root_motion_climb/__init__.py) | VA 0x883FF (CALL) | 128 B | Same as roll, no gate. |
+
+### `__thiscall` detour pattern
+
+The tricky piece is **wrapping a CALL** such that you call the
+vanilla function from the shim and post-process its output:
+
+```
+Shim entry (stack):
+  [ESP+0]  = return-to-caller (pushed by trampoline CALL)
+  [ESP+4]  = param_1                  <- caller's original args
+  ...                                   (pushed before trampoline)
+  [ESP+N]  = param_N
+
+Shim body:
+  push   edi                          ; save callee-saveds
+  push   ebx                          ; EBX holds param_1 for later
+  mov    ebx, [esp+12]                ; param_1 now in EBX
+  mov    edi, ecx                     ; save 'this' register
+  push   [esp+0x18]                   ; re-push 4 args for the
+  push   [esp+0x18]                   ; vanilla CALL (stack offset
+  push   [esp+0x18]                   ; stays +0x18 because each
+  push   [esp+0x18]                   ; push shifts the source)
+  mov    ecx, edi                     ; restore 'this'
+  call   anim_apply_translation       ; vanilla cleans 16 B stack
+  ...post-process using EBX...        ; e.g. scale param_1[0x6C..0x71]
+  pop    ebx
+  pop    edi
+  ret    0x10                         ; clean the original 16 B
+```
+
+The repeated `push [esp+0x18]` idiom is the way you re-push 4
+stack args onto the shim's frame for an inner `__thiscall`
+without needing to know exact offsets after each `push` shifts
+ESP.  Every copy reads the same (shifting) source slot, which
+because of the shift ends up pulling the next argument in
+sequence — see `root_motion_roll/_build_shim_body` for a
+tested implementation.
+
+## 9. See also
 
 - [`SHIMS.md`](./SHIMS.md) — high-level platform overview + status
   table.

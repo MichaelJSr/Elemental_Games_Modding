@@ -2,16 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import struct
-import sys
 import unittest
-from pathlib import Path
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.dirname(_THIS_DIR)
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
+from tests._xbe_fixture import XBE_PATH, require_xbe  # noqa: E402
 
 from azurik_mod.patches.slope_slide_speed import (  # noqa: E402
     SLOPE_SLIDE_SHIM_SLIDER,
@@ -25,15 +19,6 @@ from azurik_mod.patches.slope_slide_speed import (  # noqa: E402
     apply_slope_slide_speed_shim,
 )
 from azurik_mod.patching.xbe import va_to_file  # noqa: E402
-
-_XBE_CANDIDATES = [
-    Path("/Users/michaelsrouji/Documents/Xemu/tools/"
-         "Azurik - Rise of Perathia (USA).xiso/default.xbe"),
-    Path(_REPO_ROOT).parent /
-        "Azurik - Rise of Perathia (USA).xiso" / "default.xbe",
-    Path(_REPO_ROOT) / "tests" / "fixtures" / "default.xbe",
-]
-_XBE_PATH = next((p for p in _XBE_CANDIDATES if p.exists()), None)
 
 
 class SlopeSlideSpecShape(unittest.TestCase):
@@ -74,11 +59,10 @@ class SlopeSlideSpecShape(unittest.TestCase):
         self.assertEqual(len(SLOPE_SLIDE_SITES), 1)
 
 
-@unittest.skipUnless(_XBE_PATH,
-    "vanilla default.xbe fixture not available")
+@require_xbe
 class SlopeSlideApply(unittest.TestCase):
     def setUp(self):
-        self.orig = _XBE_PATH.read_bytes()
+        self.orig = XBE_PATH.read_bytes()
 
     def test_vanilla_bytes_match(self):
         off = va_to_file(_HOOK_VA)

@@ -97,6 +97,14 @@ from __future__ import annotations
 import struct
 
 from azurik_mod.patching.registry import Feature, register_feature
+from azurik_mod.patching.shim_builder import (
+    HandShimSpec,
+    emit_fld_abs32,
+    emit_jmp_rel32,
+    install_hand_shim,
+    whitelist_for_hand_shim,
+    with_sentinel,
+)
 from azurik_mod.patching.spec import ParametricPatch
 
 # ---------------------------------------------------------------------------
@@ -117,10 +125,14 @@ _VANILLA_GRAVITY = 9.8
 # Shim body size — see docstring for the exact instruction layout.
 _SHIM_BODY_SIZE = 43
 
-# Default scale below which the pack refuses to install (it would
-# make every flap weaker than vanilla's guaranteed minimum and
-# isn't a useful cheat).  Scale == 1.0 is the identity case.
-_VANILLA_DEFAULT_SCALE = 1.0
+_SPEC = HandShimSpec(
+    hook_va=_HOOK_VA,
+    hook_vanilla=_HOOK_VANILLA,
+    trampoline_mode="jmp",
+    hook_pad_nops=1,
+    hook_return_va=_HOOK_RETURN_VA,
+    body_size=_SHIM_BODY_SIZE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -158,13 +170,13 @@ FLAP_AT_PEAK_SITES: list[ParametricPatch] = [FLAP_AT_PEAK_SHIM_SLIDER]
 # Shim assembly
 # ---------------------------------------------------------------------------
 
-def _build_shim_body(k_va: int, shim_va: int) -> bytes:
+def _build_shim_body(shim_va: int, k_va: int) -> bytes:
     """Hand-assemble the 43-byte flap_at_peak shim.
 
-    ``k_va`` is the absolute VA of the injected 4-byte float
-    (``K = 2g * scale^2``).  ``shim_va`` is the absolute VA where
-    the shim body starts in the patched XBE — used to compute the
-    closing ``JMP`` rel32 back to 0x8940F.
+    ``shim_va`` is the absolute VA where the shim body starts in
+    the patched XBE — used to compute the closing ``JMP`` rel32
+    back to 0x8940F.  ``k_va`` is the absolute VA of the injected
+    4-byte float (``K = 2g * scale^2``).
 
     Stack state at shim entry (CALL-less JMP trampoline):
         ST0 = v0_vanilla (vanilla's proposed z-velocity)
@@ -173,50 +185,40 @@ def _build_shim_body(k_va: int, shim_va: int) -> bytes:
     Register side effects:
         EAX — clobbered (replaying ``MOV EAX, [ESI+0x20]`` the
               6-byte trampoline displaced).
-
-    The back-JMP is computed such that
-        rel32 = HOOK_RETURN_VA - (shim_va + 43)
-    per x86's "EIP-after-JMP" rel32 convention.
     """
-    parts: list[bytes] = []
-
-    # 0-5: FLD [K_VA] (6 bytes)
-    parts.append(b"\xD9\x05" + struct.pack("<I", k_va))
-    # 6-11: FMUL [ESI+0x144] — ST0 *= flap_height (6 bytes)
-    parts.append(b"\xD8\x8E\x44\x01\x00\x00")
-    # 12-13: FSQRT — ST0 = sqrt(K*fh) = scale * sqrt(2g*fh) (2 bytes)
-    parts.append(b"\xD9\xFA")
-    # 14-15: FCOM ST(1) — compare floor (ST0) vs v0_vanilla (ST1)
-    parts.append(b"\xD8\xD1")
-    # 16-17: FNSTSW AX
-    parts.append(b"\xDF\xE0")
-    # 18-20: TEST AH, 0x01 — check C0 (ST0 < operand)
-    parts.append(b"\xF6\xC4\x01")
-    # 21-22: JNZ +7 → offset 30 (v0_vanilla > floor branch)
-    parts.append(b"\x75\x07")
-    # ---- floor >= v0_vanilla: write floor ----
-    # 23-25: FSTP [ESI+0x2C] — write floor
-    parts.append(b"\xD9\x5E\x2C")
-    # 26-27: FSTP ST(0) — pop v0_vanilla
-    parts.append(b"\xDD\xD8")
-    # 28-29: JMP +5 → offset 35
-    parts.append(b"\xEB\x05")
-    # ---- v0_vanilla > floor: write v0_vanilla (offset 30) ----
-    # 30-31: FSTP ST(0) — pop floor
-    parts.append(b"\xDD\xD8")
-    # 32-34: FSTP [ESI+0x2C] — write v0_vanilla
-    parts.append(b"\xD9\x5E\x2C")
-    # ---- done (offset 35) ----
-    # 35-37: MOV EAX, [ESI+0x20] (replay clobbered MOV)
-    parts.append(b"\x8B\x46\x20")
-    # 38-42: JMP <rel32> back to HOOK_RETURN_VA
-    jmp_origin_after = shim_va + _SHIM_BODY_SIZE
-    rel32 = _HOOK_RETURN_VA - jmp_origin_after
-    parts.append(b"\xE9" + struct.pack("<i", rel32))
-
-    body = b"".join(parts)
-    assert len(body) == _SHIM_BODY_SIZE, (
-        f"expected {_SHIM_BODY_SIZE}-byte shim, got {len(body)}")
+    body = b"".join([
+        # 0-5: FLD [K_VA] — ST0 = K, ST1 = v0_vanilla
+        emit_fld_abs32(k_va),
+        # 6-11: FMUL [ESI+0x144] — ST0 *= flap_height
+        b"\xD8\x8E\x44\x01\x00\x00",
+        # 12-13: FSQRT — ST0 = floor = scale * sqrt(2g*fh)
+        b"\xD9\xFA",
+        # 14-15: FCOM ST(1) — compare floor with v0_vanilla
+        b"\xD8\xD1",
+        # 16-17: FNSTSW AX
+        b"\xDF\xE0",
+        # 18-20: TEST AH, 0x01 — check C0 (ST0 < operand)
+        b"\xF6\xC4\x01",
+        # 21-22: JNZ +7 → offset 30 (v0_vanilla > floor branch)
+        b"\x75\x07",
+        # 23-25: FSTP [ESI+0x2C] — write floor
+        b"\xD9\x5E\x2C",
+        # 26-27: FSTP ST(0) — pop v0_vanilla
+        b"\xDD\xD8",
+        # 28-29: JMP +5 → offset 35
+        b"\xEB\x05",
+        # 30-31: FSTP ST(0) — pop floor (v0_vanilla branch)
+        b"\xDD\xD8",
+        # 32-34: FSTP [ESI+0x2C] — write v0_vanilla
+        b"\xD9\x5E\x2C",
+        # 35-37: MOV EAX, [ESI+0x20] (replay clobbered MOV)
+        b"\x8B\x46\x20",
+        # 38-42: JMP <rel32> back to HOOK_RETURN_VA
+        emit_jmp_rel32(
+            from_origin_after=shim_va + _SHIM_BODY_SIZE,
+            to_va=_HOOK_RETURN_VA),
+    ])
+    assert len(body) == _SHIM_BODY_SIZE
     return body
 
 
@@ -231,67 +233,39 @@ def apply_flap_at_peak(
 ) -> bool:
     """Install the flap_at_peak shim with the given scale factor.
 
-    Returns ``True`` on install, ``False`` on no-op (``scale == 1.0``
-    is considered identity — actually NOT a no-op because it forces
-    every flap to at least the vanilla first-flap v0, but we still
-    run the install so the guarantee holds).  Returns ``False`` if
-    the hook-site bytes drift from vanilla.
-    """
-    # scale == 1.0 IS meaningful — it guarantees "every 2nd+ flap
-    # reaches at least first-flap v0", which vanilla does NOT
-    # guarantee (ceiling-clamped flaps would be zero).  We only
-    # skip the install when the user explicitly dialled scale to
-    # a value that would be a strict no-op if the ceiling didn't
-    # matter.  For now that's nothing; always install when asked.
-    scale = float(scale)
+    Returns ``True`` on install (or already-applied).  Returns
+    ``False`` only when the hook-site bytes drift from vanilla.
 
-    # Defensive floor — scale == 0.0 would make every flap zero,
-    # which is worse than vanilla.  Clamp to something tiny but
-    # non-zero so K stays positive and sqrt doesn't blow up.
+    ``scale == 1.0`` IS meaningful — it guarantees every 2nd+
+    flap reaches at least first-flap v0, which vanilla does NOT
+    guarantee (ceiling-clamped flaps would be zero).  We always
+    install when asked.  ``scale`` is defensively clamped to a
+    tiny positive value to keep K (=2g·scale²) strictly positive
+    so the shim's FSQRT doesn't return NaN.
+    """
+    scale = float(scale)
     if scale < 1e-4:
         scale = 1e-4
 
-    from azurik_mod.patching.apply import _carve_shim_landing
-    from azurik_mod.patching.xbe import va_to_file
-
-    hook_off = va_to_file(_HOOK_VA)
-    current = bytes(xbe_data[hook_off:hook_off + 6])
-    if current != _HOOK_VANILLA:
-        # Already applied?  Detect our own JMP trampoline.
-        if current[0] == 0xE9 and current[5] == 0x90:
-            print(f"  flap_at_peak (already applied)")
-            return True
-        print(f"  WARNING: flap_at_peak — hook site at VA "
-              f"0x{_HOOK_VA:X} drifted (got {current.hex()}); "
-              f"skipping.")
-        return False
-
-    # Compute K = 2g * scale^2 and carve a 4-byte slot for it,
-    # + 4 bytes of 0xFF sentinel to protect against the allocator's
-    # back-scan (same pattern wing_flap_count uses for its int block).
+    # K = 2g * scale^2 — precomputed at apply time, baked into
+    # a 4-byte float carved into .text padding with a 4-byte
+    # 0xFF sentinel (see with_sentinel docstring).
     k_value = 2.0 * _VANILLA_GRAVITY * (scale * scale)
-    k_block = struct.pack("<f", float(k_value)) + b"\xFF\xFF\xFF\xFF"
-    _, k_va = _carve_shim_landing(xbe_data, k_block)
-
-    # Carve a 43-byte placeholder for the shim body — 0xCC (INT 3)
-    # so a mis-directed jump into it traps immediately.  We need
-    # shim_va before assembling the body (for the back-JMP rel32).
-    placeholder = b"\xCC" * _SHIM_BODY_SIZE
-    body_file_off, shim_va = _carve_shim_landing(xbe_data, placeholder)
-
-    # Assemble and overwrite.
-    body = _build_shim_body(k_va, shim_va)
-    xbe_data[body_file_off:body_file_off + _SHIM_BODY_SIZE] = body
-
-    # Install the 5-byte JMP trampoline + 1-byte NOP at the hook.
-    rel32 = shim_va - (_HOOK_VA + 5)
-    trampoline = b"\xE9" + struct.pack("<i", rel32) + b"\x90"
-    xbe_data[hook_off:hook_off + 6] = trampoline
-
-    print(f"  Wing-flap at-peak bypass: scale={scale:.3f}x  "
-          f"(shim @ VA 0x{shim_va:X}, +{_SHIM_BODY_SIZE} bytes; "
-          f"K=2g*scale^2={k_value:.4f} @ VA 0x{k_va:X})")
-    return True
+    result = install_hand_shim(
+        xbe_data, _SPEC,
+        data_block=with_sentinel(struct.pack("<f", float(k_value))),
+        build_body=_build_shim_body,
+        label=(
+            f"Wing-flap at-peak bypass: scale={scale:.3f}x "
+            f"(K=2g*scale^2={k_value:.4f})"),
+    )
+    if result is not None:
+        return True
+    # result=None means either already-applied (success) or drift.
+    from azurik_mod.patching.xbe import va_to_file
+    off = va_to_file(_HOOK_VA)
+    b = xbe_data[off:off + 6]
+    return len(b) == 6 and b[0] == 0xE9 and b[5] == 0x90
 
 
 # ---------------------------------------------------------------------------
@@ -299,41 +273,15 @@ def apply_flap_at_peak(
 # ---------------------------------------------------------------------------
 
 def _flap_at_peak_dynamic_whitelist(xbe: bytes) -> list[tuple[int, int]]:
-    """Whitelist ranges for verify-patches --strict.
-
-    Always whitelists the 6-byte trampoline slot at VA 0x89409.
-    Follows the trampoline to the shim body when installed and
-    whitelists the 43-byte body + its 4-byte K constant + 4-byte
-    sentinel.
-    """
-    from azurik_mod.patching.xbe import resolve_va_to_file, va_to_file
-
-    try:
-        hook_off = va_to_file(_HOOK_VA)
-    except Exception:  # noqa: BLE001
-        return []
-
-    ranges: list[tuple[int, int]] = [(hook_off, hook_off + 6)]
-
-    if len(xbe) >= hook_off + 6:
-        patch = xbe[hook_off:hook_off + 6]
-        if patch[:1] == b"\xE9" and patch[5] == 0x90:
-            rel32 = struct.unpack("<i", patch[1:5])[0]
-            shim_va = _HOOK_VA + 5 + rel32
-            shim_off = resolve_va_to_file(xbe, shim_va)
-            if shim_off is not None:
-                ranges.append(
-                    (shim_off, shim_off + _SHIM_BODY_SIZE))
-                # First instruction of the body is FLD [K_VA] —
-                # parse the 4-byte VA and whitelist the 8-byte
-                # (K + sentinel) block.
-                body = xbe[shim_off:shim_off + _SHIM_BODY_SIZE]
-                if len(body) >= 6 and body[0:2] == b"\xD9\x05":
-                    k_va = struct.unpack("<I", body[2:6])[0]
-                    k_off = resolve_va_to_file(xbe, k_va)
-                    if k_off is not None:
-                        ranges.append((k_off, k_off + 8))
-    return ranges
+    """Whitelist: trampoline (6 B), shim body (43 B), K+sentinel (8 B)."""
+    # The shim's first instruction is FLD [K_VA] at offset 0 —
+    # D9 05 <abs32>, so data_abs32_offsets=(0,).
+    return whitelist_for_hand_shim(
+        xbe, _SPEC,
+        data_abs32_offsets=(0,),
+        data_abs32_opcode=b"\xD9\x05",
+        data_whitelist_size=8,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -355,11 +303,12 @@ FEATURE = register_feature(Feature(
     name="flap_at_peak",
     description=(
         "Wing-flap subsequent-flap height — bypasses the vanilla "
-        "no-altitude-above-first-flap-height ceiling via a C shim "
-        "trampoline at VA 0x89409.  Guarantees every 2nd+ flap "
-        "reaches at least sqrt(2g * flap_height) * scale.  The "
-        "cap this bypasses is INTENTIONAL vanilla design, not a "
-        "bug — see docs/LEARNINGS.md § 'Wing-flap v0 cap'."
+        "no-altitude-above-first-flap-height ceiling via a "
+        "hand-assembled shim trampoline at VA 0x89409.  "
+        "Guarantees every 2nd+ flap reaches at least "
+        "sqrt(2g * flap_height) * scale.  The cap this bypasses "
+        "is INTENTIONAL vanilla design, not a bug — see "
+        "docs/LEARNINGS.md § 'Wing-flap v0 cap'."
     ),
     sites=FLAP_AT_PEAK_SITES,
     apply=lambda xbe_data: None,   # no-op; custom_apply is used

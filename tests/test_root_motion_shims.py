@@ -2,16 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import struct
-import sys
 import unittest
-from pathlib import Path
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.dirname(_THIS_DIR)
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
+from tests._xbe_fixture import XBE_PATH, require_xbe  # noqa: E402
 
 from azurik_mod.patches.root_motion_roll import (  # noqa: E402
     ROLL_SPEED_SHIM_SLIDER,
@@ -24,7 +18,6 @@ from azurik_mod.patches.root_motion_roll import (  # noqa: E402
 )
 from azurik_mod.patches.root_motion_climb import (  # noqa: E402
     CLIMB_SPEED_SHIM_SLIDER,
-    _HOOK_RETURN_VA as _CLIMB_HOOK_RETURN,
     _HOOK_VA as _CLIMB_HOOK_VA,
     _HOOK_VANILLA as _CLIMB_HOOK_VANILLA,
     _SHIM_BODY_SIZE as _CLIMB_SHIM_SIZE,
@@ -32,15 +25,6 @@ from azurik_mod.patches.root_motion_climb import (  # noqa: E402
     apply_root_motion_climb,
 )
 from azurik_mod.patching.xbe import va_to_file  # noqa: E402
-
-_XBE_CANDIDATES = [
-    Path("/Users/michaelsrouji/Documents/Xemu/tools/"
-         "Azurik - Rise of Perathia (USA).xiso/default.xbe"),
-    Path(_REPO_ROOT).parent /
-        "Azurik - Rise of Perathia (USA).xiso" / "default.xbe",
-    Path(_REPO_ROOT) / "tests" / "fixtures" / "default.xbe",
-]
-_XBE_PATH = next((p for p in _XBE_CANDIDATES if p.exists()), None)
 
 
 # ---------------------------------------------------------------------------
@@ -123,11 +107,10 @@ class RootMotionClimbSpec(unittest.TestCase):
 # Apply on vanilla XBE
 # ---------------------------------------------------------------------------
 
-@unittest.skipUnless(_XBE_PATH,
-    "vanilla default.xbe fixture not available")
+@require_xbe
 class RollApplyBehaviour(unittest.TestCase):
     def setUp(self):
-        self.orig = _XBE_PATH.read_bytes()
+        self.orig = XBE_PATH.read_bytes()
 
     def test_vanilla_bytes_match(self):
         off = va_to_file(_ROLL_HOOK_VA)
@@ -149,11 +132,10 @@ class RollApplyBehaviour(unittest.TestCase):
         self.assertEqual(bytes(data), snap)
 
 
-@unittest.skipUnless(_XBE_PATH,
-    "vanilla default.xbe fixture not available")
+@require_xbe
 class ClimbApplyBehaviour(unittest.TestCase):
     def setUp(self):
-        self.orig = _XBE_PATH.read_bytes()
+        self.orig = XBE_PATH.read_bytes()
 
     def test_vanilla_bytes_match(self):
         off = va_to_file(_CLIMB_HOOK_VA)

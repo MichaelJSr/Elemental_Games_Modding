@@ -12,16 +12,10 @@ when enabled.
 
 from __future__ import annotations
 
-import os
 import struct
-import sys
 import unittest
-from pathlib import Path
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.dirname(_THIS_DIR)
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
+from tests._xbe_fixture import XBE_PATH, require_xbe  # noqa: E402
 
 from azurik_mod.patches.no_fall_damage import (  # noqa: E402
     AZURIK_FALL_DEATH_VA,
@@ -48,15 +42,6 @@ from azurik_mod.patches.wing_flap_count import (  # noqa: E402
     apply_wing_flap_count,
 )
 from azurik_mod.patching.xbe import parse_xbe_sections, va_to_file  # noqa: E402
-
-_XBE_CANDIDATES = [
-    Path("/Users/michaelsrouji/Documents/Xemu/tools/"
-         "Azurik - Rise of Perathia (USA).xiso/default.xbe"),
-    Path(_REPO_ROOT).parent /
-        "Azurik - Rise of Perathia (USA).xiso" / "default.xbe",
-    Path(_REPO_ROOT) / "tests" / "fixtures" / "default.xbe",
-]
-_XBE_PATH = next((p for p in _XBE_CANDIDATES if p.exists()), None)
 
 
 # ---------------------------------------------------------------------------
@@ -89,11 +74,10 @@ class NoFallDamageSpecShape(unittest.TestCase):
             b"\x32\xC0\xC2\x08\x00\x90")
 
 
-@unittest.skipUnless(_XBE_PATH,
-    "vanilla default.xbe fixture not available")
+@require_xbe
 class NoFallDamageApply(unittest.TestCase):
     def setUp(self):
-        self.orig = _XBE_PATH.read_bytes()
+        self.orig = XBE_PATH.read_bytes()
 
     def test_vanilla_bytes_match_ghidra(self):
         """Drift-guard: the 6 bytes at VA 0x0008AB70 must match
@@ -170,11 +154,10 @@ class InfiniteFuelSpecShape(unittest.TestCase):
         self.assertEqual(AZURIK_PER_FRAME_DRAIN_VA, 0x00083DE3)
 
 
-@unittest.skipUnless(_XBE_PATH,
-    "vanilla default.xbe fixture not available")
+@require_xbe
 class InfiniteFuelApply(unittest.TestCase):
     def setUp(self):
-        self.orig = _XBE_PATH.read_bytes()
+        self.orig = XBE_PATH.read_bytes()
 
     def test_vanilla_bytes_match_ghidra(self):
         # Site 1: FUN_000842D0 prologue.
@@ -281,11 +264,10 @@ class WingFlapCountSliderShape(unittest.TestCase):
         self.assertEqual(FLAPS_AIR_1.encode(-5.0), struct.pack("<i", 0))
 
 
-@unittest.skipUnless(_XBE_PATH,
-    "vanilla default.xbe fixture not available")
+@require_xbe
 class WingFlapCountApply(unittest.TestCase):
     def setUp(self):
-        self.orig = _XBE_PATH.read_bytes()
+        self.orig = XBE_PATH.read_bytes()
 
     def test_vanilla_hook_bytes_match_ghidra(self):
         off = va_to_file(_WING_FLAP_HOOK_VA)
