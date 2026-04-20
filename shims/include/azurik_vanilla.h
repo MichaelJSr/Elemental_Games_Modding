@@ -1092,6 +1092,208 @@ int _isdigit(int ch);
 int _isspace(int ch);
 
 
+/* ==================================================================
+ * Player physics / movement functions (April 2026 late RE pass)
+ * All __thiscall unless noted.  Exposed so future shims can
+ * intercept specific physics states by name rather than raw VA.
+ *
+ * The player's physics state machine is dispatched from
+ * ``player_physics_tick`` (FUN_0008CCC0) based on
+ * ``entity.state`` (``[ESI+0x94]``):
+ *
+ *     0 = ground (walking / idle)        → walk
+ *     1 = climbing                       → climb
+ *     2 = airborne (post-jump, pre-land) → airborne_frame
+ *     3 = slope-slide (slow / entry)     → slope_slide
+ *     4 = slope-slide (fast / momentum)  → slope_slide
+ *     5 = pre-jump (1-frame transition)  → prejump
+ *     6 = swim                           → swim
+ *     7-8 = gameover / dead
+ *   256-261 = cutscene / cinematic
+ * ================================================================== */
+
+/* Main walking-state velocity computation (state 0).  Reads
+ * ``CritterData.run_speed`` × ``entity.magnitude`` × direction
+ * to produce horizontal velocity.  The ``FLD [EAX+0x40]`` at
+ * VA 0x85F62 is our ``walk_speed_scale`` patch site.
+ *
+ * Vanilla VA: 0x00085F50  (mangled: _player_walk_state@4) */
+__attribute__((cdecl))
+void player_walk_state(int *entity);
+
+/* First-jump-from-ground function (state 5 → 2 transition).
+ * Initialises ``entity.jump_height = 1.1`` (``[ESI+0x144]``),
+ * ``entity.air_control = 9.0`` (``[ESI+0x140]``), then computes
+ * initial vertical velocity via ``v0 = sqrt(2 × gravity ×
+ * jump_height)``.  The ``FLD [0x001980A8]`` at VA 0x89160 is
+ * our ``jump_speed_scale`` patch site.  Calls
+ * ``airborne_re_init`` (FUN_00083F90) on the air-power path.
+ *
+ * Vanilla VA: 0x00089060  (mangled: _player_jump_init) */
+__attribute__((cdecl))
+unsigned char player_jump_init(void);
+
+/* Per-frame airborne physics (state 2).  Reads
+ * ``entity[+0x140]`` (air control) × ``entity[+0x124]``
+ * (magnitude) for horizontal velocity; applies gravity to
+ * vertical.  Calls ``wing_flap`` (FUN_00089300) when the flap
+ * button is pressed.  VA 0x896EA is a legacy "dive boost" FADD
+ * that was formerly (and mistakenly) the ``flap_height_scale``
+ * patch target — see docs/LEARNINGS.md.
+ *
+ * Vanilla VA: 0x00089480  (mangled: _player_airborne_tick@4) */
+__attribute__((cdecl))
+void player_airborne_tick(int *entity);
+
+/* Wing flap / Air-power double jump (state 2, called per frame
+ * from ``player_airborne_tick`` when the flap button is edge-
+ * triggered).
+ *
+ * Flow:
+ *   1. Checks ``[EBX+0x20] & 0x04`` (flap button edge).
+ *   2. Reads ``armor.flap_count`` at ``[EDX+0x38]`` (VA 0x89321,
+ *      our ``wing_flap_count`` trampoline site).
+ *   3. Compares ``entity.flap_counter`` (``[ESI+0xD8]``) vs max;
+ *      returns early (no flap) when exhausted.
+ *   4. Calls ``airborne_re_init`` (FUN_00083F90) to reset
+ *      ``entity.air_control`` = 12.0 and ``.jump_height`` = 1.2
+ *      (air-power mode) or 9.0 / 1.1 (no air-power).
+ *   5. Calls ``consume_fuel`` (FUN_000842D0) with cost = 1.0
+ *      (first flap) or 100.0 (subsequent flap beyond 6m fall).
+ *   6. Computes v0 at VA 0x893AE (``flap_height_scale`` patch
+ *      target — ``FLD [0x001980A8]`` gravity, then
+ *      ``× flap_height``, ``FADD ST,ST`` = ×2, ``FSQRT``).
+ *   7. Halves v0 via ``FMUL [0x001A2510]=0.5`` at VA 0x893DD
+ *      (``flap_subsequent_scale`` patch target) when player
+ *      has fallen > 6m below peak.
+ *   8. Scales by ``FMUL [0x001A26C4]=1.5`` at VA 0x893EB.
+ *   9. Caps z-velocity at v0 (``[ESI+0x2C]``).
+ *
+ * Returns 1 if a flap fired (v0 applied, flap counter
+ * incremented, sound played); 0 if gated out.
+ *
+ * Vanilla VA: 0x00089300  (mangled: _wing_flap@4) */
+__attribute__((stdcall))
+unsigned char wing_flap(int *input_state);
+
+/* Per-frame airborne re-initialiser.  Called from ``player_jump_init``
+ * (default path) and ``wing_flap`` (every flap).  Writes
+ * ``entity[+0x140]`` (air control) and ``entity[+0x144]``
+ * (jump height) based on active air-power level
+ * (``[armor_mgr + 0x20] + 0x8`` ∈ [1, 3]):
+ *
+ *   Air power 1-3:  air_control = 12.0 (VA 0x83FAA imm32)
+ *                   jump_height =  1.2 (VA 0x83FB0 imm32)
+ *   Otherwise:      air_control =  9.0 (VA 0x83FCC imm32)
+ *                   jump_height =  1.1 (VA 0x83FC2 imm32)
+ *
+ * The two imm32s at 0x83FAC (12.0) and 0x83FCE (9.0) are patch
+ * targets for ``air_control_scale`` (as of April 2026 v2).
+ *
+ * Vanilla VA: 0x00083F90  (mangled: @player_airborne_reinit@4) */
+__attribute__((fastcall))
+void player_airborne_reinit(int *air_control_out);
+
+/* Ground-input-state composer.  Runs per-frame; reads raw stick
+ * + button inputs and computes ``entity.magnitude``
+ * (``[ESI+0x124]``).  When WHITE or BACK is held (bit 0x40 of
+ * ``entity.flags[0x20]``), multiplies magnitude by 3.0 at VA
+ * 0x849E4 (``FMUL [0x001A25BC]``) — the ``roll_speed_scale``
+ * patch target.  The 3.0 is the vanilla WHITE-button / dash
+ * boost multiplier.
+ *
+ * Vanilla VA: 0x00084940  (mangled: @player_input_tick@4) */
+__attribute__((fastcall))
+void player_input_tick(int entity_input_state);
+
+/* Climbing-state velocity (state 1).  Reads ``[0x001980E4]=2.0``
+ * (our ``climb_speed_scale`` patch target) at VA 0x87FA7 +
+ * 0x88357.  Called per frame while climbing a rope/ledge.
+ *
+ * Vanilla VA: 0x00087F80  (mangled: _player_climb_tick@4) */
+__attribute__((cdecl))
+void player_climb_tick(int *entity);
+
+/* Slope-slide-state velocity (states 3 & 4).  Triggered when
+ * the player lands on a slope steeper than 45° from upright
+ * (via ``FUN_0008AE10`` transition).  Reads
+ * ``[0x001AAB68]=2.0`` (our ``slope_slide_speed_scale`` patch
+ * target) at VA 0x89B76 for the state-3 slow-slide velocity.
+ * State 4 uses separate fast-slide physics with dynamic-
+ * initialised ``_DAT_003902A0/A4/A8/9C`` constants.
+ *
+ * Vanilla VA: 0x00089A70  (mangled: _player_slope_slide_tick) */
+__attribute__((cdecl))
+void player_slope_slide_tick(void);
+
+/* Swim-state velocity (state 6).  Reads ``[0x001A25B4]=10.0``
+ * at VA 0x8B7BF (``swim_speed_scale`` patch target).
+ *
+ * Vanilla VA: 0x0008B700  (mangled: _player_swim_tick@4) */
+__attribute__((stdcall))
+unsigned char player_swim_tick(int context);
+
+/* Fall-damage dispatcher.  Called from ``player_airborne_tick``'s
+ * landing-transition path (VA 0x8C173) with ``param_1 = fall
+ * height`` and ``param_2 = fall velocity``.  Reads 7 cvars
+ * from ``config.xbr`` on first call ("fall min velocity",
+ * "fall height 1/2/3", "fall damage 1/2/3") and caches them
+ * as static doubles at ``_DAT_00390228..00390290``.  Applies
+ * damage via ``FUN_00044640`` when thresholds are breached.
+ *
+ * Our ``no_fall_damage`` patch (April 2026 v2) rewrites the
+ * prologue to ``XOR AL, AL ; RET 8 ; NOP`` — always return 0
+ * (no damage) without running the tier selector.
+ *
+ * Vanilla VA: 0x0008AB70  (mangled: _fall_damage_dispatch@8) */
+__attribute__((stdcall))
+unsigned char fall_damage_dispatch(float fall_height, float fall_speed);
+
+/* Fuel consumer.  __thiscall where ``this = armor_mgr``.
+ * Decrements ``armor_mgr.fuel_current`` (``[this+0x24]``) by
+ * ``cost / armor_mgr.fuel_max`` (``[[this+0x20]+0x38]``) and
+ * returns 1 on success, 0 on refuse (no armor / no fuel / out
+ * of fuel).  CURRENTLY only called from ``wing_flap`` at VAs
+ * 0x89354 (cost=1.0) and 0x893D4 (cost=100.0).
+ *
+ * NOTE: attack-casting fuel drain uses a SEPARATE consumer path
+ * (per-attack "Fuel multiplier" in ``config/attacks_anims``
+ * loaded at FUN_0007E2E0).  Our ``infinite_fuel`` patch
+ * short-circuits this function only — NOT the attack-cast
+ * fuel drain.  See docs/LEARNINGS.md for follow-up notes.
+ *
+ * Our ``infinite_fuel`` patch rewrites the prologue to
+ * ``MOV AL, 1 ; RET 4`` — always return "consumed" without
+ * decrementing.
+ *
+ * Vanilla VA: 0x000842D0  (mangled: _consume_fuel@4) */
+__attribute__((thiscall))
+unsigned char consume_fuel(float cost);
+
+/* ==================================================================
+ * Config / cvar loaders (April 2026 RE pass continued)
+ * ================================================================== */
+
+/* Config-cell-value reader.  Called from every per-asset config
+ * loader (see FUN_0007E2E0 for attack data, FUN_0003C700 for
+ * armor properties) to pull a float value out of a ``tabl``
+ * asset by (row, column) index.  The result is returned as an
+ * x87 float10 on ST(0); Ghidra models it as ``float10``.
+ *
+ * Vanilla VA: 0x000B6280  (mangled: _config_cell_value@16) */
+__attribute__((stdcall))
+long double config_cell_value(void *tabl, int row, int column,
+                              double *default_out);
+
+/* Cvar value fetcher.  Called to read a cvar's current value
+ * by name (e.g. "fall min velocity").  Cached-return pattern:
+ * the caller maintains a static double + a ``cached`` byte;
+ * when the byte is zero, this function runs the lookup and
+ * fills the byte.
+ *
+ * Vanilla VA: 0x0005E620  (mangled: _cvar_get_double) */
+__attribute__((cdecl))
+long double cvar_get_double(void);
 
 
 

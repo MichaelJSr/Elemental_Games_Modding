@@ -937,6 +937,121 @@ _Static_assert(__builtin_offsetof(MovieContext, vtable) == 0x00,
 #endif
 
 
+/* ==================================================================
+ * Player entity field offsets (April 2026 late RE pass)
+ *
+ * The player entity struct is reached as ``entity`` in the physics
+ * state-machine dispatch (``FUN_0008CCC0``).  ESI / unaff_ESI in
+ * the per-state functions is the same pointer.  Key fields and
+ * their physics roles:
+ *
+ *   +0x20   entity_input_state_ptr (points at PlayerInputState)
+ *   +0x24   velocity.x
+ *   +0x28   velocity.y
+ *   +0x2C   velocity.z
+ *   +0x30   entity_type (0 / 0x150 = cinematic; other = gameplay)
+ *   +0x60   flags byte (bit 0x4 = jumped_this_frame? etc.)
+ *   +0x94   state (0 ground, 1 climb, 2 air, 3/4 slope-slide,
+ *                  5 prejump, 6 swim, 7-8 dead, 256+ cutscene)
+ *   +0x124  magnitude (WHITE/BACK boost × stick mag — computed
+ *                      per frame by player_input_tick)
+ *   +0x128..+0x130  direction vector (normalized stick dir)
+ *   +0x134  grab_target (-1 = none; else ledge-grab state)
+ *   +0x140  air_control_speed (9.0 default, 12.0 w/ air power)
+ *   +0x144  jump_height       (1.1 default, 1.2 w/ air power)
+ *   +0x148/0x14C  velocity-in-jump (dynamics)
+ *   +0x150  "airborne-entered" flag byte
+ *   +0x164  peak_z (max height reached this jump; used by
+ *                    wing_flap for flap-height budget)
+ *   +0x168  prev_z (fall-damage dispatcher input)
+ *   +0x16C  misc flags (bit 0x2 = had-landed)
+ *   +0xD8   flap_counter (INCREMENTED per flap; compared vs
+ *                         armor.flap_count by wing_flap)
+ *
+ * PlayerInputState (pointed at by entity[+0x20]):
+ *   +0x20   flags byte — bit 0x40 = WHITE/BACK held (roll boost)
+ *                         bit 0x04 = JUMP button edge-triggered
+ *                         bit 0x02, 0x08, 0x10, 0x20 = misc inputs
+ *   +0x48..+0x4D   edge-lock bytes for various button bits
+ *
+ * ArmorMgr chain (reached via entity[+0x20].gameplay_ptr[+0x154][+0xCC]):
+ *   armor_mgr +0x20   → level_struct pointer
+ *   armor_mgr +0x24   → fuel_current  (float, consumed by wing_flap)
+ *   level_struct +0x08 → air_power_level (int; 1/2/3 granted,
+ *                                         0/4 = no air power)
+ *   level_struct +0x38 → armor.flap_count (1/2/5 vanilla for
+ *                                          air power 1/2/3)
+ *
+ * IMPORTANT: ``DAT_001A7AE4`` is NOT the air_power_level — it's
+ * the active XInput CONTROLLER index (0-3 for port, 4 for
+ * "no controller").  The wing_flap_count shim dispatches on
+ * the level struct chain above, not on this global.
+ * ================================================================== */
+
+
+/* ==================================================================
+ * Player physics isolated constants (April 2026 late RE pass)
+ *
+ * Single- or few-reader .rdata floats.  Each of these can be
+ * patched as a direct 4-byte overwrite without collateral to
+ * unrelated systems (shared constants have separate tables).
+ * ================================================================== */
+
+/* 0x001AAB68 = 2.0f — slope-slide state-3 velocity scalar.
+ * Single reader: FMUL at VA 0x89B76 inside player_slope_slide_tick.
+ * Patched by ``slope_slide_speed_scale`` slider. */
+#define AZURIK_SLOPE_SLIDE_CONST_VA   0x001AAB68
+#define AZURIK_VANILLA_SLOPE_SLIDE    2.0f
+
+/* 0x001980E4 = 2.0f — climbing-state velocity scalar.
+ * Exactly 2 readers, both in player_climb_tick (VAs 0x87FA7 +
+ * 0x88357).  Patched by ``climb_speed_scale`` slider. */
+#define AZURIK_CLIMB_SPEED_CONST_VA   0x001980E4
+#define AZURIK_VANILLA_CLIMB_SPEED    2.0f
+
+/* 0x001980A8 = 9.8f — global gravity constant.
+ * MANY readers (physics, animation, camera).  Per-site rewrite
+ * via FLD-to-injected-constant is the only safe scaling approach
+ * (direct overwrite would scale EVERYTHING, not just the chosen
+ * site).  Used by ``jump_speed_scale`` and ``flap_height_scale``. */
+#define AZURIK_GRAVITY_CONST_VA       0x001980A8
+#define AZURIK_VANILLA_GRAVITY        9.8f
+
+/* 0x001A25B8 = 6.0f — subsequent-flap-height threshold.
+ * Read once from wing_flap (VA 0x893C0).  When the player has
+ * fallen > 6m below their flap peak, the next flap's v0 is
+ * halved.  Not currently sliderised but available as an RE
+ * anchor. */
+#define AZURIK_FLAP_SUBSEQUENT_THRESHOLD_VA  0x001A25B8
+#define AZURIK_VANILLA_FLAP_SUB_THRESH       6.0f
+
+/* 0x001A2510 = 0.5f — subsequent-flap halving factor.
+ * Shared (read from 260+ sites — generic "half").  Our
+ * ``flap_subsequent_scale`` slider rewrites the FMUL at VA
+ * 0x893DD to reference an injected float, NOT this constant. */
+#define AZURIK_FLAP_HALVING_CONST_VA  0x001A2510
+#define AZURIK_VANILLA_FLAP_HALVING   0.5f
+
+/* 0x001A26C4 = 1.5f — wing-flap final boost multiplier.
+ * Read at VA 0x893EB (wing_flap) and 10+ unrelated sites.
+ * Per-site rewrite only. */
+#define AZURIK_FLAP_BOOST_CONST_VA    0x001A26C4
+#define AZURIK_VANILLA_FLAP_BOOST     1.5f
+
+/* 0x001A25BC = 3.0f — WHITE/BACK button roll-boost multiplier.
+ * Shared (45 readers).  Our ``roll_speed_scale`` slider
+ * rewrites the FMUL at VA 0x849E4 (in player_input_tick) to
+ * reference an injected float instead of the shared constant. */
+#define AZURIK_ROLL_BOOST_CONST_VA    0x001A25BC
+#define AZURIK_VANILLA_ROLL_BOOST     3.0f
+
+/* 0x001A25B4 = 10.0f — swim stroke multiplier.
+ * Shared, but only one player-physics reader at VA 0x8B7BF.
+ * Used by ``swim_speed_scale`` via FMUL-to-injected-constant. */
+#define AZURIK_SWIM_BOOST_CONST_VA    0x001A25B4
+#define AZURIK_VANILLA_SWIM_BOOST     10.0f
+
+
 #ifdef __cplusplus
 }
 #endif

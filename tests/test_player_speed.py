@@ -780,10 +780,9 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
      - 5 × 4-byte imm32 ranges (primary air-control sites)
      - 2 × 4-byte imm32 ranges (secondary air-control sites
        inside FUN_00083F90 — ``12.0`` and ``9.0``)
-     - 1 × 4-byte direct-constant range (climb)
-
-    (The v3 slope-slide constant at VA 0x1AAB68 is NOT
-    whitelisted — v4 doesn't touch it.)
+     - 2 × 4-byte direct-constant ranges (climb + slope_slide
+       at VA 0x1AAB68 — the latter added back as a dedicated
+       slider target)
     """
 
     def test_vanilla_xbe_includes_all_static_sites(self):
@@ -797,6 +796,7 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         walk_off = va_to_file(_WALK_SITE_VA)
         roll_off = va_to_file(_ROLL_FMUL_VA)
         climb_off = va_to_file(_CLIMB_CONST_VA)
+        slope_off = va_to_file(_ROLL_CONST_VA)
         swim_off = va_to_file(_SWIM_SITE_VA)
         jump_off = va_to_file(_JUMP_SITE_VA)
         flap_off = va_to_file(_FLAP_SITE_VA)
@@ -808,6 +808,7 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         self.assertIn((roll_off, roll_off + 6), ranges)
         self.assertIn((flap_sub_off, flap_sub_off + 6), ranges)
         self.assertIn((climb_off, climb_off + 4), ranges)
+        self.assertIn((slope_off, slope_off + 4), ranges)
         for ac_va in _AIR_CONTROL_SITE_VAS:
             ac_off = va_to_file(ac_va)
             self.assertIn((ac_off, ac_off + 4), ranges,
@@ -816,10 +817,10 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         # 6 instr sites (walk/swim/jump/flap/roll-FMUL/
         #                flap_subsequent-FMUL)
         # + 5 primary air-control imm32 + 2 secondary air-control imm32
-        # + 1 direct-const (climb) = 14 on vanilla.
+        # + 2 direct-const (climb, slope_slide) = 15 on vanilla.
         # After apply, up to 6 extra 4-byte follows for injected
         # floats land.
-        self.assertIn(len(ranges), (14, 15, 16, 17, 18, 19, 20),
+        self.assertIn(len(ranges), (15, 16, 17, 18, 19, 20, 21),
             msg=f"unexpected range count {len(ranges)}: {ranges}")
 
     def test_patched_xbe_adds_injected_float_ranges(self):
@@ -856,15 +857,15 @@ class DynamicWhitelistFromXbe(unittest.TestCase):
         # 4-byte ranges:
         #   - 5 primary air-control imm32 sites
         #   - 2 secondary air-control imm32 sites (inside FUN_00083F90)
-        #   - 1 direct-constant site (climb)
+        #   - 2 direct-constant sites (climb + slope_slide)
         #   - 6 injected-float follows (walk base, swim mult,
         #     jump gravity scalar, flap gravity scalar, roll mult,
         #     flap_subsequent halving factor)
-        # = 14 four-byte ranges total.
-        self.assertEqual(len(four_byte_ranges), 14,
-            msg="5 primary + 2 secondary air-control + 1 direct-"
-                "const (climb) + 6 injected floats = 14 "
-                "four-byte ranges "
+        # = 15 four-byte ranges total.
+        self.assertEqual(len(four_byte_ranges), 15,
+            msg="5 primary + 2 secondary air-control + 2 direct-"
+                "const (climb + slope_slide) + 6 injected floats "
+                "= 15 four-byte ranges "
                 f"(got {len(four_byte_ranges)}: {four_byte_ranges})")
         # No two-byte ranges anymore (roll no longer uses edge-lock
         # or force-on patches).

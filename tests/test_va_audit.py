@@ -210,6 +210,47 @@ ANCHOR_EXPECTATIONS: dict[str, tuple[int, str, object, str]] = {
         0x0019E048, ".rdata",
         lambda b: b.startswith(b"1\x00 \x00d\x00a\x00y\x00\x00"),
         "UTF-16 L'1 day' playtime singular format"),
+    # --- Player physics constants (April 2026 late pass) ---
+    "AZURIK_SLOPE_SLIDE_CONST_VA": (
+        0x001AAB68, ".data",
+        lambda b: abs(struct.unpack("<f", b[:4])[0] - 2.0) < 1e-5,
+        "f32 2.0 — slope-slide state velocity scalar "
+        "(single reader at VA 0x89B76 in FUN_00089A70)"),
+    "AZURIK_CLIMB_SPEED_CONST_VA": (
+        0x001980E4, ".rdata",
+        lambda b: abs(struct.unpack("<f", b[:4])[0] - 2.0) < 1e-5,
+        "f32 2.0 — climbing-state velocity scalar "
+        "(2 readers in FUN_00087F80)"),
+    "AZURIK_GRAVITY_CONST_VA": (
+        0x001980A8, ".rdata",
+        lambda b: abs(struct.unpack("<f", b[:4])[0] - 9.8) < 1e-5,
+        "f32 9.8 — global gravity constant (many readers; "
+        "patched via per-site FLD rewrites)"),
+    "AZURIK_FLAP_SUBSEQUENT_THRESHOLD_VA": (
+        0x001A25B8, ".rdata",
+        lambda b: abs(struct.unpack("<f", b[:4])[0] - 6.0) < 1e-5,
+        "f32 6.0 — subsequent-flap-height threshold "
+        "(read at VA 0x893C0 in wing_flap)"),
+    "AZURIK_FLAP_HALVING_CONST_VA": (
+        0x001A2510, ".rdata",
+        lambda b: abs(struct.unpack("<f", b[:4])[0] - 0.5) < 1e-5,
+        "f32 0.5 — generic half (shared with 260+ readers; "
+        "flap_subsequent patches FMUL instruction not this)"),
+    "AZURIK_FLAP_BOOST_CONST_VA": (
+        0x001A26C4, ".rdata",
+        lambda b: abs(struct.unpack("<f", b[:4])[0] - 1.5) < 1e-5,
+        "f32 1.5 — wing-flap final boost multiplier "
+        "(read at VA 0x893EB in wing_flap)"),
+    "AZURIK_ROLL_BOOST_CONST_VA": (
+        0x001A25BC, ".rdata",
+        lambda b: abs(struct.unpack("<f", b[:4])[0] - 3.0) < 1e-5,
+        "f32 3.0 — WHITE/BACK dash boost (shared 45 readers; "
+        "roll_speed_scale patches FMUL instruction not this)"),
+    "AZURIK_SWIM_BOOST_CONST_VA": (
+        0x001A25B4, ".rdata",
+        lambda b: abs(struct.unpack("<f", b[:4])[0] - 10.0) < 1e-5,
+        "f32 10.0 — swim-stroke multiplier (shared; "
+        "swim_speed_scale patches FMUL instruction not this)"),
 }
 
 

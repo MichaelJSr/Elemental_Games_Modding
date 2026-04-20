@@ -328,6 +328,21 @@ FLAP_SUBSEQUENT_SCALE = ParametricPatch(
     decode=lambda b: struct.unpack("<d", b)[0],
 )
 
+SLOPE_SLIDE_SPEED_SCALE = ParametricPatch(
+    name="slope_slide_speed_scale",
+    label="Slope-slide speed (steep-terrain auto-slide)",
+    va=0,
+    size=0,
+    original=b"",
+    default=1.0,
+    slider_min=0.1,
+    slider_max=10.0,
+    slider_step=0.05,
+    unit="x",
+    encode=lambda v: struct.pack("<d", float(v)),
+    decode=lambda b: struct.unpack("<d", b)[0],
+)
+
 CLIMB_SPEED_SCALE = ParametricPatch(
     name="climb_speed_scale",
     label="Player climbing speed",
@@ -618,6 +633,7 @@ def apply_player_physics(
     flap_scale: float | None = None,
     flap_subsequent_scale: float | None = None,
     climb_scale: float | None = None,
+    slope_slide_scale: float | None = None,
     # Back-compat alias: callers that still pass run_scale get
     # transparently routed to roll_scale (the new name).
     run_scale: float | None = None,
@@ -665,6 +681,11 @@ def apply_player_physics(
     c = 1.0 if climb_scale is None else float(climb_scale)
     if c != 1.0:
         apply_climb_speed(xbe_data, climb_scale=c)
+
+    ss = (1.0 if slope_slide_scale is None
+          else float(slope_slide_scale))
+    if ss != 1.0:
+        apply_slope_slide_speed(xbe_data, slope_slide_scale=ss)
 
 
 def apply_player_speed(
@@ -1037,6 +1058,55 @@ def apply_flap_height(
     return True
 
 
+def apply_slope_slide_speed(
+    xbe_data: bytearray,
+    *,
+    slope_slide_scale: float = 1.0,
+) -> bool:
+    """Patch ``default.xbe`` to scale slope-slide velocity.
+
+    When the player lands on a slope steeper than 45° from
+    upright, the engine transitions to state 3 (slow slope
+    slide) inside ``player_slope_slide_tick`` (FUN_00089A70).
+    That function's velocity scalar reads ``[0x001AAB68]=2.0``
+    at VA 0x89B76 — the ONE and ONLY reader of that constant
+    in the binary.
+
+    We overwrite the 4-byte float in-place (2.0 → 2.0 ×
+    slope_slide_scale) — zero collateral, zero shim required.
+
+    Only affects:
+      * State 3 slow slope slide (e.g., sliding down moderately
+        steep terrain when walking over it)
+      * Subsequent-transition state 4 fast slide (reads the
+        same constant indirectly via dt scaling)
+
+    Does NOT affect:
+      * Player-initiated roll / dash (that's
+        ``roll_speed_scale``, the WHITE/BACK boost).
+      * Walking, airborne, climbing, swimming — all independent.
+
+    Returns True on apply, False on no-op or drift.
+    """
+    if slope_slide_scale == 1.0:
+        return False
+
+    off = va_to_file(_ROLL_CONST_VA)   # 0x001AAB68
+    current = bytes(xbe_data[off:off + 4])
+    if current != _ROLL_CONST_VANILLA:
+        print(f"  WARNING: slope_slide_speed — constant at VA "
+              f"0x{_ROLL_CONST_VA:X} drifted (got "
+              f"{current.hex()}); skipping.")
+        return False
+
+    new_value = _VANILLA_ROLL_SPEED * float(slope_slide_scale)
+    xbe_data[off:off + 4] = struct.pack("<f", new_value)
+    print(f"  Slope-slide speed: {slope_slide_scale:.3f}x vanilla  "
+          f"(constant {_VANILLA_ROLL_SPEED:.3f} -> {new_value:.3f} "
+          f"at VA 0x{_ROLL_CONST_VA:X})")
+    return True
+
+
 def apply_flap_subsequent(
     xbe_data: bytearray,
     *,
@@ -1123,11 +1193,17 @@ def _player_speed_dynamic_whitelist(
         pass
     try:
         # v4: Roll targets the FMUL instruction at VA 0x849E4
-        # (6 bytes — ``FMUL [abs32]``).  The v3 4-byte constant
-        # at 0x1AAB68 (slope-slide) is NOT whitelisted anymore
-        # because v4 doesn't touch it.
+        # (6 bytes — ``FMUL [abs32]``).
         roll_off = va_to_file(_ROLL_FMUL_VA)
         ranges.append((roll_off, roll_off + 6))
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        # Slope-slide speed: 4-byte constant at VA 0x1AAB68.
+        # Back on the whitelist (late April 2026) because the
+        # dedicated ``slope_slide_speed_scale`` slider targets it.
+        slope_off = va_to_file(_ROLL_CONST_VA)
+        ranges.append((slope_off, slope_off + 4))
     except Exception:  # noqa: BLE001
         pass
     try:
@@ -1222,6 +1298,7 @@ PLAYER_PHYSICS_SITES = [
     FLAP_HEIGHT_SCALE,
     FLAP_SUBSEQUENT_SCALE,
     CLIMB_SPEED_SCALE,
+    SLOPE_SLIDE_SPEED_SCALE,
 ]
 """Registered Patches-page sites.  Gravity, roll, and climb
 sliders write to isolated .rdata floats directly; walk, swim,
@@ -1247,6 +1324,7 @@ def _custom_apply(
     flap_height_scale: float | None = None,
     flap_subsequent_scale: float | None = None,
     climb_speed_scale: float | None = None,
+    slope_slide_speed_scale: float | None = None,
     # Back-compat: the old kwarg spellings.  New callers should use
     # the *_speed_scale forms, but CLI / serialized configs that
     # predate the rename still work.
@@ -1294,6 +1372,7 @@ def _custom_apply(
         flap_scale=flap,
         flap_subsequent_scale=flap_subsequent_scale,
         climb_scale=climb,
+        slope_slide_scale=slope_slide_speed_scale,
     )
 
 
@@ -1328,6 +1407,7 @@ __all__ = [
     "PLAYER_PHYSICS_SITES",
     "ROLL_SPEED_SCALE",
     "RUN_SPEED_SCALE",
+    "SLOPE_SLIDE_SPEED_SCALE",
     "SWIM_SPEED_SCALE",
     "WALK_SPEED_SCALE",
     "apply_air_control_speed",
@@ -1337,5 +1417,6 @@ __all__ = [
     "apply_jump_speed",
     "apply_player_physics",
     "apply_player_speed",
+    "apply_slope_slide_speed",
     "apply_swim_speed",
 ]

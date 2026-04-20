@@ -17,6 +17,7 @@ from azurik_mod.patches.player_physics import (  # noqa: E402
     CLIMB_SPEED_SCALE,
     FLAP_HEIGHT_SCALE,
     FLAP_SUBSEQUENT_SCALE,
+    SLOPE_SLIDE_SPEED_SCALE,
     GRAVITY_BASELINE,
     GRAVITY_PATCH,
     JUMP_SPEED_SCALE,
@@ -118,6 +119,7 @@ class VirtualSlidersAreHandled(unittest.TestCase):
         self.assertTrue(FLAP_HEIGHT_SCALE.is_virtual)
         self.assertTrue(FLAP_SUBSEQUENT_SCALE.is_virtual)
         self.assertTrue(CLIMB_SPEED_SCALE.is_virtual)
+        self.assertTrue(SLOPE_SLIDE_SPEED_SCALE.is_virtual)
         # Back-compat alias points at the same descriptor as roll.
         self.assertIs(RUN_SPEED_SCALE, ROLL_SPEED_SCALE)
 

@@ -2,6 +2,125 @@
 
 ## Unreleased
 
+### Player packs — round 4 (infinite_fuel per-frame drain + slope_slide slider + shim header coverage)
+
+**1. `infinite_fuel` — v2 (adds per-frame drain site).**
+
+The v1 patch at FUN_000842D0 covered only the event-driven
+fuel consumer (wing flap, 100-unit penalty, etc.).  User
+testing confirmed fuel still drained, which meant a second
+consumer existed.  Located it at VA 0x83DE3 inside
+FUN_00083D80 (the armor-state tick):
+
+```asm
+00083DE3   D9 05 20 81 19 00   FLD  [0x00198120]  ; = 1/30 (frame time)
+00083DE9   D8 71 34            FDIV [ECX+0x34]     ; / drain rate
+00083DEC   D8 6E 24            FSUBR [ESI+0x24]    ; fuel - x
+00083DEF   D9 5E 24            FSTP [ESI+0x24]     ; write back
+```
+
+Classic "drain fuel by dt/rate every frame" pattern.  The
+`1/30 = 0.0333...` at VA 0x198120 has EXACTLY ONE reader —
+this block — so we can safely NOP the entire 15-byte
+sequence without collateral.  FP stack delta of the block is
+0 (FLD pushes 1, FSTP pops 1), so 15 × NOP preserves FP
+state and simply skips the decrement.
+
+v2 applies BOTH patches.  Should now be truly infinite fuel
+for both event-driven consumers AND the per-frame drain.
+Open follow-up: if the user still sees fuel drain (attack
+cast?), we'll hunt for a third path.
+
+**2. `slope_slide_speed_scale` slider — new (player_physics).**
+
+Patches the single-reader constant at VA 0x001AAB68 (vanilla
+2.0) used by FUN_00089A70 when the player lands on a slope
+> 45° from upright and enters the auto-slide state.  This
+was the v3 roll target we abandoned (it's NOT the WHITE-
+button dash — roll_scale covers that) but it IS a legitimate
+physics axis the user wants control over.  Direct 4-byte
+overwrite, no shim.  Range 0.1-10.0×.
+
+**3. Shim headers updated with late-April 2026 RE findings.**
+
+`shims/include/azurik.h`:
+- Added player entity field offset documentation
+  (magnitude, air control, jump height, flap counter,
+  peak_z, flags byte, etc.).
+- Added ArmorMgr pointer chain documentation
+  (armor_mgr → level_struct → air_power_level).
+- **IMPORTANT: corrected DAT_001A7AE4** — documented that
+  it's the active XInput controller index (0-3, or 4 when
+  disconnected), NOT the air-power level.  The wing_flap_count
+  dispatcher now uses the correct chain.
+- Added 8 constant macros + expectations: slope_slide,
+  climb, gravity, flap_boost, flap_halving, flap_threshold,
+  roll_boost, swim_boost (each with VA + vanilla value).
+
+`shims/include/azurik_vanilla.h`:
+- Added 10 extern declarations for the player-physics
+  functions we've mapped: `player_walk_state`,
+  `player_jump_init`, `player_airborne_tick`, `wing_flap`,
+  `player_airborne_reinit`, `player_input_tick`,
+  `player_climb_tick`, `player_slope_slide_tick`,
+  `player_swim_tick`, `fall_damage_dispatch`, `consume_fuel`.
+- Added 2 config loader externs: `config_cell_value`,
+  `cvar_get_double`.
+- Each extern includes VA, calling convention, a comprehensive
+  comment block describing the function's role + any patch
+  sites inside it.
+
+`tests/test_va_audit.py`:
+- Added `ANCHOR_EXPECTATIONS` entries for all 8 new azurik.h
+  constant macros.  Each entry validates section + vanilla
+  byte pattern.
+
+**4. Documentation: config editor vs XBE-side patch trade-offs.**
+
+Question: "could any of our patches be more easily achieved
+through the config editor?"
+
+Answer: some, but mostly NO because critter_data config
+values are dead data at runtime.  Specifically:
+
+- **Fall damage values** (`fall_height_1/2/3`,
+  `fall_damage_1/2/3`, `fall min velocity`): DO live in
+  `config.xbr` and ARE read at runtime (cached as static
+  doubles in FUN_0008AB70 on first call).  Could be edited
+  via the config editor to change thresholds.  Our
+  `no_fall_damage` patch uses a more-robust XBE prologue
+  bypass so it works even if those cvars are at extreme
+  values.
+
+- **Fuel amounts** (`air fuel max`, `initial fuel`, etc.):
+  LIVE in `config.xbr`.  User COULD set `air fuel max` to
+  a huge value as a "pseudo-infinite" alternative — the bar
+  would start very full and drain imperceptibly.  But our
+  `infinite_fuel` XBE patch is strictly better (doesn't
+  depend on users having/using a config editor).
+
+- **Critter movement** (walk/run speeds, accel, turn rate):
+  The `config.xbr` rows for these fields turned out to be
+  DEAD DATA at runtime — they're read into the struct but
+  never consumed by the physics engine (see
+  `docs/LEARNINGS.md` § "The player-speed dead-data pivot").
+  XBE-side patches are the ONLY way to change these, which
+  is why all our speed sliders are XBE-code rewrites.
+
+- **Attack fuel multipliers**: LIVE in
+  `config/attacks_anims` tabl.  Editable via config editor
+  to reduce/zero attack fuel costs.  Would be a complementary
+  approach to our `infinite_fuel` if a third drain path is
+  found.
+
+- **Armor/flap counts**: LIVE in `config/armor_properties`
+  tabl's ``"Flaps"`` column.  Our `wing_flap_count` shim
+  overrides at runtime via a trampoline; editing the tabl
+  would be an alternative static approach.
+
+Tests: 779 unit tests all pass (+3 for the new infinite_fuel
+per-frame-drain assertions).
+
 ### Player packs — round 3 (roll retarget / wing-flap-count fix / full fall-damage / flap_subsequent slider)
 
 User feedback on the previous round identified four concrete

@@ -30,7 +30,9 @@ from azurik_mod.patches.no_fall_damage import (  # noqa: E402
 )
 from azurik_mod.patches.infinite_fuel import (  # noqa: E402
     AZURIK_CONSUME_FUEL_VA,
+    AZURIK_PER_FRAME_DRAIN_VA,
     INFINITE_FUEL_SPEC,
+    PER_FRAME_DRAIN_SPEC,
     apply_infinite_fuel_patch,
 )
 from azurik_mod.patches.wing_flap_count import (  # noqa: E402
@@ -111,6 +113,11 @@ class NoFallDamageApply(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class InfiniteFuelSpecShape(unittest.TestCase):
+    """v2 (late April 2026) — infinite_fuel now has TWO sites:
+    the event-driven FUN_000842D0 prologue AND the per-frame
+    sustained drain at VA 0x83DE3 inside FUN_00083D80.
+    """
+
     def test_patch_is_mov_al_1_ret_4(self):
         # B0 01 C2 04 00 = MOV AL,1 ; RET 4.
         self.assertEqual(INFINITE_FUEL_SPEC.patch, bytes.fromhex("b001c20400"))
@@ -118,6 +125,23 @@ class InfiniteFuelSpecShape(unittest.TestCase):
     def test_vanilla_is_prologue_push_mov_test(self):
         # Matches what Ghidra shows for FUN_000842D0's first 5 bytes.
         self.assertEqual(INFINITE_FUEL_SPEC.original, bytes.fromhex("518b412085"))
+
+    def test_per_frame_drain_is_15_nops(self):
+        self.assertEqual(len(PER_FRAME_DRAIN_SPEC.patch), 15)
+        self.assertEqual(PER_FRAME_DRAIN_SPEC.patch, bytes([0x90] * 15))
+
+    def test_per_frame_drain_vanilla_is_fld_fdiv_fsubr_fstp(self):
+        # Vanilla: FLD [0x198120] ; FDIV [ECX+0x34] ;
+        #          FSUBR [ESI+0x24] ; FSTP [ESI+0x24]
+        self.assertEqual(
+            PER_FRAME_DRAIN_SPEC.original,
+            bytes.fromhex("d90520811900"
+                          "d87134"
+                          "d86e24"
+                          "d95e24"))
+
+    def test_per_frame_drain_va_is_0x83de3(self):
+        self.assertEqual(AZURIK_PER_FRAME_DRAIN_VA, 0x00083DE3)
 
 
 @unittest.skipUnless(_XBE_PATH,
@@ -127,16 +151,24 @@ class InfiniteFuelApply(unittest.TestCase):
         self.orig = _XBE_PATH.read_bytes()
 
     def test_vanilla_bytes_match_ghidra(self):
+        # Site 1: FUN_000842D0 prologue.
         off = va_to_file(AZURIK_CONSUME_FUEL_VA)
         self.assertEqual(bytes(self.orig[off:off + 5]),
                          INFINITE_FUEL_SPEC.original)
+        # Site 2: per-frame drain at VA 0x83DE3.
+        off2 = va_to_file(AZURIK_PER_FRAME_DRAIN_VA)
+        self.assertEqual(bytes(self.orig[off2:off2 + 15]),
+                         PER_FRAME_DRAIN_SPEC.original)
 
-    def test_apply_replaces_prologue(self):
+    def test_apply_replaces_both_sites(self):
         data = bytearray(self.orig)
         apply_infinite_fuel_patch(data)
         off = va_to_file(AZURIK_CONSUME_FUEL_VA)
         self.assertEqual(bytes(data[off:off + 5]),
                          INFINITE_FUEL_SPEC.patch)
+        off2 = va_to_file(AZURIK_PER_FRAME_DRAIN_VA)
+        self.assertEqual(bytes(data[off2:off2 + 15]),
+                         PER_FRAME_DRAIN_SPEC.patch)
 
 
 # ---------------------------------------------------------------------------

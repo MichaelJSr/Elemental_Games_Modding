@@ -31,6 +31,7 @@ from azurik_mod.patches.player_physics import (
     PLAYER_PHYSICS_SITES,
     ROLL_SPEED_SCALE,
     RUN_SPEED_SCALE,           # back-compat alias -> ROLL_SPEED_SCALE
+    SLOPE_SLIDE_SPEED_SCALE,
     SWIM_SPEED_SCALE,
     WALK_SPEED_SCALE,
     apply_air_control_speed,
@@ -40,6 +41,7 @@ from azurik_mod.patches.player_physics import (
     apply_jump_speed,
     apply_player_physics,
     apply_player_speed,
+    apply_slope_slide_speed,
     apply_swim_speed,
 )
 from azurik_mod.patches.qol_gem_popups import (
@@ -74,8 +76,10 @@ from azurik_mod.patches.no_fall_damage import (
 )
 from azurik_mod.patches.infinite_fuel import (
     AZURIK_CONSUME_FUEL_VA,
+    AZURIK_PER_FRAME_DRAIN_VA,
     INFINITE_FUEL_SITES,
     INFINITE_FUEL_SPEC,
+    PER_FRAME_DRAIN_SPEC,
     apply_infinite_fuel_patch,
 )
 from azurik_mod.patches.wing_flap_count import (
@@ -152,6 +156,7 @@ __all__ = [
     "QOL_PATCH_SITES",
     "ROLL_SPEED_SCALE",
     "RUN_SPEED_SCALE",
+    "SLOPE_SLIDE_SPEED_SCALE",
     "SKIP_LOGO_LEGACY_SPEC",
     "SKIP_LOGO_SPEC",
     "SKIP_LOGO_TRAMPOLINE",
@@ -175,6 +180,7 @@ __all__ = [
     "apply_player_speed",
     "apply_qol_patches",
     "apply_skip_logo_patch",
+    "apply_slope_slide_speed",
     "apply_skip_save_signature_patch",
     "apply_swim_speed",
     "apply_wing_flap_count",

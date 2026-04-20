@@ -1301,6 +1301,8 @@ def cmd_randomize_full(args):
         flap_subsequent_scale = float(
             getattr(args, 'player_flap_subsequent_scale', None) or 1.0)
         climb_scale = float(getattr(args, 'player_climb_scale', None) or 1.0)
+        slope_slide_scale = float(
+            getattr(args, 'player_slope_slide_scale', None) or 1.0)
         want_no_fall_damage = bool(getattr(args, 'no_fall_damage', False))
         want_infinite_fuel = bool(getattr(args, 'infinite_fuel', False))
         flaps_air_1 = getattr(args, 'flaps_air_1', None)
@@ -1334,7 +1336,8 @@ def cmd_randomize_full(args):
                                or air_control_scale != 1.0
                                or flap_scale != 1.0
                                or flap_subsequent_scale != 1.0
-                               or climb_scale != 1.0),
+                               or climb_scale != 1.0
+                               or slope_slide_scale != 1.0),
             "no_fall_damage": want_no_fall_damage,
             "infinite_fuel": want_infinite_fuel,
             "wing_flap_count": want_wing_flap_count,
@@ -1360,6 +1363,7 @@ def cmd_randomize_full(args):
                     "flap_height_scale": flap_scale,
                     "flap_subsequent_scale": flap_subsequent_scale,
                     "climb_speed_scale": climb_scale,
+                    "slope_slide_speed_scale": slope_slide_scale,
                 },
                 "wing_flap_count": {
                     "flaps_air_power_1": (
@@ -2037,6 +2041,8 @@ def cmd_apply_physics(args):
     flap_subsequent_scale = float(
         getattr(args, "flap_subsequent", None) or 1.0)
     climb_scale = float(getattr(args, "climb_speed", None) or 1.0)
+    slope_slide_scale = float(
+        getattr(args, "slope_slide_speed", None) or 1.0)
 
     if (gravity is None
             and walk_scale == 1.0
@@ -2046,12 +2052,14 @@ def cmd_apply_physics(args):
             and air_control_scale == 1.0
             and flap_scale == 1.0
             and flap_subsequent_scale == 1.0
-            and climb_scale == 1.0):
+            and climb_scale == 1.0
+            and slope_slide_scale == 1.0):
         print("No physics changes requested.  "
               "Pass --gravity, --walk-speed, --roll-speed (or "
               "legacy --run-speed), --swim-speed, --jump-speed, "
               "--air-control-speed, --flap-height, "
-              "--flap-subsequent, and/or --climb-speed.")
+              "--flap-subsequent, --climb-speed, and/or "
+              "--slope-slide-speed.")
         return
 
     def _patch_xbe_in_place(xbe_path: Path) -> None:
@@ -2070,6 +2078,8 @@ def cmd_apply_physics(args):
                                    if flap_subsequent_scale != 1.0
                                    else None),
             climb_scale=climb_scale if climb_scale != 1.0 else None,
+            slope_slide_scale=(slope_slide_scale
+                               if slope_slide_scale != 1.0 else None),
         )
         xbe_path.write_bytes(data)
 

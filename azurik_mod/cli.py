@@ -324,6 +324,17 @@ def main() -> None:
                              "at VA 0x001980E4 (single-purpose "
                              "float used only by FUN_00087F80 — "
                              "the climbing/hanging-ledge state).")
+    p_full.add_argument("--player-slope-slide-scale", type=float,
+                        metavar="X",
+                        help="Slope-slide state speed multiplier "
+                             "(default 1.0, range 0.1-10.0).  "
+                             "Scales the single-reader 2.0 "
+                             "constant at VA 0x001AAB68 used by "
+                             "FUN_00089A70 when the player lands "
+                             "on a slope steeper than 45° and "
+                             "begins auto-sliding.  Independent "
+                             "of roll_scale (that's the WHITE-"
+                             "button dash).")
     p_full.add_argument("--no-fall-damage", dest="no_fall_damage",
                         action="store_true",
                         help="Disable fall damage.  Flips the "
@@ -422,6 +433,12 @@ def main() -> None:
              "(default 1.0; range 0.1-10.0).  Overwrites the "
              "2.0 constant at VA 0x001980E4 (only read by "
              "FUN_00087F80 — climbing/hanging-ledge physics).")
+    p_physics.add_argument("--slope-slide-speed", type=float,
+        metavar="X",
+        help="Slope-slide speed multiplier (default 1.0; "
+             "range 0.1-10.0).  Overwrites 2.0 at VA 0x001AAB68 "
+             "(single-reader constant in FUN_00089A70 — the "
+             "steep-terrain auto-slide state).")
 
     # inspect-physics (diagnostic — read-only dump of patch state)
     p_inspect = sub.add_parser(
