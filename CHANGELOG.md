@@ -2,6 +2,82 @@
 
 ## Unreleased
 
+### Player packs — round 8 (shim revival of 4 retired sliders)
+
+Four of the previously-retired physics sliders are now shipping
+as their own shim-backed packs — hand-assembled trampolines at
+code-flow points that byte patches couldn't reach.  Each pack
+ships with a shim body, a ParametricPatch slider, spec-shape +
+byte-landing + idempotent-re-apply unit tests, and a
+`dynamic_whitelist_from_xbe` callback so `verify-patches
+--strict` accepts the trampoline + shim + injected-scale bytes.
+
+**Revived packs:**
+
+- `flap_at_peak` (VA 0x89409 — final z-velocity FSTP inside
+  `wing_flap`).  43-byte shim.  Wraps the final velocity write
+  with `max(vanilla_v0, sqrt(2g*flap_height)*scale)`.  Bypasses
+  the intentional vanilla "no altitude above first-flap height"
+  ceiling, which is latched in `player_jump_init` at 0x8915A.
+- `slope_slide_speed` (VA 0x8A095 — state-4 fast-slide FLD).
+  17-byte shim.  Simplest of the four: replays the FLD then
+  FMULs by user scale before the downstream velocity
+  integration consumes the value.
+- `root_motion_roll` (VA 0x866D9 — CALL to
+  `anim_apply_translation` from `player_walk_state`).  134-byte
+  shim.  Wraps the vanilla anim-apply, post-scales the
+  translation deltas at `param_1[0x6C..0x71]` **only while
+  PlayerInputState.flags & 0x40 is set** (WHITE/BACK roll gate).
+  Normal walking stays vanilla.
+- `root_motion_climb` (VA 0x883FF — CALL to
+  `anim_apply_translation` from `player_climb_tick`).  128-byte
+  shim.  Same pattern as roll but no gate — scales
+  unconditionally inside climb_tick.
+
+**Three packs stay retired** (config-editor workarounds
+documented in their descriptions): `no_fall_damage`,
+`infinite_fuel`, `wing_flap_count`.  All three land bytes
+correctly but gameplay-side evidence suggests other code paths
+dominate.
+
+**Headers + Ghidra sync:**
+
+- Added `anim_apply_translation` (renamed from FUN_00042E40) and
+  `anim_change` (renamed from FUN_00042910) to `azurik_vanilla.h`
+  and `vanilla_symbols.py`.  Also added `player_armor_state_tick`
+  (VA 0x83D80) which was macro-only before.  Ghidra renamed +
+  plate-commented at both VAs.
+- Fixed `apply_damage` calling-convention mismatch:
+  `vanilla_symbols.py` was `cdecl`, verified via Ghidra `RET 0xC`
+  at 0x44735 that stdcall is correct (matching `azurik_vanilla.h`).
+- Added 8 new VA macros to `azurik.h`:
+  `AZURIK_FUN_ANIM_APPLY_TRANSLATION_VA`,
+  `AZURIK_FUN_ANIM_CHANGE_VA`,
+  `AZURIK_FUN_PLAYER_PHYSICS_INTEGRATE_ROOT_MOTION_VA`,
+  `AZURIK_PATCH_FLAP_V0_FINAL_FSTP_VA`,
+  `AZURIK_PATCH_PEAK_Z_WRITE_VA`,
+  `AZURIK_SHIM_HOOK_WALK_ANIM_APPLY_VA`,
+  `AZURIK_SHIM_HOOK_CLIMB_ANIM_APPLY_VA`,
+  `AZURIK_SHIM_HOOK_SLOPE_VEL_FLD_VA`.
+- 8 Ghidra plate comments added at the shim hook addresses +
+  the peak-z-latching site for future RE continuity.
+- `tests/test_va_audit.py` extended with the 8 new macros.
+
+**Design note**: the flap_at_peak shim works *around* vanilla
+rather than fixing a bug.  Vanilla deliberately latches
+`peak_z` once per jump and caps subsequent-flap altitude at
+`initial_flap_z + flap_height` as an anti-infinite-altitude
+mechanic.  Below-peak flaps (controlled by the existing
+`flap_below_peak_scale` byte patch) are supported vanilla
+behaviour; above-peak flaps are not.  The shim documents this
+framing in its pack docstring + `docs/LEARNINGS.md` §
+"Wing-flap v0 cap" so future agents don't chase more byte
+patches hoping to find a "fix".
+
+**Test suite grows from 811 → 845 tests + 761 subtests.**
+Four new pack test modules plus updated ``test_categories.py``
+to expect the 3 additional sliders.
+
 ### Player packs — round 7 (retire broken physics sliders + packs)
 
 After further user testing in late April 2026, three more player

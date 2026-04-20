@@ -2910,15 +2910,16 @@ register(VanillaSymbol(
 register(VanillaSymbol(
     name="apply_damage",
     va=0x00044640,
-    calling_convention="cdecl",
+    calling_convention="stdcall",
     arg_bytes=12,
     doc=(
-        "Generic damage-apply routine.  Called from ~22 sites "
-        "spanning combat, enemy impact, and environmental "
-        "hazards.  Fall-damage callers (VA 0x8AD9B inside "
-        "fall_damage_dispatch and VA 0x8BF59 inside "
-        "fall_death_dispatch) are both bypassed by our "
-        "no_fall_damage v2 pack.  NOT directly patched \u2014 "
+        "Generic damage-apply routine.  __stdcall(int entity, "
+        "int kind, char caller_flag) — verified by RET 0xC at "
+        "VA 0x44735.  Called from ~22 sites spanning combat, "
+        "enemy impact, and environmental hazards.  Fall-damage "
+        "callers (VA 0x8AD9B inside fall_damage_dispatch and "
+        "VA 0x8BF59 inside fall_death_dispatch) are both bypassed "
+        "by our no_fall_damage pack.  NOT directly patched \u2014 "
         "touching this shared routine would affect non-fall "
         "damage too."
     ),
@@ -2972,6 +2973,56 @@ register(VanillaSymbol(
         "call, passes the cvar-name pointer in ESI (register).  "
         "The arg-in-ESI is a Watcom-ish convention not expressible "
         "in portable C, so shims using this would need a wrapper."
+    ),
+))
+
+register(VanillaSymbol(
+    name="anim_apply_translation",
+    va=0x00042E40,
+    calling_convention="thiscall",
+    arg_bytes=16,
+    doc=(
+        "Per-frame animation-apply helper.  __thiscall (ECX = "
+        "anim container; stack args: int* anim_obj, float "
+        "blend_time, byte* reference_name, float* ref_pos). "
+        "Samples the active ``banm`` clip via FUN_000cab80, "
+        "writes XYZ translation deltas to anim_obj[0x6C..0x71] "
+        "(both delta-mode and absolute-mode output slots), and "
+        "commits via vtable+0xC0.  Called from every player-state "
+        "tick (walk/climb/airborne/swim/slope).  Our "
+        "root_motion_roll and root_motion_climb shims intercept "
+        "this function's CALL sites and post-scale the written "
+        "deltas.  Ends with ``RET 0x10`` (callee cleans 16 bytes)."
+    ),
+))
+
+register(VanillaSymbol(
+    name="anim_change",
+    va=0x00042910,
+    calling_convention="thiscall",
+    arg_bytes=12,
+    doc=(
+        "Animation-change helper.  __thiscall — switches the "
+        "active ``banm`` clip on the anim object via "
+        "load_asset_by_fourcc('banm', 1) and binds the clip.  "
+        "NOT the per-frame translation applier (that's "
+        "anim_apply_translation at 0x42E40).  Called whenever an "
+        "animation index changes (e.g. walk \u2192 roll transition)."
+    ),
+))
+
+register(VanillaSymbol(
+    name="player_armor_state_tick",
+    va=0x00083D80,
+    calling_convention="thiscall",
+    arg_bytes=0,
+    doc=(
+        "Player armor-state per-frame tick.  Drives fuel drain, "
+        "armor-power cooldowns, and level-gated armor features. "
+        "Previously only had a macro anchor in azurik.h; now has "
+        "a first-class VanillaSymbol entry so shims can reference "
+        "it by name.  Home of the VA 0x83DE3 per-frame fuel-drain "
+        "block that the retired infinite_fuel pack NOPed."
     ),
 ))
 

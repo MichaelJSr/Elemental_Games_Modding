@@ -1320,6 +1320,41 @@ void player_landing(int entity, int landing_ctx);
 __attribute__((thiscall))
 unsigned char consume_fuel(float cost);
 
+/* Player armor-state per-frame tick.  Drives fuel drain,
+ * armor-power cooldowns, and level-gated armor features.
+ * Home of the VA 0x83DE3 per-frame fuel-drain block that
+ * the retired ``infinite_fuel`` pack NOPed.
+ *
+ * Vanilla VA: 0x00083D80  (mangled: _player_armor_state_tick) */
+__attribute__((thiscall))
+void player_armor_state_tick(void);
+
+/* Per-frame animation-apply helper.  __thiscall — samples the
+ * active ``banm`` clip via ``FUN_000cab80``, writes XYZ
+ * translation deltas to ``anim_obj[0x6C..0x71]`` (both
+ * delta-mode and absolute-mode output slots), and commits via
+ * vtable+0xC0.  Called from every player-state tick (walk /
+ * climb / airborne / swim / slope).  Our ``root_motion_roll``
+ * and ``root_motion_climb`` shims intercept the CALL sites to
+ * this function and post-scale the written deltas.  Ends with
+ * ``RET 0x10`` (callee cleans 16 bytes).
+ *
+ * Vanilla VA: 0x00042E40  (mangled: _anim_apply_translation@16) */
+__attribute__((thiscall))
+void anim_apply_translation(int *anim_obj, float blend_time,
+                            unsigned char *reference_name,
+                            float *ref_pos);
+
+/* Animation-change helper.  __thiscall — switches the active
+ * ``banm`` clip via ``load_asset_by_fourcc('banm', 1)`` and
+ * binds it.  NOT the per-frame translation applier (that's
+ * ``anim_apply_translation`` at 0x42E40).  Called on animation
+ * index changes (e.g. walk → roll transition).
+ *
+ * Vanilla VA: 0x00042910  (mangled: _anim_change@12) */
+__attribute__((thiscall))
+void anim_change(int anim_index, int flags, int reserved);
+
 /* ==================================================================
  * Config / cvar loaders (April 2026 RE pass continued)
  * ================================================================== */

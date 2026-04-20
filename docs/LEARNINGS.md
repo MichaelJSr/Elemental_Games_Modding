@@ -425,29 +425,40 @@ The old `run_*` kwargs / attr names remain as transparent
 aliases so pinned callers don't break, but all documentation
 and tests use the new name.
 
-### Retired physics patches (late April 2026)
+### Revived via shim (late April 2026 round 8)
 
-Several patches that write clean bytes at the "right" VA turn
-out to have no observable in-game effect.  Each is retired from
-the GUI / randomizer but kept as a module-level symbol so tests
-covering byte landings still run.  Root causes + workarounds:
+Four of the previously-retired patches are now shipping as
+shim-backed packs — hand-assembled trampolines that hook at
+code-flow points byte patches couldn't reach:
 
-| Slider / pack | Byte patch | Why it doesn't land gameplay-side | Workaround |
-|---|---|---|---|
-| `roll_speed_scale` | FMUL 3.0 at 0x849E4 | WHITE triggers `roll_forward` animation which drives position via **root motion**, bypassing `magnitude`. | C shim that intercepts root-motion application. |
-| `climb_speed_scale` | constant 2.0 at 0x1980E4 | `player_climb_tick` reads the constant, but climbing motion is also animation-root-motion driven (climb sounds confirm state entry but velocity comes from the animation). | C shim (same as roll). |
-| `slope_slide_speed_scale` | constant 2.0 at 0x1AAB68 | Only the state-3 (slow slide) scalar.  State-4 fast slides (common on steep descents) use a dynamic 500× multiplier at DAT_003902A0 we can't reach with a byte rewrite. | C shim hooking the state-4 init block. |
-| `flap_at_peak_scale` | NOP at 0x89381 (v1), FLD-ST rewrite at 0x8939F (v2) | Both land cleanly; engine re-derives fVar2 downstream or clamps harder than our patch allows. | C shim wrapping v0 FSTP at 0x893BA. |
-| `no_fall_damage` | prologue RET at 0x8AB70 + 0x8BE00 | Covers the two damage paths we found; light damage still fires via a third unpinned caller. | Config editor: `damage` section → raise fall-height thresholds, or `critters_damage` → bump player hitPoints. |
-| `infinite_fuel` | prologue RET at 0x842D0, NOP at 0x83DE3 | Attack-cast fuel drain (from `attacks_anims.Fuel multiplier`) is a separate, un-patched path. | Config editor: `armor_properties` → fuel_max very large, **or** zero every Fuel multiplier in `attacks_anims`. |
-| `wing_flap_count` | 47-byte dispatch shim at 0x89321 | Shim lands and executes, but the game re-reads the Flaps count through an animation-state path we haven't traced. | Config editor: `armor_properties` → `Flaps` column per armor row; read fresh each flap. |
+| Pack | Hook VA | Shim strategy |
+|---|---|---|
+| `flap_at_peak` | `0x89409` (FSTP [ESI+0x2C]) | 6-byte JMP trampoline; shim wraps the final z-velocity write with `max(vanilla_v0, sqrt(2g*fh)*scale)` then replays MOV EAX, [ESI+0x20]. |
+| `root_motion_roll` | `0x866D9` (CALL anim_apply_translation) | 5-byte CALL trampoline; shim wraps the vanilla call, post-scales param_1[0x6C..0x71] deltas while PlayerInputState.flags & 0x40 (WHITE/BACK) is set. |
+| `root_motion_climb` | `0x883FF` (CALL anim_apply_translation) | Same pattern as roll but no gate — entire function is climb-state. |
+| `slope_slide_speed` | `0x8A095` (FLD [0x003902A0]) | 6-byte JMP trampoline; shim replays the FLD then FMULs by user scale before the downstream velocity integration consumes the value. |
 
-The common pattern: **player actions whose position / state is
-driven by the animation system are not patchable by byte
-rewriting of the C-level physics code**.  Future shim work
-should target the animation root-motion application
-(characters-system level) rather than the physics-level
-constants.
+The flap_at_peak shim is a **workaround**, not a bug fix —
+vanilla deliberately caps subsequent-flap altitude at
+``initial_flap_z + flap_height`` (peak_z is latched in
+``player_jump_init`` @ 0x8915A and never refreshed).  See
+"Wing-flap v0 cap" below for the full design-intent framing.
+
+### Retired (config-editor workarounds)
+
+Three packs stay retired because their byte patches land but
+gameplay-side evidence suggests other code paths dominate:
+
+| Pack | Byte patch | Config-editor workaround |
+|---|---|---|
+| `no_fall_damage` | prologue RET at 0x8AB70 + 0x8BE00 | `damage` section → raise fall-height thresholds, or `critters_damage` → bump player hitPoints. |
+| `infinite_fuel` | prologue RET at 0x842D0, NOP at 0x83DE3 | `armor_properties` → fuel_max very large, **or** zero every `Fuel multiplier` in `attacks_anims`. |
+| `wing_flap_count` | 47-byte dispatch shim at 0x89321 | `armor_properties` → `Flaps` column per armor row; read fresh each flap. |
+
+The common pattern for ALL of these: **player state driven by
+the animation system or by separate state-specific code paths
+isn't cleanly byte-patchable** — interception at the animation
+or state-machine layer (via shim) is required.
 
 ### Airborne horizontal-control speed (new April 2026)
 

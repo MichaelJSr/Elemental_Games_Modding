@@ -1161,23 +1161,52 @@ enum PlayerPhysicsState {
 #define AZURIK_FUN_LOAD_ATTACKS_ANIMS_VA        0x0007E2E0
 #define AZURIK_FUN_CVAR_GET_DOUBLE_VA           0x0005E620
 
+/* Animation system (added for the root-motion shim revivals).
+ * ``anim_apply_translation`` is the per-frame banm-sample +
+ * vtable commit function, called from every player-state tick.
+ * ``anim_change`` is the animation-swap helper.
+ * ``player_physics_integrate_root_motion`` is the one FADD
+ * site where anim deltas feed entity velocity — global choke
+ * point that covers EVERY state, not just roll / climb. */
+#define AZURIK_FUN_ANIM_APPLY_TRANSLATION_VA    0x00042E40
+#define AZURIK_FUN_ANIM_CHANGE_VA               0x00042910
+#define AZURIK_FUN_PLAYER_PHYSICS_INTEGRATE_ROOT_MOTION_VA 0x0008CE14
+
 /* Key patch sites (instruction addresses). */
 #define AZURIK_PATCH_ROLL_FMUL_VA               0x000849E4
 #define AZURIK_PATCH_WALK_FLD_VA                0x00085F62
 #define AZURIK_PATCH_JUMP_FLD_VA                0x00089160
 #define AZURIK_PATCH_FLAP_FLD_VA                0x000893AE
 #define AZURIK_PATCH_FLAP_SUB_FMUL_VA           0x000893DD
-/* Binary-toggle 2-byte site (late April 2026 v2).  When
- * patched from `D9 C1` (FLD ST(1)) to `D9 C0` (FLD ST(0)),
- * the `fVar2 = min(fVar1, flap_height)` cap inside `wing_flap`
- * collapses to `fVar2 = flap_height` — subsequent flaps near
- * peak get full v0 = sqrt(2g × flap_height).  `fVar1` is left
- * untouched so the below-6m halving check at
- * `AZURIK_PATCH_FLAP_SUB_FMUL_VA` continues to fire correctly.
- * Target of the `flap_at_peak_scale` slider.  (v1 NOPed
- * `FSUB [EBX+0x5C]` at 0x89381 instead but caused fuel-drain
- * side effects; reverted.) */
+/* Historical 2-byte FLD-ST site (the v2 byte-patch attempt
+ * at the `fVar2 = min(fVar1, flap_height)` cap).  Retired
+ * because user testing showed no observable effect — see
+ * docs/LEARNINGS.md.  Kept as an anchor for RE agents. */
 #define AZURIK_PATCH_FLAP_AT_PEAK_FLD_ST_VA      0x0008939F
+
+/* Shim hook sites introduced in the late-April 2026 shim-
+ * revival round.  Each is the entry of a C-shim trampoline;
+ * see the corresponding pack folder for the shim body.
+ *
+ * FLAP_V0_FINAL_FSTP:  ``D9 5E 2C`` — final z-velocity write
+ *   inside ``wing_flap``; ``flap_at_peak`` shim overrides with
+ *   max(vanilla_v0, sqrt(2g * flap_height) * scale).
+ * WALK_ANIM_APPLY:     5-byte CALL to anim_apply_translation
+ *   from ``player_walk_state``; ``root_motion_roll`` shim
+ *   post-scales translation deltas when WHITE/BACK is held.
+ * CLIMB_ANIM_APPLY:    5-byte CALL from ``player_climb_tick``;
+ *   ``root_motion_climb`` shim post-scales unconditionally.
+ * SLOPE_VEL_FLD:       ``D9 05 A0 02 39 00`` — state-4
+ *   fast-slide velocity load; ``slope_slide_speed`` shim
+ *   pre-multiplies by user scale.
+ * PEAK_Z_WRITE:        ``FSTP [ESI+0x164]`` inside
+ *   ``player_jump_init`` — where peak-z gets latched.  Read
+ *   anchor only (not patched). */
+#define AZURIK_PATCH_FLAP_V0_FINAL_FSTP_VA       0x00089409
+#define AZURIK_PATCH_PEAK_Z_WRITE_VA             0x0008915A
+#define AZURIK_SHIM_HOOK_WALK_ANIM_APPLY_VA      0x000866D9
+#define AZURIK_SHIM_HOOK_CLIMB_ANIM_APPLY_VA     0x000883FF
+#define AZURIK_SHIM_HOOK_SLOPE_VEL_FLD_VA        0x0008A095
 #define AZURIK_PATCH_SLOPE_SLIDE_FMUL_VA        0x00089B76
 #define AZURIK_PATCH_SWIM_FMUL_VA               0x0008B7BF
 #define AZURIK_PATCH_AIR_CTRL_12_IMM32_VA       0x00083FAC

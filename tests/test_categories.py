@@ -299,24 +299,32 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
                               pack_params=params)
         slider_keys = sorted(browser.sliders().keys())
         # player_physics owns 7 working sliders as of late April 2026.
-        # Retired (kept as module symbols for back-compat + tests,
-        # but no longer surfaced): roll, flap_at_peak, climb,
-        # slope_slide (all need shims — animation root motion or
-        # state-derived velocity).  wing_flap_count, no_fall_damage,
-        # infinite_fuel packs also retired so their sliders do not
-        # appear here.
+        # Four retired sliders are re-surfaced as their OWN shim-
+        # backed packs (flap_at_peak, slope_slide_speed,
+        # root_motion_roll, root_motion_climb) — so their sliders
+        # show up keyed on the new pack names, not on
+        # ``player_physics``.
         self.assertEqual(
             slider_keys,
-            [("player_physics", "air_control_scale"),
+            [("flap_at_peak", "flap_at_peak_scale"),
+             ("player_physics", "air_control_scale"),
              ("player_physics", "flap_below_peak_scale"),
              ("player_physics", "flap_height_scale"),
              ("player_physics", "gravity"),
              ("player_physics", "jump_speed_scale"),
              ("player_physics", "swim_speed_scale"),
-             ("player_physics", "walk_speed_scale")])
+             ("player_physics", "walk_speed_scale"),
+             ("root_motion_climb", "climb_speed_scale"),
+             ("root_motion_roll", "roll_speed_scale"),
+             ("slope_slide_speed", "slope_slide_speed_scale")])
         # Initial values mirrored into pack_params.
         self.assertIn("player_physics", params)
         self.assertEqual(len(params["player_physics"]), 7)
+        for pack_name in ("flap_at_peak", "slope_slide_speed",
+                          "root_motion_roll", "root_motion_climb"):
+            self.assertIn(pack_name, params)
+            self.assertEqual(len(params[pack_name]), 1,
+                msg=f"{pack_name} should expose exactly 1 slider")
         # wing_flap_count retired; no longer in pack_params.
         self.assertNotIn("wing_flap_count", params)
 

@@ -38,7 +38,10 @@ from azurik_mod.patches.player_physics import (
     WALK_SPEED_SCALE,
     apply_air_control_speed,
     apply_climb_speed,
-    apply_flap_at_peak,
+    # Retired byte-patch attempts at FLAP_AT_PEAK's former sites
+    # (0x89381 and 0x8939F) — kept importable for test continuity
+    # but no longer re-exported here.  The working shim lives in
+    # the ``flap_at_peak`` pack below.
     apply_flap_height,
     apply_flap_subsequent,
     apply_jump_speed,
@@ -93,6 +96,26 @@ from azurik_mod.patches.wing_flap_count import (
     FLAPS_AIR_3,
     WING_FLAP_COUNT_SITES,
     apply_wing_flap_count,
+)
+from azurik_mod.patches.flap_at_peak import (
+    FLAP_AT_PEAK_SHIM_SLIDER,
+    FLAP_AT_PEAK_SITES,
+    apply_flap_at_peak,
+)
+from azurik_mod.patches.slope_slide_speed import (
+    SLOPE_SLIDE_SHIM_SLIDER,
+    SLOPE_SLIDE_SITES,
+    apply_slope_slide_speed_shim,
+)
+from azurik_mod.patches.root_motion_roll import (
+    ROLL_SPEED_SHIM_SLIDER,
+    ROLL_SPEED_SITES,
+    apply_root_motion_roll,
+)
+from azurik_mod.patches.root_motion_climb import (
+    CLIMB_SPEED_SHIM_SLIDER,
+    CLIMB_SPEED_SITES,
+    apply_root_motion_climb,
 )
 
 # ``randomize`` has no byte patches — it surfaces the randomizer
