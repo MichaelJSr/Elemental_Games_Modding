@@ -89,7 +89,7 @@ to short localized byte ranges in ``.text``.
 
 from __future__ import annotations
 
-from azurik_mod.patching.registry import Feature, register_feature
+from azurik_mod.patching.registry import Feature
 from azurik_mod.patching.spec import PatchSpec
 
 
@@ -153,26 +153,26 @@ def apply_infinite_fuel_patch(xbe_data: bytearray) -> None:
         apply_patch_spec(xbe_data, spec)
 
 
-FEATURE = register_feature(Feature(
+_FEATURE_SPEC = Feature(
     name="infinite_fuel",
     description=(
-        "[BROKEN — prefer the config editor] Rewrites both the "
-        "event-driven consumer (FUN_000842D0) and the per-frame "
-        "sustained drain (FUN_00083D80 @ 0x83DE3).  User testing "
-        "on 2026-04 confirms fuel still drains in-game — there is "
-        "at least one more drain path (likely attack-cast fuel "
-        "in `config/attacks_anims`).  Workaround: open the config "
-        "editor → `armor_properties`, set `fuel_max` to a very "
-        "large number (e.g. 1e6), or set every per-attack "
-        "`Fuel multiplier` in `attacks_anims` to 0."
+        "[RETIRED] Rewrites both the event-driven fuel consumer "
+        "(FUN_000842D0) and the per-frame drain (0x83DE3). User "
+        "testing confirms fuel still drains via attack-cast "
+        "consumption.  Workaround: edit config.xbr — "
+        "`armor_properties` → fuel_max very large, or zero every "
+        "`Fuel multiplier` in `attacks_anims`."
     ),
     sites=INFINITE_FUEL_SITES,
     apply=apply_infinite_fuel_patch,
     default_on=False,
     included_in_randomizer_qol=False,
     category="player",
-    tags=("cheat", "powers", "broken"),
-))
+    tags=("cheat", "powers", "retired"),
+)
+# Not registered — pack is retired.  Keep spec defined so tests
+# covering byte landings still work.
+FEATURE = _FEATURE_SPEC
 
 
 __all__ = [

@@ -158,10 +158,9 @@ The v2 patch at VA 0x893AE mirrors the initial-jump pattern:
 rewrite the gravity FLD to reference an injected
 ``9.8 × flap_scale²`` so the sqrt yields ``flap_scale × v0``.
 
-### Wing-flap v0 has a `min(remaining, flap_height)` cap (late April 2026, v2 fix)
+### Wing-flap v0 cap — near-peak fix abandoned (late April 2026)
 
-After the player starts flapping, ``peak_z`` keeps rising each
-flap.  Vanilla `wing_flap` computes, at VAs 0x89368-0x89393:
+Vanilla `wing_flap` (FUN_00089300) at VAs 0x89368-0x89393:
 
 ```
 fVar1 = peak_z + flap_height - current_z
@@ -170,32 +169,30 @@ fVar2 = min(fVar1, flap_height)
 v0 = sqrt(2 × g × fVar2)
 ```
 
-When the player is at peak (`current_z ≈ peak_z`),
-``fVar2 = flap_height`` giving full v0.  BUT the first flap
-raises `current_z` above `peak_z` by some small delta before
-the game updates `peak_z` itself, so subsequent flaps see
-``fVar2 = flap_height - delta`` — yielding weak v0.
+User-observed ceiling: `peak_z` is latched to the initial-flap
+z, so **subsequent flaps can never exceed
+`initial_flap_z + flap_height`**.  Falling below that height
+works (each flap restores some altitude) but flaps AT the
+ceiling give zero v0 because `fVar1 <= 0` triggers the clamp.
 
-**v1 fix (abandoned)**: NOPed the 3-byte `FSUB [EBX+0x5C]` at
-VA 0x89381 so ``fVar1 = peak_z + flap_height`` (always large).
-Side effect discovered in user testing: fVar1 is ALSO tested
-against 6.0 at VA 0x893C0 for the halving check, AND against
-``consume_fuel`` at VA 0x893D4 — the halving path consumes
-100 fuel per flap.  Forcing fVar1 large routed every flap
-through the halving path AND drained fuel to zero within a
-couple of flaps, so subsequent flaps were refused entirely.
+Two byte-patch attempts, both abandoned:
 
-**v2 fix (shipped)**: rewrite the 2-byte `FLD ST(1)` at VA
-0x8939F to `FLD ST(0)`.  That duplicates the just-loaded
-`flap_height` instead of `fVar1`, so the subsequent FCOMP
-compares fh with fh (equal) and the JP at 0x893A8 is always
-taken — skipping the min selection.  ``fVar2 = flap_height``
-every flap → full v0.  ``fVar1`` is preserved untouched, so
-the below-6m halving check + `flap_below_peak_scale` slider
-behave normally.
+- v1 NOPed `FSUB [EBX+0x5C]` at 0x89381 so `fVar1 = peak+fh`
+  (always large).  Landed cleanly but `fVar1 > 6m` tripped
+  the halving path at 0x893C0 AND `consume_fuel(100)` at
+  0x893D4 — fuel drained to zero within 1–2 flaps and the
+  fuel gate refused further flaps.
+- v2 rewrote `FLD ST(1)` → `FLD ST(0)` at 0x8939F so the
+  `min(fVar1, fh)` compare became `min(fh, fh)`.  Byte-level
+  verification showed the patch landed; in-game testing
+  reported no observable effect.  The engine likely
+  re-derives `fVar2` downstream after the FSQRT we can't
+  reach with a single-instruction rewrite.
 
-Packaged as the `flap_at_peak_scale` binary toggle (value
-!= 1.0 enables).
+`flap_at_peak_scale` is retired.  Workarounds: raise
+`flap_height_scale` + `jump_speed_scale` to increase the
+ceiling, or write a C shim that intercepts `wing_flap`'s v0
+write (`FSTP [ESP+0x1C]` at 0x893BA).
 
 ### Air-control speed has TWO dominant writer sites — FUN_00083F90 (April 2026)
 
@@ -428,55 +425,29 @@ The old `run_*` kwargs / attr names remain as transparent
 aliases so pinned callers don't break, but all documentation
 and tests use the new name.
 
-### Roll speed is animation-root-motion, not magnitude (late April 2026 — slider retired)
+### Retired physics patches (late April 2026)
 
-Further user testing in late April 2026 confirmed a harder
-truth: even with bit 0x40 set and the 3.0 FMUL firing on
-`magnitude`, the observed roll speed in-game does NOT change.
-Pressing WHITE plays the `characters/garret4/roll_forward`
-animation which drives position via **animation root motion**
-— a translation track inside the animation asset that the
-engine applies to the entity each frame, bypassing the
-`magnitude` → velocity pipeline entirely.
+Several patches that write clean bytes at the "right" VA turn
+out to have no observable in-game effect.  Each is retired from
+the GUI / randomizer but kept as a module-level symbol so tests
+covering byte landings still run.  Root causes + workarounds:
 
-What the 3.0 FMUL at VA 0x849E4 *does* affect: the walking
-velocity during the roll (e.g. if you're holding stick
-forward WHILE the WHITE-triggered bit is set), but that
-contribution is dominated by the animation track.
+| Slider / pack | Byte patch | Why it doesn't land gameplay-side | Workaround |
+|---|---|---|---|
+| `roll_speed_scale` | FMUL 3.0 at 0x849E4 | WHITE triggers `roll_forward` animation which drives position via **root motion**, bypassing `magnitude`. | C shim that intercepts root-motion application. |
+| `climb_speed_scale` | constant 2.0 at 0x1980E4 | `player_climb_tick` reads the constant, but climbing motion is also animation-root-motion driven (climb sounds confirm state entry but velocity comes from the animation). | C shim (same as roll). |
+| `slope_slide_speed_scale` | constant 2.0 at 0x1AAB68 | Only the state-3 (slow slide) scalar.  State-4 fast slides (common on steep descents) use a dynamic 500× multiplier at DAT_003902A0 we can't reach with a byte rewrite. | C shim hooking the state-4 init block. |
+| `flap_at_peak_scale` | NOP at 0x89381 (v1), FLD-ST rewrite at 0x8939F (v2) | Both land cleanly; engine re-derives fVar2 downstream or clamps harder than our patch allows. | C shim wrapping v0 FSTP at 0x893BA. |
+| `no_fall_damage` | prologue RET at 0x8AB70 + 0x8BE00 | Covers the two damage paths we found; light damage still fires via a third unpinned caller. | Config editor: `damage` section → raise fall-height thresholds, or `critters_damage` → bump player hitPoints. |
+| `infinite_fuel` | prologue RET at 0x842D0, NOP at 0x83DE3 | Attack-cast fuel drain (from `attacks_anims.Fuel multiplier`) is a separate, un-patched path. | Config editor: `armor_properties` → fuel_max very large, **or** zero every Fuel multiplier in `attacks_anims`. |
+| `wing_flap_count` | 47-byte dispatch shim at 0x89321 | Shim lands and executes, but the game re-reads the Flaps count through an animation-state path we haven't traced. | Config editor: `armor_properties` → `Flaps` column per armor row; read fresh each flap. |
 
-Consequences for modding:
-
-- **`roll_speed_scale` was retired from the GUI / randomizer**
-  in late April 2026 (slider hidden; definition kept for
-  test continuity).
-- A real roll-speed fix would need a C shim that intercepts
-  the animation-root-motion application and scales the
-  translation delta.  Not yet shipped.
-- For players who want FASTER roll animation playback (and
-  therefore shorter roll duration, which feels like faster
-  movement), scaling the animation rate is an option — but
-  Azurik has no per-animation rate config for player moves,
-  only for attack animations (`attacks_anims.tabl`).
-
-### Broken packs still use the config editor — late April 2026 retirement of byte-patch approach for a cluster of "didn't stick" attempts
-
-Several patch packs went through multiple byte-level attempts
-with reported behaviour that didn't match the apparent
-code-flow analysis.  Rather than chase each further, we
-retired their active behaviour to a `broken` tag and point
-users at the config editor equivalents:
-
-| Pack | Config-editor workaround |
-|------|--------------------------|
-| `no_fall_damage` | `damage` → raise fall-height thresholds; `critters_damage` → hitPoints on player row |
-| `infinite_fuel` | `armor_properties` → fuel_max very large; `attacks_anims` → zero every Fuel multiplier |
-| `wing_flap_count` | `armor_properties` → Flaps column (per-armor-row) |
-| `roll_speed_scale` | no config equivalent — needs animation-root-motion shim |
-
-The pack modules still ship (tests cover the byte-patch
-landings), and the `register_feature(...)` still fires so
-pre-pinned CLI configs keep loading; only the expectation
-that the patch actually works in-game has moved.
+The common pattern: **player actions whose position / state is
+driven by the animation system are not patchable by byte
+rewriting of the C-level physics code**.  Future shim work
+should target the animation root-motion application
+(characters-system level) rather than the physics-level
+constants.
 
 ### Airborne horizontal-control speed (new April 2026)
 

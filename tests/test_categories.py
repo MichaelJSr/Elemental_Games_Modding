@@ -298,33 +298,27 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         browser = PackBrowser(self._root, all_packs(), {},
                               pack_params=params)
         slider_keys = sorted(browser.sliders().keys())
-        # player_physics owns 10 sliders post-late-April-2026:
-        #   flap_below_peak_scale (née flap_subsequent_scale) and the
-        #   new flap_at_peak_scale are separate controls for
-        #   below-6m vs at-peak wing-flap height; roll_speed_scale
-        #   was retired (animation root motion, not magnitude).
-        #   wing_flap_count contributes 3 more in the same Player
-        #   tab but as a distinct pack.
+        # player_physics owns 7 working sliders as of late April 2026.
+        # Retired (kept as module symbols for back-compat + tests,
+        # but no longer surfaced): roll, flap_at_peak, climb,
+        # slope_slide (all need shims — animation root motion or
+        # state-derived velocity).  wing_flap_count, no_fall_damage,
+        # infinite_fuel packs also retired so their sliders do not
+        # appear here.
         self.assertEqual(
             slider_keys,
             [("player_physics", "air_control_scale"),
-             ("player_physics", "climb_speed_scale"),
-             ("player_physics", "flap_at_peak_scale"),
              ("player_physics", "flap_below_peak_scale"),
              ("player_physics", "flap_height_scale"),
              ("player_physics", "gravity"),
              ("player_physics", "jump_speed_scale"),
-             ("player_physics", "slope_slide_speed_scale"),
              ("player_physics", "swim_speed_scale"),
-             ("player_physics", "walk_speed_scale"),
-             ("wing_flap_count", "flaps_air_power_1"),
-             ("wing_flap_count", "flaps_air_power_2"),
-             ("wing_flap_count", "flaps_air_power_3")])
+             ("player_physics", "walk_speed_scale")])
         # Initial values mirrored into pack_params.
         self.assertIn("player_physics", params)
-        self.assertEqual(len(params["player_physics"]), 10)
-        self.assertIn("wing_flap_count", params)
-        self.assertEqual(len(params["wing_flap_count"]), 3)
+        self.assertEqual(len(params["player_physics"]), 7)
+        # wing_flap_count retired; no longer in pack_params.
+        self.assertNotIn("wing_flap_count", params)
 
     def test_plugin_category_gets_its_own_tab(self):
         """Simulate a plugin: register a category + a pack referencing

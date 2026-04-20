@@ -260,18 +260,11 @@ def main() -> None:
                         help="Player walk-speed multiplier (default 1.0, "
                              "range 0.1-10.0).")
     p_full.add_argument("--player-roll-scale", type=float, metavar="X",
-                        help="Player roll / WHITE-button boost multiplier "
-                             "(default 1.0, range 0.1-10.0).  This scales "
-                             "the 3.0 multiplier on FMUL [0x001A25BC] in "
-                             "FUN_00084940; the same gate feeds diving / "
-                             "rolling.")
+                        help="[RETIRED — no observable effect; roll "
+                             "is animation-root-motion driven]")
     p_full.add_argument("--player-run-scale", type=float, metavar="X",
                         dest="player_run_scale",
-                        help="Deprecated alias for --player-roll-scale.  "
-                             "(The 3.0 constant it patches is the roll/"
-                             "dive boost, not a run modifier — Azurik "
-                             "has no separate run speed; walking is just "
-                             "stick magnitude.)")
+                        help="[RETIRED — see --player-roll-scale]")
     p_full.add_argument("--player-swim-scale", type=float, metavar="X",
                         help="Player swim-speed multiplier (default 1.0, "
                              "range 0.1-10.0).  Scales the 10.0 FMUL at "
@@ -321,61 +314,37 @@ def main() -> None:
                              "cancel the halving; 4.0 to double.")
     p_full.add_argument("--player-flap-at-peak-scale", type=float,
                         metavar="X",
-                        help="Player wing-flap v0 strength NEAR "
-                             "peak for 2nd+ flaps (default 1.0).  "
-                             "Vanilla caps v0 at sqrt(2g * "
-                             "min(remaining_height, flap_height)), "
-                             "so flaps right at peak are weak.  "
-                             "Any value != 1.0 enables the fix: "
-                             "NOPs FSUB [EBX+0x5C] at VA 0x89381 "
-                             "so v0 = sqrt(2g * flap_height) "
-                             "(full first-flap v0 every flap).")
+                        help="[RETIRED — no observable effect; "
+                             "engine re-derives v0 downstream]")
     p_full.add_argument("--player-climb-scale", type=float,
                         metavar="X",
-                        help="Player climbing-state speed "
-                             "multiplier (default 1.0, range "
-                             "0.1-10.0).  Scales the 2.0 constant "
-                             "at VA 0x001980E4 (single-purpose "
-                             "float used only by FUN_00087F80 — "
-                             "the climbing/hanging-ledge state).")
+                        help="[RETIRED — no observable effect; "
+                             "climbing uses animation root motion]")
     p_full.add_argument("--player-slope-slide-scale", type=float,
                         metavar="X",
-                        help="Slope-slide state speed multiplier "
-                             "(default 1.0, range 0.1-10.0).  "
-                             "Scales the single-reader 2.0 "
-                             "constant at VA 0x001AAB68 used by "
-                             "FUN_00089A70 when the player lands "
-                             "on a slope steeper than 45° and "
-                             "begins auto-sliding.  Independent "
-                             "of roll_scale (that's the WHITE-"
-                             "button dash).")
+                        help="[RETIRED — only covers state-3 slow "
+                             "slide; state-4 fast slide uses a "
+                             "dynamic 500x multiplier]")
     p_full.add_argument("--no-fall-damage", dest="no_fall_damage",
                         action="store_true",
-                        help="Disable fall damage.  Flips the "
-                             "top-level conditional branch in "
-                             "FUN_0008AB70 so every landing "
-                             "routes to the 'no damage' return "
-                             "path.  Leaves HP / other damage "
-                             "systems untouched.")
+                        help="[RETIRED — no-op, use config editor "
+                             "damage thresholds or critters_damage "
+                             "hitPoints]")
     p_full.add_argument("--infinite-fuel", dest="infinite_fuel",
                         action="store_true",
-                        help="Elemental powers never consume "
-                             "fuel.  Rewrites FUN_000842D0's "
-                             "prologue to ``MOV AL,1 ; RET 4``.")
+                        help="[RETIRED — no-op, use config editor "
+                             "armor_properties.fuel_max or zero "
+                             "attacks_anims Fuel multipliers]")
     p_full.add_argument("--flaps-air-1", dest="flaps_air_1",
                         type=int, metavar="N",
-                        help="Wing flaps granted per jump at "
-                             "Air Power level 1 (vanilla: 1).  "
-                             "Installs the wing_flap_count shim "
-                             "at VA 0x89321.")
+                        help="[RETIRED — no-op, use config editor "
+                             "armor_properties Flaps column]")
     p_full.add_argument("--flaps-air-2", dest="flaps_air_2",
                         type=int, metavar="N",
-                        help="Wing flaps granted per jump at "
-                             "Air Power level 2 (vanilla: 2).")
+                        help="[RETIRED — see --flaps-air-1]")
     p_full.add_argument("--flaps-air-3", dest="flaps_air_3",
                         type=int, metavar="N",
-                        help="Wing flaps granted per jump at "
-                             "Air Power level 3 (vanilla: 5).")
+                        help="[RETIRED — see --flaps-air-1]")
 
     # apply-physics (standalone physics slider runner)
     p_physics = sub.add_parser(
@@ -405,16 +374,11 @@ def main() -> None:
     p_physics.add_argument("--walk-speed", type=float, metavar="X",
         help="Player walk speed multiplier (default 1.0; range 0.1-10.0).")
     p_physics.add_argument("--roll-speed", type=float, metavar="X",
-        help="Player rolling / sliding GROUND-state speed "
-             "multiplier (default 1.0; range 0.1-10.0).  v3: "
-             "scales the single-reader 2.0 constant at VA "
-             "0x001AAB68 (only read by FUN_00089A70 ground-"
-             "roll physics) — no longer couples to airborne "
-             "speed the way pre-v3 roll_scale did.")
+        help="[RETIRED — no observable effect; roll is "
+             "animation-root-motion driven]")
     p_physics.add_argument("--run-speed", type=float, metavar="X",
         dest="run_speed",
-        help="Deprecated alias for --roll-speed.  The 3.0 multiplier "
-             "is the roll/dive boost, not a run modifier.")
+        help="[RETIRED — see --roll-speed]")
     p_physics.add_argument("--swim-speed", type=float, metavar="X",
         help="Player swim speed multiplier (default 1.0; range 0.1-10.0).  "
              "Scales the 10.0 FMUL at VA 0x8B7BF inside FUN_0008b700.")
@@ -446,22 +410,13 @@ def main() -> None:
              "Set 2.0 to cancel halving, 4.0 to double height.")
     p_physics.add_argument("--flap-at-peak", type=float,
         metavar="X",
-        help="Wing-flap v0 NEAR peak for 2nd+ flaps (default "
-             "1.0; binary toggle: !=1.0 enables).  NOPs FSUB "
-             "[EBX+0x5C] at VA 0x89381 so v0 stays at full "
-             "sqrt(2g * flap_height) regardless of how far "
-             "above peak the player has risen.")
+        help="[RETIRED — no observable effect; see docs]")
     p_physics.add_argument("--climb-speed", type=float, metavar="X",
-        help="Player climbing-state speed multiplier "
-             "(default 1.0; range 0.1-10.0).  Overwrites the "
-             "2.0 constant at VA 0x001980E4 (only read by "
-             "FUN_00087F80 — climbing/hanging-ledge physics).")
+        help="[RETIRED — no observable effect; climbing "
+             "uses animation root motion]")
     p_physics.add_argument("--slope-slide-speed", type=float,
         metavar="X",
-        help="Slope-slide speed multiplier (default 1.0; "
-             "range 0.1-10.0).  Overwrites 2.0 at VA 0x001AAB68 "
-             "(single-reader constant in FUN_00089A70 — the "
-             "steep-terrain auto-slide state).")
+        help="[RETIRED — only covers slow-slide state]")
 
     # inspect-physics (diagnostic — read-only dump of patch state)
     p_inspect = sub.add_parser(

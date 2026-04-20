@@ -300,7 +300,7 @@ AIR_CONTROL_SCALE = ParametricPatch(
 
 FLAP_HEIGHT_SCALE = ParametricPatch(
     name="flap_height_scale",
-    label="Player wing-flap (double jump) height",
+    label="Wing-flap height (1st flap)",
     va=0,
     size=0,
     original=b"",
@@ -312,17 +312,14 @@ FLAP_HEIGHT_SCALE = ParametricPatch(
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
     description=(
-        "Scales v0 for the FIRST wing flap after a jump.  Acts "
-        "quadratically on the gravity input to sqrt(2g*h), so "
-        "2.0 makes the flap reach ~2x vanilla height, 4.0 "
-        "reaches ~4x, etc.  Subsequent flaps are controlled "
-        "separately by the two 'Wing-flap (2nd+ flaps)' sliders."
+        "Scales the FIRST wing flap's peak height (2x = ~2x "
+        "higher). Subsequent flaps use the other flap slider."
     ),
 )
 
 FLAP_BELOW_PEAK_SCALE = ParametricPatch(
     name="flap_below_peak_scale",
-    label="Wing-flap height (2nd+ flaps, far below peak)",
+    label="Wing-flap height (2nd+ flaps)",
     va=0,
     size=0,
     original=b"",
@@ -334,21 +331,24 @@ FLAP_BELOW_PEAK_SCALE = ParametricPatch(
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
     description=(
-        "Scales the vanilla 0.5x halving factor that kicks in when "
-        "the player has fallen more than 6 m below their jump peak. "
-        "1.0 = vanilla (halved v0).  2.0 = un-halved (same v0 as "
-        "the 1st flap).  4.0 = 2x the 1st-flap v0.  Does NOT affect "
-        "flaps taken within 6 m of the peak — use "
-        "'Wing-flap height (2nd+ flaps, near peak)' for those."
+        "Scales 2nd+ flap v0 when >6m below peak. 2x = un-halved."
     ),
 )
 
 # Back-compat alias — the old name pre-rename (late April 2026).
 FLAP_SUBSEQUENT_SCALE = FLAP_BELOW_PEAK_SCALE
 
+# FLAP_AT_PEAK_SCALE kept as a module-level symbol for back-compat
+# callers and tests, but retired from PLAYER_PHYSICS_SITES below
+# — two byte-patch attempts (FSUB-NOP at 0x89381, FLD-ST1 rewrite at
+# 0x8939F) landed cleanly but produced no in-game effect.  The peak
+# that wing_flap tracks is latched to the first-flap z, and fVar2
+# caps every subsequent flap at (initial_flap_z + flap_height) −
+# current_z even after our FLD rewrite.  Needs a shim.  See
+# docs/LEARNINGS.md § "Wing-flap v0 cap".
 FLAP_AT_PEAK_SCALE = ParametricPatch(
     name="flap_at_peak_scale",
-    label="Wing-flap height (2nd+ flaps, near peak)",
+    label="Wing-flap height (near peak, RETIRED)",
     va=0,
     size=0,
     original=b"",
@@ -360,13 +360,9 @@ FLAP_AT_PEAK_SCALE = ParametricPatch(
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
     description=(
-        "Binary toggle — any value other than 1.0 enables the fix. "
-        "Vanilla caps subsequent-flap v0 at sqrt(2g x remaining_height) "
-        "where remaining shrinks as the player rises, so flaps near "
-        "the peak feel weak.  The fix rewrites a single FLD inside "
-        "wing_flap so the cap collapses to 'flap_height', giving "
-        "full first-flap v0 every time.  Slider value itself has "
-        "no effect on magnitude; it's tested only against 1.0."
+        "RETIRED — see docs/LEARNINGS.md. Byte patches at 0x89381 "
+        "and 0x8939F landed cleanly but gave no in-game effect. "
+        "Workaround: use a higher 1st-flap height + higher jump."
     ),
 )
 
@@ -1457,29 +1453,32 @@ def _player_speed_dynamic_whitelist(
 PLAYER_PHYSICS_SITES = [
     GRAVITY_PATCH,
     WALK_SPEED_SCALE,
-    # ROLL_SPEED_SCALE retired late April 2026 — the WHITE-button
-    # FMUL at VA 0x849E4 scales the shared ``magnitude`` field,
-    # but the actual roll animation (characters/garret4/
-    # roll_forward) drives position via animation root motion,
-    # which the magnitude multiplier never touches.  Users
-    # consistently reported the slider had no observable effect.
-    # ROLL_SPEED_SCALE is kept as a module-level symbol for
-    # back-compat callers + the ``apply_player_speed`` test suite,
-    # but it's no longer surfaced in the GUI / randomizer.  A
-    # future root-motion shim could revive it.
     SWIM_SPEED_SCALE,
     JUMP_SPEED_SCALE,
     AIR_CONTROL_SCALE,
     FLAP_HEIGHT_SCALE,
     FLAP_BELOW_PEAK_SCALE,
-    FLAP_AT_PEAK_SCALE,
-    CLIMB_SPEED_SCALE,
-    SLOPE_SLIDE_SPEED_SCALE,
 ]
-"""Registered Patches-page sites.  Walk, swim, jump, and flap use
-shim-landed FLD/FMUL rewrites; air-control uses imm32 overwrites
-at seven call sites; climb and slope-slide use direct constant
-overwrites.  Roll was retired — see note inline above."""
+"""Registered Patches-page sites (7 working sliders).
+
+Retired sliders (kept as module symbols for back-compat / tests,
+but no longer surfaced in the GUI or randomizer):
+
+- ``ROLL_SPEED_SCALE`` — roll is animation-root-motion driven.
+- ``FLAP_AT_PEAK_SCALE`` — the near-peak cap is latched to
+  initial-flap z; byte patches at 0x89381 and 0x8939F landed
+  cleanly but the engine re-derives the cap downstream.
+- ``CLIMB_SPEED_SCALE`` — constant at VA 0x1980E4 IS the climb
+  velocity scalar, but the climbing animation appears to drive
+  position via root motion similar to roll.
+- ``SLOPE_SLIDE_SPEED_SCALE`` — constant at VA 0x1AAB68 is only
+  the state-3 (slow slide) scalar; state-4 (fast slide, common
+  on steep descents) uses a dynamic 500x multiplier we can't
+  scale with a byte rewrite.
+
+All four need C shims that intercept either animation root
+motion or runtime state-derived velocity.  See
+docs/LEARNINGS.md § "Retired physics patches"."""
 
 
 def _apply_defaults(xbe_data: bytearray) -> None:

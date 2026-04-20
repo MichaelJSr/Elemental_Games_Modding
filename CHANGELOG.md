@@ -2,6 +2,58 @@
 
 ## Unreleased
 
+### Player packs — round 7 (retire broken physics sliders + packs)
+
+After further user testing in late April 2026, three more player
+physics sliders joined `roll_speed_scale` in retirement, and the
+three "config-editor workaround" packs dropped their registry
+entries entirely.  Every retired item's ParametricPatch / Feature
+spec stays defined (tests covering byte landings still run), but
+none are surfaced in the GUI or routed through the randomizer
+CLI anymore.
+
+**Retired sliders** (`PLAYER_PHYSICS_SITES` drops from 10 → 7):
+
+- `flap_at_peak_scale` — v1 NOP at 0x89381 and v2 FLD-ST rewrite
+  at 0x8939F both land cleanly but produce no observable effect.
+  The engine appears to re-derive the v0 cap downstream.  Users
+  consistently reported flap_at_peak flaps still give zero v0.
+- `climb_speed_scale` — the 2.0 constant at 0x1980E4 IS the
+  climbing velocity scalar, but climbing motion (like rolling)
+  is animation-root-motion driven; the scalar isn't the
+  dominant term.
+- `slope_slide_speed_scale` — the 2.0 constant at 0x1AAB68 only
+  governs the state-3 (slow slide) path.  State-4 fast slides
+  use a dynamic 500× multiplier that isn't a static byte we can
+  rewrite.
+
+**Retired packs** (no longer `register_feature(...)`'d):
+
+- `no_fall_damage` — prologue rewrites of FUN_0008AB70 and
+  FUN_0008BE00 don't cover a third damage path.
+- `infinite_fuel` — prologue + NOP cover event-driven and
+  per-frame drains; attack-cast fuel is a separate, untraced
+  path.
+- `wing_flap_count` — 47-byte dispatch shim applies but the
+  game re-reads the flap count through an animation state
+  path we haven't traced.
+
+The `docs/LEARNINGS.md` § "Retired physics patches" table
+documents each with: patch site, why it doesn't land, and a
+workaround (mostly "use the config editor" — fall damage via
+`damage` thresholds, fuel via `armor_properties.fuel_max`,
+wing-flap count via `armor_properties.Flaps`).
+
+**Slider description trimming.**  The 7 remaining player
+physics sliders use concise 1-2 sentence descriptions rendered
+under the label.  Old labels like "Player wing-flap (double
+jump) height" shortened to "Wing-flap height (1st flap)" +
+description.  No functional change.
+
+**Test suite stays at 785 passed + 761 subtests** — the retired
+Feature specs stay defined so spec-shape / byte-landing tests
+run unchanged, only the `register_feature` call is removed.
+
 ### Player packs — round 6 (flap_at_peak v2 + roll retirement + config-editor pointers)
 
 **1. `flap_at_peak_scale` v2 — replaces the buggy v1 FSUB-NOP.**

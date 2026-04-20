@@ -76,7 +76,7 @@ other pack are orthogonal to this one.
 
 from __future__ import annotations
 
-from azurik_mod.patching.registry import Feature, register_feature
+from azurik_mod.patching.registry import Feature
 from azurik_mod.patching.spec import PatchSpec
 
 
@@ -136,26 +136,26 @@ def apply_no_fall_damage_patch(xbe_data: bytearray) -> None:
         apply_patch_spec(xbe_data, spec)
 
 
-FEATURE = register_feature(Feature(
+_FEATURE_SPEC = Feature(
     name="no_fall_damage",
     description=(
-        "[BROKEN — prefer the config editor] Rewrites the "
-        "prologues of both fall-damage dispatchers "
-        "(fall_damage_dispatch at 0x8AB70 and fall_death_dispatch "
-        "at 0x8BE00) to XOR AL,AL ; RET N.  User testing on 2026-04 "
-        "showed damage still fires via a third path we haven't "
-        "pinned down yet.  Workaround: open the config editor, "
-        "section `damage`, and raise the thresholds / reduce the "
-        "multipliers for fall-height 1/2/3; or edit `critters_damage` "
-        "→ hitPoints on the player row so every fall is survivable."
+        "[RETIRED] Rewrites the prologues of fall_damage_dispatch "
+        "(0x8AB70) and fall_death_dispatch (0x8BE00) to return 0. "
+        "User testing confirms fall damage still fires via an "
+        "unpinned third path.  Workaround: edit config.xbr — "
+        "`damage` section → raise fall-height thresholds, or "
+        "`critters_damage` → bump player hitPoints."
     ),
     sites=NO_FALL_DAMAGE_SITES,
     apply=apply_no_fall_damage_patch,
     default_on=False,
     included_in_randomizer_qol=False,
     category="player",
-    tags=("cheat", "movement", "broken"),
-))
+    tags=("cheat", "movement", "retired"),
+)
+# Not registered — pack is retired.  Keep _FEATURE_SPEC defined so
+# tests covering spec shape / byte landings still work.
+FEATURE = _FEATURE_SPEC
 
 
 __all__ = [

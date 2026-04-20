@@ -99,7 +99,7 @@ from __future__ import annotations
 
 import struct
 
-from azurik_mod.patching.registry import Feature, register_feature
+from azurik_mod.patching.registry import Feature
 from azurik_mod.patching.spec import ParametricPatch
 
 
@@ -449,30 +449,28 @@ def _custom_apply(
     )
 
 
-FEATURE = register_feature(Feature(
+_FEATURE_SPEC = Feature(
     name="wing_flap_count",
     description=(
-        "[BROKEN — prefer the config editor] Installs a 47-byte "
-        "dispatch shim at the flap-count read site inside "
-        "FUN_00089300 to override per-air-power-level flap "
-        "counts.  User testing on 2026-04 reports no observable "
-        "effect in-game despite the shim applying cleanly; likely "
-        "there's an animation-driven re-check we haven't found "
-        "yet.  Workaround: open the config editor → "
-        "`armor_properties` → `Flaps` column and edit the value "
-        "for each armor row directly (fire1..3 / water1..3 / "
-        "air1..3 / earth1..3).  The game reads that column fresh "
-        "each flap so your change takes effect immediately."
+        "[RETIRED] 47-byte dispatch shim that overrode "
+        "per-air-power-level flap counts inside FUN_00089300. "
+        "Shim applies cleanly but the game re-reads the count "
+        "through a path we haven't traced.  Workaround: edit "
+        "config.xbr → `armor_properties` → `Flaps` column per "
+        "armor row; the game reads it fresh each flap."
     ),
     sites=WING_FLAP_COUNT_SITES,
     apply=lambda xbe_data: None,   # no-op; custom_apply is used
     default_on=False,
     included_in_randomizer_qol=False,
     category="player",
-    tags=("cheat", "movement", "air-power", "broken"),
+    tags=("cheat", "movement", "air-power", "retired"),
     dynamic_whitelist_from_xbe=_wing_flap_count_dynamic_whitelist,
     custom_apply=_custom_apply,
-))
+)
+# Not registered — pack is retired.  Keep spec defined so tests
+# covering byte landings still work.
+FEATURE = _FEATURE_SPEC
 
 
 __all__ = [

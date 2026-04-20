@@ -42,7 +42,7 @@ register_category(Category(
 | Pack                 | Sites | Default-on | Category       | Tags          | Folder |
 |----------------------|-------|------------|----------------|---------------|--------|
 | `fps_unlock`         | 50    | no         | `performance`  | fps           | [azurik_mod/patches/fps_unlock/](../azurik_mod/patches/fps_unlock/) |
-| `player_physics`     | 10    | no         | `player`       | physics       | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
+| `player_physics`     | 7     | no         | `player`       | physics       | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
 | `qol_skip_logo`      | 1     | no         | `boot`         | c-shim        | [azurik_mod/patches/qol_skip_logo/](../azurik_mod/patches/qol_skip_logo/) |
 | `qol_gem_popups`     | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_gem_popups/](../azurik_mod/patches/qol_gem_popups/) |
 | `qol_other_popups`   | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_other_popups/](../azurik_mod/patches/qol_other_popups/) |
@@ -53,9 +53,9 @@ register_category(Category(
 | `rand_gems`          | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_barriers`      | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_connections`   | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
-| `no_fall_damage`     | 2     | no         | `player`       | cheat, movement | [azurik_mod/patches/no_fall_damage/](../azurik_mod/patches/no_fall_damage/) |
-| `infinite_fuel`      | 1     | no         | `player`       | cheat, powers | [azurik_mod/patches/infinite_fuel/](../azurik_mod/patches/infinite_fuel/) |
-| `wing_flap_count`    | 1+3   | no         | `player`       | cheat, movement, air-power | [azurik_mod/patches/wing_flap_count/](../azurik_mod/patches/wing_flap_count/) |
+| `no_fall_damage`     | 2     | no         | *retired*      | cheat, retired | [azurik_mod/patches/no_fall_damage/](../azurik_mod/patches/no_fall_damage/) |
+| `infinite_fuel`      | 2     | no         | *retired*      | cheat, retired | [azurik_mod/patches/infinite_fuel/](../azurik_mod/patches/infinite_fuel/) |
+| `wing_flap_count`    | 1+3   | no         | *retired*      | cheat, retired | [azurik_mod/patches/wing_flap_count/](../azurik_mod/patches/wing_flap_count/) |
 
 ---
 
@@ -347,14 +347,14 @@ deprecated aliases for `--player-roll-scale` / `--roll-speed`.
 
 ### GUI
 
-The Patches page renders 10 `ParametricSlider` widgets under the `player_physics` section (gravity, walk, climb, swim, jump, air-control, flap-height, flap-below-peak, flap-at-peak, slope-slide).  Slider values live on `AppState.pack_params["player_physics"]` and are forwarded to `cmd_randomize_full` / `cmd_apply_physics` by `gui/backend.run_randomizer`.  Sliders support typing values beyond the min/max bounds in the text box (with a `[!]` badge) for expert tuning, and each carries a long-form description rendered under the label.
+The Patches page renders 7 working `ParametricSlider` widgets under `player_physics`: `gravity`, `walk_speed_scale`, `swim_speed_scale`, `jump_speed_scale`, `air_control_scale`, `flap_height_scale` (1st flap), `flap_below_peak_scale` (2nd+ flaps when >6m below peak).  Slider values live on `AppState.pack_params["player_physics"]` and carry a long-form description rendered under the label; sliders accept out-of-range values via the text box for expert tuning.
 
-`roll_speed_scale` was retired in late April 2026 — the WHITE-button boost FMUL does scale the shared `magnitude` field, but the roll animation drives position via animation root motion that doesn't consume `magnitude`, so the slider had no observable in-game effect.  The ParametricPatch remains defined for back-compat but is absent from `PLAYER_PHYSICS_SITES`; see `docs/LEARNINGS.md` § "Roll speed is animation-root-motion".
+**Retired sliders** (kept as module symbols for back-compat + tests, no longer surfaced): `roll_speed_scale`, `climb_speed_scale`, `slope_slide_speed_scale`, `flap_at_peak_scale`.  All four have byte patches that land cleanly but produce no observable in-game effect — the actions they target are driven by animation root motion or engine-internal state-derived velocity that byte rewrites can't reach.  See `docs/LEARNINGS.md` § "Retired physics patches" for root-cause analysis + shim-level workaround sketches.
 
-The wing-flap controls are split across three sliders:
-- `flap_height_scale` — scales the FIRST flap's v0 (VA 0x893AE FLD rewrite).
-- `flap_below_peak_scale` (née `flap_subsequent_scale`) — scales the 0.5-halving factor for 2nd+ flaps more than 6m below peak (VA 0x893DD FMUL rewrite).
-- `flap_at_peak_scale` — binary toggle (any value != 1.0 enables) that rewrites the 2-byte `FLD ST(1)` at VA 0x8939F to `FLD ST(0)`, collapsing the `min(remaining, flap_height)` cap to `flap_height` always.  Gives full-strength subsequent flaps near peak without affecting the below-6m halving check.
+**Retired packs** (same reason, same recourse — use the config editor): `no_fall_damage`, `infinite_fuel`, `wing_flap_count`.  Concrete workarounds:
+- **No fall damage** → `config.xbr` / `damage` section: raise fall-height thresholds.  Or `critters_damage` → bump player row's `hitPoints`.
+- **Infinite fuel** → `config.xbr` / `armor_properties`: set `fuel_max` to a large number; or `attacks_anims`: zero every `Fuel multiplier`.
+- **Wing-flap count** → `config.xbr` / `armor_properties`: edit the `Flaps` column per armor row (fire1..3 / water1..3 / air1..3 / earth1..3) — read fresh each flap so changes land immediately.
 
 ### Diagnostics
 
