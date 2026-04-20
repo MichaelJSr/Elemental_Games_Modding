@@ -8,6 +8,189 @@ from pathlib import Path
 from typing import Callable
 
 
+# ---------------------------------------------------------------------------
+# Tooltip — lightweight hover popup
+# ---------------------------------------------------------------------------
+#
+# Tkinter has no built-in tooltip widget.  This small helper attaches a
+# hover-reveal popup to any widget — bound to the ``<Enter>`` and
+# ``<Leave>`` events of the widget itself.  We use it to move long
+# slider / pack / category descriptions out of the always-visible
+# layout and into an on-demand popup attached to a small ``ⓘ`` glyph.
+#
+# The ``hide_delay_ms`` keeps the popup visible briefly after the
+# cursor leaves the trigger widget so users can move into the popup
+# without it disappearing mid-read.  Text is wrapped at the given
+# ``wraplength`` to keep long descriptions readable.
+
+_TOOLTIP_BG = "#1f1f1f"
+_TOOLTIP_FG = "#e5e5e5"
+_TOOLTIP_HIDE_DELAY_MS = 80  # grace period after <Leave>
+
+
+class Tooltip:
+    """Hover-reveal tooltip bound to ``widget``.
+
+    Usage::
+
+        info = ttk.Label(parent, text="\u24d8", cursor="question_arrow")
+        info.pack(...)
+        Tooltip(info, text="The long description to show on hover.")
+
+    The tooltip is a top-level window containing a single
+    word-wrapped label.  It positions itself below-right of the
+    trigger widget's bounding box.  Survives the trigger widget
+    being destroyed (the popup cleans up in that case too).
+
+    Attributes:
+        widget:       the trigger widget.
+        text:         the tooltip's current text.  Mutate via
+                      :meth:`set_text` so the popup re-renders if
+                      it's open.
+        wraplength:   pixel width at which lines wrap (default
+                      360 — roughly 45-55 characters per line).
+    """
+
+    def __init__(
+        self,
+        widget: tk.Widget,
+        text: str,
+        *,
+        wraplength: int = 360,
+        delay_ms: int = 250,
+    ) -> None:
+        self.widget = widget
+        self._text = text
+        self.wraplength = wraplength
+        self.delay_ms = delay_ms
+        self._tip: tk.Toplevel | None = None
+        self._show_after: str | None = None
+        self._hide_after: str | None = None
+        widget.bind("<Enter>", self._schedule_show, add="+")
+        widget.bind("<Leave>", self._schedule_hide, add="+")
+        widget.bind("<ButtonPress>", self._schedule_hide, add="+")
+        widget.bind("<Destroy>", self._on_destroy, add="+")
+
+    # ---- Public API ----
+
+    def set_text(self, text: str) -> None:
+        """Update the tooltip text.  Re-renders if currently open."""
+        self._text = text
+        if self._tip is not None:
+            for child in self._tip.winfo_children():
+                child.destroy()
+            self._populate(self._tip)
+
+    # ---- Scheduling ----
+
+    def _schedule_show(self, _event=None) -> None:
+        self._cancel_hide()
+        if self._tip is not None or not self._text.strip():
+            return
+        if self._show_after is not None:
+            self.widget.after_cancel(self._show_after)
+        self._show_after = self.widget.after(self.delay_ms, self._show)
+
+    def _schedule_hide(self, _event=None) -> None:
+        if self._show_after is not None:
+            self.widget.after_cancel(self._show_after)
+            self._show_after = None
+        if self._hide_after is not None:
+            return
+        self._hide_after = self.widget.after(
+            _TOOLTIP_HIDE_DELAY_MS, self._hide)
+
+    def _cancel_hide(self) -> None:
+        if self._hide_after is not None:
+            self.widget.after_cancel(self._hide_after)
+            self._hide_after = None
+
+    # ---- Window lifecycle ----
+
+    def _show(self) -> None:
+        self._show_after = None
+        if self._tip is not None:
+            return
+        try:
+            # Anchor: bottom-right of the trigger widget, offset a bit
+            # so it doesn't overlap the cursor's default position.
+            x = self.widget.winfo_rootx() + self.widget.winfo_width() - 8
+            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+        except tk.TclError:
+            # Widget destroyed between Enter and the scheduled _show.
+            return
+        self._tip = tk.Toplevel(self.widget)
+        self._tip.wm_overrideredirect(True)
+        self._tip.wm_geometry(f"+{x}+{y}")
+        try:
+            self._tip.wm_attributes("-topmost", True)
+        except tk.TclError:
+            pass
+        self._populate(self._tip)
+
+    def _populate(self, parent: tk.Toplevel) -> None:
+        frame = tk.Frame(
+            parent,
+            background=_TOOLTIP_BG,
+            highlightthickness=1,
+            highlightbackground="#3a3a3a",
+            bd=0,
+        )
+        frame.pack()
+        tk.Label(
+            frame,
+            text=self._text.strip(),
+            background=_TOOLTIP_BG,
+            foreground=_TOOLTIP_FG,
+            wraplength=self.wraplength,
+            justify=tk.LEFT,
+            padx=8,
+            pady=6,
+        ).pack()
+
+    def _hide(self) -> None:
+        self._hide_after = None
+        if self._tip is not None:
+            try:
+                self._tip.destroy()
+            except tk.TclError:
+                pass
+            self._tip = None
+
+    def _on_destroy(self, _event=None) -> None:
+        self._hide()
+
+
+def attach_info_tooltip(
+    parent: tk.Widget,
+    text: str,
+    *,
+    glyph: str = "\u24d8",  # ⓘ — circled Latin small letter i
+) -> tk.Widget | None:
+    """Return a small ``ⓘ`` label packed into ``parent`` with a
+    hover tooltip showing ``text``.
+
+    Returns ``None`` when ``text`` is empty/whitespace — caller
+    can skip packing any info-button row in that case.  The
+    returned label is unpacked (caller decides layout) — use
+    ``.pack()`` / ``.grid()`` as usual.
+
+    Dedicated helper so every tab / pack / slider uses the
+    identical ⓘ glyph + foreground colour + cursor + tooltip
+    appearance without hand-wiring each call site.
+    """
+    if not text or not text.strip():
+        return None
+    lbl = tk.Label(
+        parent,
+        text=glyph,
+        foreground="#6fb3ff",
+        cursor="question_arrow",
+    )
+    Tooltip(lbl, text)
+    return lbl
+
+
 class ISOFilePicker(ttk.Frame):
     """File picker row: label + path entry + Browse button."""
 
@@ -618,11 +801,22 @@ class ParametricSlider(ttk.Frame):
         self._entry_var = tk.StringVar(value=f"{self._exact_value:g}")
         self._building = False  # suppress re-entrant callbacks
 
-        # Row 1: label + current value / default + range hint.
+        # Row 1: label + info icon + current value + range hint.
+        # The description — previously rendered as a multi-line
+        # wrapped paragraph under the slider — now lives in a
+        # hover tooltip attached to a small ⓘ glyph next to the
+        # bold label, so the default view stays compact.  Users
+        # who want the full context hover the ⓘ.
         head = ttk.Frame(self)
         head.pack(fill=tk.X)
         ttk.Label(head, text=patch.label, font=("", 10, "bold")).pack(
             side=tk.LEFT)
+
+        description = getattr(patch, "description", "") or ""
+        info_lbl = attach_info_tooltip(head, description)
+        if info_lbl is not None:
+            info_lbl.pack(side=tk.LEFT, padx=(4, 0))
+
         self._value_lbl = ttk.Label(
             head,
             text=self._header_text(self._exact_value),
@@ -634,18 +828,6 @@ class ParametricSlider(ttk.Frame):
                   f"{patch.slider_max:g}  (entry: unrestricted)"),
             foreground="gray",
         ).pack(side=tk.RIGHT)
-
-        # Optional long-form description (set on the ParametricPatch).
-        description = getattr(patch, "description", "") or ""
-        if description.strip():
-            desc = ttk.Label(
-                self,
-                text=description.strip(),
-                foreground="gray",
-                wraplength=560,
-                justify=tk.LEFT,
-            )
-            desc.pack(fill=tk.X, pady=(1, 2))
 
         # Row 2: slider + numeric entry + reset
         row = ttk.Frame(self)

@@ -2,6 +2,68 @@
 
 ## Unreleased
 
+### GUI: info-tooltip system + concise descriptions (round 11.9)
+
+User reported that slider descriptions were crowding the
+Patches page.  Addressed both sides:
+
+**Infrastructure** — `Tooltip` helper class +
+`attach_info_tooltip()` factory in `gui/widgets.py`:
+
+- Hover-reveal popup bound to any `tk.Widget` via
+  `<Enter>` / `<Leave>` events.
+- Configurable show delay + grace-period hide so the cursor
+  can move from trigger into the tooltip without the popup
+  closing mid-read.
+- Survives the trigger widget's destruction (no leaked
+  Toplevels).
+- `attach_info_tooltip(parent, text)` returns a styled `ⓘ`
+  glyph Label with tooltip pre-wired, or `None` when `text`
+  is empty so the caller can skip packing it.
+
+**UI migration**:
+
+- `ParametricSlider` — the multi-line wrapped description
+  that used to render directly under the bold label is now
+  an `ⓘ` glyph next to the label; hover shows the tooltip.
+  Default view stays compact; users opt in to the detail.
+
+**Content pass** — tightened every long description while
+keeping the load-bearing info:
+
+| Slider / pack | Before | After |
+|---|---|---|
+| `wing_flap_ceiling_scale` (slider) | 346 chars | 121 chars |
+| `flap_descent_fuel_cost_scale` (slider) | 281 chars | 157 chars |
+| `flap_at_peak_scale` (slider) | 325 chars | 191 chars |
+| `roll_speed_scale` (slider) | 311 chars | 162 chars |
+| `climb_speed_scale` (slider) | 253 chars | 158 chars |
+| `slope_slide_speed_scale` (slider) | 203 chars | 113 chars |
+| `flap_at_peak` (pack) | 338 chars | 113 chars |
+| `root_motion_roll` (pack) | 316 chars | 157 chars |
+| `player_physics` (pack) | 261 chars | 135 chars |
+| `qol_skip_save_signature` (pack) | 246 chars | 150 chars |
+| `root_motion_climb` (pack) | 240 chars | 119 chars |
+
+Every slider description now fits on 1-2 lines in the
+tooltip popup; every pack description fits on 1-2 lines in
+the inline pack-row layout at `wraplength=620`.
+
+**Tests** (`tests/test_gui_tooltip.py`, 9 new):
+
+- `Tooltip` import-surface stability.
+- `attach_info_tooltip("")` returns `None`; non-empty returns
+  a Label widget with the ⓘ glyph.
+- Popup lifecycle: shows on `_show()`, hides on `_hide()`;
+  `set_text` re-renders an open popup; destroying the trigger
+  widget cleans up the popup.
+- `ParametricSlider` contract: when a description is set,
+  renders the ⓘ glyph AND does NOT render the full
+  description as an inline standalone label.  When empty,
+  renders neither.
+
+904 tests pass total (+9).
+
 ### Restored 4 shim-backed physics packs (round 11.8)
 
 User-requested restoration of the four shim packs deleted in

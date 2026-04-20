@@ -136,11 +136,9 @@ def apply_skip_save_signature_patch(xbe_data: bytearray) -> None:
 FEATURE = register_feature(Feature(
     name="qol_skip_save_signature",
     description=(
-        "Bypasses the HMAC-SHA1 signature check when loading save "
-        "files — lets the ``save edit`` CLI's output load without "
-        "re-signing, and lets saves move freely between consoles. "
-        "Write-side signing is unchanged so patched-XBE saves "
-        "still work on vanilla."
+        "Bypasses the HMAC-SHA1 save-file signature check on "
+        "load.  Lets edited / cross-console saves load without "
+        "re-signing; write-side signing is unchanged."
     ),
     sites=SKIP_SAVE_SIG_SITES,
     apply=apply_skip_save_signature_patch,

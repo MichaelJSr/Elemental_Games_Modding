@@ -89,11 +89,9 @@ CLIMB_SPEED_SHIM_SLIDER = ParametricPatch(
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
     description=(
-        "Scales the player's per-frame climbing translation.  "
-        "Climb motion is animation-root-motion driven — the "
-        "retired byte-patch of the 2.0 constant at 0x1980E4 "
-        "didn't cover it.  This shim intercepts the anim-apply "
-        "CALL at VA 0x883FF inside player_climb_tick."
+        "Scales per-frame climbing distance.  Climb motion is "
+        "animation-root-motion driven; this shim post-scales "
+        "the translation deltas from inside player_climb_tick."
     ),
 )
 
@@ -223,11 +221,9 @@ def _custom_apply(
 FEATURE = register_feature(Feature(
     name="root_motion_climb",
     description=(
-        "Scales the player's per-frame climbing translation.  "
-        "Shim at VA 0x883FF inside player_climb_tick intercepts "
-        "the anim-apply CALL and post-scales translation deltas "
-        "on param_1 (offsets 0x6C..0x71).  Unconditional — "
-        "climbing is always state 1."
+        "Scales per-frame climbing distance.  Climb motion is "
+        "animation-root-motion driven (constant overwrites don't "
+        "reach it)."
     ),
     sites=CLIMB_SPEED_SITES,
     apply=lambda xbe_data: None,

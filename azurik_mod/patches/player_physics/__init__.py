@@ -318,8 +318,8 @@ FLAP_HEIGHT_SCALE = ParametricPatch(
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
     description=(
-        "Scales the FIRST wing flap's peak height (2x = ~2x "
-        "higher). Subsequent flaps use the other flap slider."
+        "Scales the 1st wing flap's peak height.  2x ≈ 2x "
+        "higher.  2nd+ flaps use the other flap slider."
     ),
 )
 
@@ -448,13 +448,9 @@ WING_FLAP_CEILING_SCALE = ParametricPatch(
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
     description=(
-        "Multiplies the flap_height term in the peak_z latch "
-        "written by player_jump_init (shim at VA 0x89154).  The "
-        "wing-flap hard ceiling becomes (K+1)*flap_height above "
-        "the ground the player jumped from, versus vanilla's "
-        "2*flap_height (K=1).  Concretely: K=1 vanilla, K=2 "
-        "~1.5x headroom, K=5 ~3x, K=10 ~5.5x.  Orthogonal to "
-        "the per-flap impulse sliders."
+        "Raises the wing-flap altitude ceiling.  K=1 vanilla "
+        "(2*flap_height envelope); K=2 ≈ 1.5x headroom, "
+        "K=5 ≈ 3x, K=10 ≈ 5.5x."
     ),
 )
 
@@ -490,12 +486,9 @@ FLAP_DESCENT_FUEL_COST_SCALE = ParametricPatch(
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
     description=(
-        "Scales the 100.0 fuel cost consumed by the descent-"
-        "penalty branch in wing_flap (VA 0x893D4).  Vanilla "
-        "drains the entire air-power gauge in one flap when the "
-        "player has fallen > 6m below their peak — pair a high "
-        "wing_flap_ceiling_scale with this at 0.0 so descent "
-        "flaps stay usable."
+        "Scales the 100 fuel drain that fires on flaps taken "
+        ">6m below peak.  0.0 disables the drain — pair with "
+        "wing_flap_ceiling_scale so descent flaps stay usable."
     ),
 )
 
@@ -1784,11 +1777,9 @@ def _custom_apply(
 FEATURE = register_feature(Feature(
     name="player_physics",
     description=(
-        "Scales world gravity and every player movement / speed "
-        "parameter we've RE'd: walking, rolling (ground state), "
-        "climbing, swimming, jumping, horizontal air-control "
-        "speed, and wing-flap (Air-power double-jump) impulse.  "
-        "Gravity is global; the rest are player-only."
+        "Scales world gravity and player movement: walk, swim, "
+        "jump, air-control, and wing-flap (impulse, altitude "
+        "ceiling, descent fuel drain)."
     ),
     sites=PLAYER_PHYSICS_SITES,
     apply=_apply_defaults,

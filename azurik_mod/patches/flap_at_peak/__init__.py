@@ -153,12 +153,10 @@ FLAP_AT_PEAK_SHIM_SLIDER = ParametricPatch(
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
     description=(
-        "Workaround for the vanilla 'no altitude above first-flap "
-        "height' ceiling.  Guarantees every 2nd+ flap reaches at "
-        "least sqrt(2g*flap_height) * scale.  1.0 = every flap "
-        "matches the 1st-flap v0; 2.0 = 2x that.  Installed as a "
-        "C-shim trampoline at VA 0x89409 — NOT a byte patch, "
-        "because the vanilla peak-z cap is emergent design."
+        "Enforces a v0 floor on every flap so flaps near peak "
+        "still give lift.  1.0 = floor at 1st-flap v0; 2.0 = "
+        "twice that.  Largely superseded by "
+        "wing_flap_ceiling_scale, but composes orthogonally."
     ),
 )
 
@@ -302,13 +300,9 @@ def _custom_apply(
 FEATURE = register_feature(Feature(
     name="flap_at_peak",
     description=(
-        "Wing-flap subsequent-flap height — bypasses the vanilla "
-        "no-altitude-above-first-flap-height ceiling via a "
-        "hand-assembled shim trampoline at VA 0x89409.  "
-        "Guarantees every 2nd+ flap reaches at least "
-        "sqrt(2g * flap_height) * scale.  The cap this bypasses "
-        "is INTENTIONAL vanilla design, not a bug — see "
-        "docs/LEARNINGS.md § 'Wing-flap v0 cap'."
+        "Enforces a v0 floor on every wing flap so flaps near "
+        "peak still give lift.  Companion to "
+        "wing_flap_ceiling_scale."
     ),
     sites=FLAP_AT_PEAK_SITES,
     apply=lambda xbe_data: None,   # no-op; custom_apply is used

@@ -119,12 +119,10 @@ ROLL_SPEED_SHIM_SLIDER = ParametricPatch(
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
     description=(
-        "Scales the player's roll distance per frame.  Rolls are "
-        "driven by animation root motion (the WHITE/BACK-triggered "
-        "'roll_forward' animation), which vanilla's 3x FMUL "
-        "doesn't reach.  This shim intercepts the animation-apply "
-        "CALL at VA 0x866D9 and post-scales the translation "
-        "deltas only while flags & 0x40 is set."
+        "Scales roll distance per frame.  Rolls are animation-"
+        "root-motion driven; this shim post-scales the "
+        "translation deltas only while the WHITE/BACK roll "
+        "flag is held."
     ),
 )
 
@@ -317,12 +315,9 @@ def _custom_apply(
 FEATURE = register_feature(Feature(
     name="root_motion_roll",
     description=(
-        "Scales the player's roll distance per frame.  Rolls are "
-        "animation-root-motion driven (characters/garret4/"
-        "roll_forward); this shim intercepts the anim-apply CALL "
-        "at VA 0x866D9 and post-scales the translation deltas "
-        "ONLY while PlayerInputState.flags & 0x40 is set "
-        "(WHITE/BACK roll gate).  Normal walking stays vanilla."
+        "Scales WHITE/BACK-triggered roll distance.  Rolls are "
+        "animation-root-motion driven; vanilla's 3x FMUL on "
+        "`magnitude` doesn't reach them.  Walk stays vanilla."
     ),
     sites=ROLL_SPEED_SITES,
     apply=lambda xbe_data: None,

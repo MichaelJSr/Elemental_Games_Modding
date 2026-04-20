@@ -104,10 +104,9 @@ SLOPE_SLIDE_SHIM_SLIDER = ParametricPatch(
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],
     description=(
-        "Scales the state-4 fast-slide velocity (runtime-computed "
-        "multiplier at 0x003902A0).  1.0 = vanilla.  Installed as "
-        "a 17-byte shim at VA 0x8A095 — the state-3 slow-slide "
-        "constant at 0x1AAB68 stays vanilla."
+        "Scales state-4 fast-slide velocity (steep-terrain "
+        "auto-slide).  1.0 = vanilla.  State-3 slow-slide is "
+        "unaffected."
     ),
 )
 
