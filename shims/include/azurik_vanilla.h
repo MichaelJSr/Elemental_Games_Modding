@@ -143,6 +143,22 @@ __attribute__((stdcall))
 int load_asset_by_fourcc(int fourcc, int flags);
 
 
+/* Boot-time armor-properties loader.  Populates DAT_0038C4D4
+ * (armor slot struct array) from the `config/armor_properties`
+ * asset (which resolves to the keyed-table at file offset 0x3000
+ * in config.xbr, labelled `armor_properties_real` by
+ * azurik_mod.keyed_tables) and DAT_0038C4AC (armor hit-fx
+ * slot array) from `config/armor_hit_fx`.
+ *
+ * The Flaps value (cell type double) is read via
+ * config_cell_value, converted to int64 via a FPU FISTP helper
+ * at 0x000F5A40, and stored at struct offset 0x38
+ * (puVar1[0xE]).  Runtime reads at VA 0x89321 inside wing_flap.
+ *
+ * Vanilla VA: 0x0003C700  (mangled: _load_armor_properties_config) */
+void load_armor_properties_config(void);
+
+
 /* ------------------------------------------------------------------
  * Save-slot signature entry points (April 2026 RE pass)
  * ------------------------------------------------------------------ */

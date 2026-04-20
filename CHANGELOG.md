@@ -2,6 +2,76 @@
 
 ## Unreleased
 
+### Cleanup pass: deprecations + UI simplification (round 11.13)
+
+**Slider range**: `flap_entry_fuel_cost_scale` widened from
+`[-0.05, 0.05] step 0.001` to `[-5, 5] step 0.1` — the
+threshold math tolerates this wider window for the per-flap
+1.0f entry cost (unlike the punishing 100.0f descent penalty).
+
+**Slider labels** — consistent "Wing-flap: …" prefix for the 5
+working flap sliders:
+
+| Old label | New label |
+|---|---|
+| Wing-flap height (1st flap) | Wing-flap: 1st flap height |
+| Wing-flap height (2nd+ flaps) | Wing-flap: far-descent recovery |
+| Wing-flap altitude ceiling | Wing-flap: altitude ceiling |
+| Wing-flap descent fuel cost | Wing-flap: descent penalty fuel |
+| Wing-flap per-flap fuel cost | Wing-flap: fuel cost per flap |
+
+**Deprecations** (user testing confirmed no in-game effect):
+
+- `animation_root_motion_scale` — vtable hook at 0x43066
+  installs but scaling deltas before the vtable call produces
+  no visible movement change.  `deprecated=True`, hidden from
+  GUI, retained as a shim template.
+- `slope_slide_speed` — state-3 constant overwrite + state-4
+  shim at 0x8A095 install but don't affect observed slide
+  speed.  `deprecated=True`, retained as RE scaffolding.
+
+**UI simplification**:
+
+- Removed the **Config Viewer** page — it was a read-only JSON
+  dump of registry data that the Entity Editor already covers.
+- Removed the **⚡ Apply to ISO** button from the Entity Editor
+  — the Build tab's `_merge_config_edits` plumbing already
+  merges pending Entity Editor edits into the
+  `--config-mod` blob automatically.
+
+**Entity Editor air_shield_3 Flaps investigation**: Ghidra
+trace of `load_armor_properties_config` (FUN_0003C700)
+confirms the engine loads `config/armor_properties` which
+resolves to the keyed-table at config.xbr offset 0x3000 —
+the same table the Entity Editor writes to under the label
+`armor_properties_real`.  Cell double at offset+8 is read
+via `config_cell_value`, FISTP-converted to int64, stored at
+per-armor-slot `[offset 0x38]`.  The apply pipeline IS
+correct (verified by `test_entity_editor_keyed_flaps.py`).
+Users can verify edits landed via:
+
+    azurik-mod dump -i built.iso -s armor_properties_real -e air_shield_3
+
+The `dump` CLI was extended to fall back to keyed-table
+parsing for sections that aren't in `config_registry.json`.
+
+**Sync**: `load_armor_properties_config` (VA 0x3C700) registered
+in `vanilla_symbols.py` + `azurik_vanilla.h`.  Ghidra plate
+comments added at 0x3C700 (loader), 0x43066 (deprecated
+vtable hook), 0x8A095 (deprecated slope-slide shim).
+
+**Dead-code cleanup**:
+
+- Dropped top-level `verify_patch_spec` import from
+  `randomizer/commands.py` (it was duplicated inside
+  `cmd_verify_patches`).
+- Dropped unused `apply_player_speed` alias import.
+- `no_fall_damage` pack file was already deleted in the
+  round-10 purge; user manually confirmed the folder is
+  gone.
+
+910 tests pass.
+
 ### Docs + anchor sync pass (round 11.12)
 
 Follow-up housekeeping on top of round 11.11:

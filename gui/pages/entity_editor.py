@@ -44,10 +44,12 @@ NON_GAMEPLAY_ENTITIES = {
 class EntityEditorTab(Page):
     title = "Entity Editor"
     description = ("Browse, edit, and randomize critter / player / damage "
-                   "config values.  Load values from an ISO to populate "
-                   "the grid, tweak individual properties or roll a "
-                   "randomized pass, then Export Mod JSON for the "
-                   "`--config-mod` randomize-full flag.")
+                   "config values.  Load values from an ISO, tweak "
+                   "properties, then run a build — pending edits are "
+                   "merged into the Build tab's --config-mod blob "
+                   "automatically (no explicit 'Apply' click needed).  "
+                   "Verify a built ISO kept your edits with: "
+                   "`azurik-mod dump -i built.iso -s armor_properties_real -e air_shield_3`")
     scrollable_body = False  # internal canvas handles scrolling
 
     def _build(self):
@@ -119,14 +121,6 @@ class EntityEditorTab(Page):
                    command=self._import_mod).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(btn_frame, text="Export Mod JSON",
                    command=self._export_mod).pack(side=tk.LEFT, padx=(0, 5))
-        # Direct "Apply to ISO" — bypasses the Build page so users
-        # can see the effect of their edits immediately.  Writes a
-        # new ISO next to the input file with ``_edited.iso``
-        # appended to the stem.  Only runs the config.xbr patches;
-        # no pack toggles / sliders / randomizer pools.
-        ttk.Button(
-            btn_frame, text="\u26A1 Apply to ISO",
-            command=self._apply_to_iso).pack(side=tk.LEFT, padx=(0, 5))
         self._edit_count_label = ttk.Label(
             btn_frame, text="", font=("", 10, "bold"),
             foreground="#2a6")
@@ -1007,104 +1001,3 @@ class EntityEditorTab(Page):
 
         total = sum(len(p) for e in self._edits.values() for p in e.values())
         self._status.config(text=f"Exported {total} edits to {Path(path).name}")
-
-    def _apply_to_iso(self):
-        """Apply pending edits directly to a user-chosen ISO,
-        bypassing the Build page.
-
-        Round 11.11 addition — users reported the Build-page flow
-        wasn't persisting Entity Editor edits (the
-        ``_merge_config_edits`` plumbing IS correct per the
-        regression tests, but the interactive flow confused
-        users who expected an explicit 'Apply' action).  This
-        button gives a direct path: file-picker → config.xbr
-        round trip → output ISO.
-
-        The whole config-editor stack is shared: mod JSON →
-        ``cmd_apply_mod`` → same keyed-patch apply loop that
-        ``cmd_randomize_full`` uses.  If your edits don't take
-        effect through this button, the apply pipeline itself is
-        broken (not just a UI wiring issue) and we should open a
-        bug report with the ISO + mod JSON both attached.
-        """
-        if not self._edits:
-            messagebox.showinfo(
-                "No Edits", "No property edits pending.")
-            return
-
-        # Pick input + output ISO.
-        iso_path = self.app.get_iso_path()
-        if not iso_path or not iso_path.exists():
-            messagebox.showerror(
-                "No ISO",
-                "Select a game ISO in the main File Picker "
-                "first.  The Apply button writes edits to a "
-                "copy of that ISO.")
-            return
-
-        default_out = iso_path.with_name(
-            iso_path.stem + "_edited" + iso_path.suffix)
-        out = filedialog.asksaveasfilename(
-            title="Write patched ISO",
-            defaultextension=iso_path.suffix,
-            filetypes=[("Xbox ISO", f"*{iso_path.suffix}"),
-                       ("All files", "*.*")],
-            initialfile=default_out.name,
-            initialdir=str(default_out.parent),
-        )
-        if not out:
-            return
-
-        # Reuse get_pending_mod to build the mod JSON, then drive
-        # cmd_apply_mod directly.  Runs in-process; the UI is
-        # blocked for the duration (typically 5-15 sec for a
-        # full ISO rebuild).
-        mod = self.get_pending_mod()
-        if mod is None:
-            messagebox.showinfo(
-                "No Edits", "No property edits pending.")
-            return
-
-        import argparse, tempfile, traceback
-        self._status.config(
-            text=f"Applying {self.get_edit_count()} edits to "
-                 f"{Path(out).name}...")
-        self.update_idletasks()
-
-        try:
-            with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".json", delete=False) as tf:
-                json.dump(mod, tf)
-                mod_path = tf.name
-            # cmd_patch's argparse.Namespace expects ``mod`` to be
-            # a list of mod-file paths (it supports stacking
-            # multiple mods) — pass a single-entry list.
-            args = argparse.Namespace(
-                iso=str(iso_path),
-                output=str(out),
-                mod=[mod_path],
-            )
-            from azurik_mod.randomizer.commands import cmd_patch
-            cmd_patch(args)
-            self._status.config(
-                text=f"\u2713 Applied {self.get_edit_count()} "
-                     f"edits → {Path(out).name}")
-            messagebox.showinfo(
-                "Apply complete",
-                f"Wrote {Path(out).name} with "
-                f"{self.get_edit_count()} Entity Editor edit(s) "
-                f"baked in.  Launch this ISO in xemu to test.")
-        except SystemExit as exc:
-            self._status.config(
-                text=f"\u2717 Apply aborted (exit code {exc.code})")
-            messagebox.showerror(
-                "Apply failed",
-                f"cmd_patch aborted with exit code {exc.code}.  "
-                f"Check the app's stderr for the full output.")
-        except Exception as exc:  # noqa: BLE001
-            self._status.config(text=f"\u2717 Apply failed: {exc}")
-            messagebox.showerror(
-                "Apply failed",
-                f"Could not apply edits:\n\n{exc}\n\n"
-                f"Full traceback in the app's stderr.")
-            traceback.print_exc()

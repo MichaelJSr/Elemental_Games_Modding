@@ -1,4 +1,18 @@
-"""slope_slide_speed — scale the state-4 fast-slide velocity.
+"""slope_slide_speed — DEPRECATED (round 11.13).
+
+User testing confirmed neither the state-3 constant overwrite
+(VA 0x1AAB68, vanilla 2.0) nor the state-4 shim at VA 0x8A095
+produce any observable change to slope-slide speed in-game.
+The hook byte patterns install cleanly, so the failure mode is
+probably semantic: either the loaded velocity scalar is
+further transformed before position integration, or the actual
+slope-slide state machine doesn't reach these VAs often enough
+to matter.  Hidden from the GUI via ``deprecated=True``;
+retained as RE scaffolding for future investigation.
+
+### Background (pre-deprecation)
+
+Scale the state-4 fast-slide velocity.
 
 ## Why this is a shim, not a byte patch
 
@@ -278,18 +292,19 @@ def _custom_apply(
 FEATURE = register_feature(Feature(
     name="slope_slide_speed",
     description=(
-        "Scales auto-slide velocity on steep terrain — covers "
-        "both state-3 (slow slide, constant at 0x1AAB68) and "
-        "state-4 (fast slide, shim at VA 0x8A095)."
+        "[DEPRECATED] State-3 constant overwrite + state-4 shim "
+        "at 0x8A095.  User testing round 11.13 confirmed no "
+        "observable effect."
     ),
     sites=SLOPE_SLIDE_SITES,
     apply=lambda xbe_data: None,
     default_on=False,
     included_in_randomizer_qol=False,
     category="player",
-    tags=("cheat", "movement", "c-shim"),
+    tags=("cheat", "movement", "c-shim", "deprecated"),
     dynamic_whitelist_from_xbe=_slope_slide_dynamic_whitelist,
     custom_apply=_custom_apply,
+    deprecated=True,
 ))
 
 

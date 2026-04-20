@@ -31,21 +31,20 @@ from azurik_mod.iso.xdvdfs import require_xdvdfs
 # populated before cmd_randomize_full walks it.  The import is the
 # POINT — nothing below references ``fps_unlock``, ``player_physics``
 # etc. directly for execution; ``apply_pack(pack, xbe, params)``
-# dispatches through the registry.  Keeping ``apply_player_physics``
-# + ``apply_player_speed`` around below for the ``apply-physics``
-# CLI shortcut which pre-dates the unified dispatcher.
+# dispatches through the registry.  ``apply_player_physics`` stays
+# as a direct import because ``cmd_apply_physics`` (the
+# ``apply-physics`` CLI shortcut) calls it eagerly before
+# dispatch setup.
 import azurik_mod.patches  # noqa: F401
-from azurik_mod.patches.player_physics import (
-    apply_player_physics,
-    apply_player_speed,
-)
+from azurik_mod.patches.player_physics import apply_player_physics
 from azurik_mod.patches.qol import (
     # QoL pack apply fns now flow through ``apply_pack`` — only
     # the player-character helper stays as a direct import because
     # it's not a pack, just a lightweight string-to-bytes rewrite.
     apply_player_character_patch,
 )
-from azurik_mod.patching import verify_patch_spec
+# ``verify_patch_spec`` / ``verify_parametric_patch`` / ``verify_trampoline_patch``
+# are only used from inside ``cmd_verify_patches`` below — imported lazily there.
 
 # Repo root — three levels up from this file
 # (azurik_mod/randomizer/commands.py -> <repo>).  Used as the
@@ -123,8 +122,33 @@ def cmd_dump(args):
     sections = registry.get("sections", {})
     section = sections.get(args.section)
     if not section:
-        print(f"ERROR: Section '{args.section}' not found.")
-        sys.exit(1)
+        # Fallback: try keyed tables (armor_properties_real,
+        # attacks_transitions, magic, etc.).  This is how users
+        # verify Entity Editor edits landed without needing a
+        # separate subcommand.
+        from azurik_mod.config import keyed_tables as ktp
+        config_path = _resolve_config_path(args)
+        if config_path is None:
+            print(f"ERROR: Section '{args.section}' not found.")
+            sys.exit(1)
+        tables = ktp.load_all_tables(
+            str(config_path), sections=[args.section])
+        if args.section not in tables:
+            print(f"ERROR: Section '{args.section}' not found.")
+            sys.exit(1)
+        t = tables[args.section]
+        ent_names = (
+            [args.entity] if args.entity else sorted(t.col_names))
+        for ent_name in ent_names:
+            props = t.get_entity(ent_name)
+            if not props:
+                print(f"  WARNING: Entity '{ent_name}' not found")
+                continue
+            print(f"\n  [{args.section}] {ent_name}")
+            for prop_name, (typ, val, addr) in props.items():
+                print(f"    {prop_name:<30} = {val!s:<15} "
+                      f"[{typ}]  @0x{addr:06X}")
+        return
 
     entities = section.get("entities", {})
     names = [args.entity] if args.entity else sorted(entities.keys())
@@ -142,6 +166,39 @@ def cmd_dump(args):
             val = read_value(data, offset, tf) if offset + 8 <= len(data) else "?"
             ts = {0: "unset", 1: "float", 2: "int"}.get(tf, f"?{tf}")
             print(f"    {prop_name:<30} = {format_value(val, tf):<15} [{ts}]  @0x{offset:06X}")
+
+
+def _resolve_config_path(args):
+    """Return a config.xbr path for ``cmd_dump``'s keyed-table
+    fallback, regardless of which ``--iso`` / ``--input`` flavour
+    the user passed.  Returns ``None`` if neither is usable."""
+    input_path = getattr(args, "input", None)
+    iso_path = getattr(args, "iso", None)
+    if input_path:
+        return Path(input_path)
+    if iso_path:
+        # ``read_config_data`` already extracted config.xbr to a
+        # temp dir if the input was an ISO; we need the same path
+        # here for the keyed-tables loader.  Rather than re-run
+        # xdvdfs, just check if the ISO already has config.xbr
+        # sitting alongside it (common for extracted-ISO dirs).
+        iso = Path(iso_path)
+        if iso.is_dir():
+            cand = iso / "gamedata" / "config.xbr"
+            if cand.exists():
+                return cand
+        # Otherwise, walk a temp extraction.  Users are expected
+        # to use --input for keyed-table dumps; --iso is slower.
+        import tempfile
+        from azurik_mod.iso.xdvdfs import require_xdvdfs, run_xdvdfs
+        xdvdfs = str(require_xdvdfs())
+        tmpdir = Path(tempfile.mkdtemp(prefix="azurik_dump_"))
+        run_xdvdfs(xdvdfs,
+                   ["unpack", str(iso), str(tmpdir / "game")])
+        cand = tmpdir / "game" / "gamedata" / "config.xbr"
+        if cand.exists():
+            return cand
+    return None
 
 
 def cmd_mod_template(args):

@@ -11,7 +11,6 @@ import sv_ttk
 from . import backend
 from .models import AppState, load_ui_prefs, save_ui_prefs
 from .pages.build import BuildPage
-from .pages.config_editor import ConfigEditorTab
 from .pages.entity_editor import EntityEditorTab
 from .pages.patches import PatchesPage
 from .pages.project import ProjectPage
@@ -25,7 +24,6 @@ _PAGE_SPECS: list[tuple[str, str]] = [
     ("randomize", "Randomize"),
     ("patches", "Patches"),
     ("entity_editor", "Entity Editor"),
-    ("config_editor", "Config Editor"),
     ("build", "Build & Logs"),
     ("settings", "Settings"),
 ]
@@ -101,7 +99,6 @@ class AzurikApp:
             "randomize": RandomizePage,
             "patches": PatchesPage,
             "entity_editor": EntityEditorTab,  # legacy tab class still fine
-            "config_editor": ConfigEditorTab,
             "build": BuildPage,
             "settings": SettingsPage,
         }.items():
@@ -114,7 +111,6 @@ class AzurikApp:
         self.tab_randomizer = self._pages["randomize"]
         self.tab_qol = self._pages["patches"]
         self.tab_entity = self._pages["entity_editor"]
-        self.tab_config = self._pages["config_editor"]
 
         # Show the first page.
         self.show_page("project")

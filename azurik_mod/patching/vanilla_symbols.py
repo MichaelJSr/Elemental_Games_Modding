@@ -241,6 +241,31 @@ register(VanillaSymbol(
 ))
 
 register(VanillaSymbol(
+    name="load_armor_properties_config",
+    va=0x0003C700,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "Boot-time loader that populates DAT_0038C4D4 (the "
+        "per-armor-slot struct array, 0x40 bytes per entry) from "
+        "``config/armor_properties`` and DAT_0038C4AC (armor "
+        "hit-fx slots, 0xC bytes per entry) from "
+        "``config/armor_hit_fx``.\n\n"
+        "Flaps path: reads the ``Flaps`` column as a ``double`` "
+        "via ``config_cell_value(...)``, converts to int64 via "
+        "``FUN_000f5a40`` (FPU FISTP), stores the lower 32 bits "
+        "at ``puVar1[0xE]`` (struct offset 0x38).\n\n"
+        "IMPORTANT: the asset ``config/armor_properties`` "
+        "resolves to the keyed-table at file offset 0x3000 in "
+        "config.xbr (NOT the TOC entry 1 at 0x4000).  The "
+        "azurik_mod keyed-tables parser labels that 15x19 grid "
+        "as 'armor_properties_real' to disambiguate from the "
+        "TOC's 'armor_properties' string (which is actually "
+        "attack-animation data, 16x24)."
+    ),
+))
+
+register(VanillaSymbol(
     name="load_asset_by_fourcc",
     va=0x000A67A0,
     calling_convention="stdcall",

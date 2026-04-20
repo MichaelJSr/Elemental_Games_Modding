@@ -338,7 +338,7 @@ AIR_CONTROL_SCALE = ParametricPatch(
 
 FLAP_HEIGHT_SCALE = ParametricPatch(
     name="flap_height_scale",
-    label="Wing-flap height (1st flap)",
+    label="Wing-flap: 1st flap height",
     va=0,
     size=0,
     original=b"",
@@ -357,7 +357,7 @@ FLAP_HEIGHT_SCALE = ParametricPatch(
 
 FLAP_BELOW_PEAK_SCALE = ParametricPatch(
     name="flap_below_peak_scale",
-    label="Wing-flap height (2nd+ flaps)",
+    label="Wing-flap: far-descent recovery",
     va=0,
     size=0,
     original=b"",
@@ -472,7 +472,7 @@ CLIMB_SPEED_SCALE = ParametricPatch(
 # K × flap_height at patch time).
 WING_FLAP_CEILING_SCALE = ParametricPatch(
     name="wing_flap_ceiling_scale",
-    label="Wing-flap altitude ceiling",
+    label="Wing-flap: altitude ceiling",
     va=0,
     size=0,
     original=b"",
@@ -510,7 +510,7 @@ WING_FLAP_CEILING_SCALE = ParametricPatch(
 # descent penalty into a no-op.
 FLAP_DESCENT_FUEL_COST_SCALE = ParametricPatch(
     name="flap_descent_fuel_cost_scale",
-    label="Wing-flap descent fuel cost",
+    label="Wing-flap: descent penalty fuel",
     va=0,
     size=0,
     original=b"",
@@ -548,20 +548,18 @@ FLAP_DESCENT_FUEL_COST_SCALE = ParametricPatch(
 # VA.  0.0 = no cost (infinite flaps on a single fuel charge).
 FLAP_ENTRY_FUEL_COST_SCALE = ParametricPatch(
     name="flap_entry_fuel_cost_scale",
-    label="Wing-flap per-flap fuel cost",
+    label="Wing-flap: fuel cost per flap",
     va=0,
     size=0,
     original=b"",
     default=1.0,
-    # Vanilla cost = 1.0, fuel_max = 1 / 2 / 5 (air1/2/3).  The
-    # slider useful range is [-0.05, 0.05] (same reasoning as the
-    # descent slider).  At scale=1.0 (vanilla): air1 drains full
-    # gauge in 1 flap, air2 in 2, air3 in 5.  At scale=0.1:
-    # ~10x more flaps.  At scale=0.0: infinite flaps.  Negative:
-    # fuel refilled on every flap.
-    slider_min=-0.05,
-    slider_max=0.05,
-    slider_step=0.001,
+    # Useful range is [-5, 5] step 0.1: vanilla cost is 1.0 and
+    # fuel_max is 1 / 2 / 5 (air1/2/3), so ±5 spans "gauge
+    # refunds 5/flap" to "gauge drains 5× faster".  Outside that
+    # the clear-to-0 threshold trips or the refund saturates.
+    slider_min=-5.0,
+    slider_max=5.0,
+    slider_step=0.1,
     unit="x",
     encode=lambda v: struct.pack("<d", float(v)),
     decode=lambda b: struct.unpack("<d", b)[0],

@@ -298,30 +298,24 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         browser = PackBrowser(self._root, all_packs(), {},
                               pack_params=params)
         slider_keys = sorted(browser.sliders().keys())
-        # Slider inventory as of round 11.10:
+        # Slider inventory as of round 11.13:
         #
-        #   player_physics owns 9 sliders (direct byte patches +
-        #   one hand-assembled shim for wing_flap_ceiling_scale).
+        #   player_physics owns 10 sliders.
         #
-        #   flap_at_peak and slope_slide_speed are shim-backed
-        #   packs, each owning one virtual slider.  Restored in
-        #   round 11.8 from the round-10 purge (which was a GUI
-        #   wiring bug, not a genuine apply failure).
+        #   flap_at_peak stays visible — the v0-floor shim at
+        #   0x89409 composes orthogonally with wing_flap_ceiling.
         #
-        #   root_motion_roll and root_motion_climb are also
-        #   registered but DEPRECATED in round 11.10 — they stay
-        #   importable + testable but the GUI browser hides them
-        #   because user-verified they produce no observable
-        #   in-game effect even after the wiring fix (probable
-        #   cause: anim_apply_translation commits deltas via
-        #   vtable+0xC0 inside the call).
+        #   root_motion_roll / root_motion_climb /
+        #   slope_slide_speed / animation_root_motion_scale all
+        #   registered but marked deprecated=True — user-verified
+        #   they produce no observable in-game effect.  Hidden
+        #   from the PackBrowser, kept for CLI/test / future RE.
         #
         #   wing_flap_count / no_fall_damage / infinite_fuel are
-        #   still deleted.
+        #   still deleted outright (config-editor replaces them).
         self.assertEqual(
             slider_keys,
-            [("animation_root_motion_scale", "animation_root_motion_scale"),
-             ("flap_at_peak",       "flap_at_peak_scale"),
+            [("flap_at_peak",       "flap_at_peak_scale"),
              ("player_physics",     "air_control_scale"),
              ("player_physics",     "flap_below_peak_scale"),
              ("player_physics",     "flap_descent_fuel_cost_scale"),
@@ -331,20 +325,20 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
              ("player_physics",     "jump_speed_scale"),
              ("player_physics",     "swim_speed_scale"),
              ("player_physics",     "walk_speed_scale"),
-             ("player_physics",     "wing_flap_ceiling_scale"),
-             ("slope_slide_speed",  "slope_slide_speed_scale")])
+             ("player_physics",     "wing_flap_ceiling_scale")])
         self.assertIn("player_physics", params)
         self.assertEqual(len(params["player_physics"]), 10)
-        for pack_name in ("flap_at_peak", "slope_slide_speed",
-                          "animation_root_motion_scale"):
+        for pack_name in ("flap_at_peak",):
             self.assertIn(pack_name, params,
                 msg=f"{pack_name} restored in round 11.8; its "
                     f"single-slider bucket must be rendered")
             self.assertEqual(len(params[pack_name]), 1,
                 msg=f"{pack_name} exposes exactly one slider")
-        for pack_name in ("root_motion_roll", "root_motion_climb"):
+        for pack_name in ("root_motion_roll", "root_motion_climb",
+                          "slope_slide_speed",
+                          "animation_root_motion_scale"):
             self.assertNotIn(pack_name, params,
-                msg=f"{pack_name} is deprecated in round 11.10 — "
+                msg=f"{pack_name} is deprecated — "
                     f"GUI browser must hide it")
         for pack_name in ("wing_flap_count", "no_fall_damage",
                           "infinite_fuel"):
@@ -357,7 +351,9 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         CLI + tests — only the GUI browser hides them.  Pins the
         ``Feature.deprecated`` flag introduced in round 11.10."""
         from azurik_mod.patching.registry import get_pack
-        for pack_name in ("root_motion_roll", "root_motion_climb"):
+        for pack_name in ("root_motion_roll", "root_motion_climb",
+                          "slope_slide_speed",
+                          "animation_root_motion_scale"):
             pack = get_pack(pack_name)
             self.assertIsNotNone(pack,
                 msg=f"{pack_name} must still be in registry")

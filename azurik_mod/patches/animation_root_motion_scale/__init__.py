@@ -1,5 +1,23 @@
-"""animation_root_motion_scale — central shim for per-frame
-animation-driven player translation.
+"""animation_root_motion_scale — DEPRECATED (round 11.13).
+
+User testing confirmed the vtable-hook approach produces no
+observable in-game movement change at any scale (tested 0.1,
+0.5, 2.0, 5.0).  Likely causes:
+
+- The CALL at 0x43066 may not reach every root-motion path.
+- Scaling ``param_1[0x6C..0x71]`` before the commit may not
+  be what that vtable slot does with them (maybe it reads
+  from elsewhere, or the deltas are already applied).
+- A sibling anim-apply function (there are several dispatchers
+  around 0x42E40) may be the real commit site.
+
+Retained as a historical artifact — the shim itself is
+correctly hand-assembled and installs cleanly.  Hidden from
+the GUI via ``deprecated=True``.  Anyone wanting to iterate
+on root-motion scaling should start from the `_SPEC` below
+as a known-good 38-byte shim template.
+
+### Background (pre-deprecation)
 
 ## Background
 
@@ -256,20 +274,19 @@ def _custom_apply(
 FEATURE = register_feature(Feature(
     name="animation_root_motion_scale",
     description=(
-        "Central animation-root-motion scale.  Hooks the vtable "
-        "commit inside anim_apply_translation (VA 0x43066) and "
-        "scales the 6 translation deltas before the commit.  "
-        "Experimental — scales ALL animation-driven player "
-        "translations globally."
+        "[DEPRECATED] vtable-hook at anim_apply_translation's "
+        "end (VA 0x43066).  User testing round 11.13 confirmed "
+        "no observable movement change at any scale."
     ),
     sites=SITES,
     apply=lambda xbe_data: None,
     default_on=False,
     included_in_randomizer_qol=False,
     category="player",
-    tags=("cheat", "movement", "c-shim", "root-motion", "experimental"),
+    tags=("cheat", "movement", "c-shim", "root-motion", "deprecated"),
     dynamic_whitelist_from_xbe=_dynamic_whitelist,
     custom_apply=_custom_apply,
+    deprecated=True,
 ))
 
 

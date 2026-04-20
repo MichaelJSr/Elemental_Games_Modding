@@ -417,7 +417,44 @@ purposes.  The two sliders compose: entry-cost governs the
 cheap per-flap drain, descent-cost governs the punishment for
 trying to flap too far below peak_z.
 
-### Animation root-motion vtable-commit hook (round 11.11, experimental)
+### Armor config loader — engine reads the 0x3000 table, not TOC entry 1 (round 11.13)
+
+`load_armor_properties_config` at VA 0x3C700 populates the
+per-armor-slot struct array at `DAT_0038C4D4` at boot.  It
+loads the asset by string name `config/armor_properties`
+(string at 0x19FEC8), then reads columns `Name`, `Type`,
+`Level`, `Strong vs`, `Weak vs`, `Strong protection`,
+`Normal protection`, `Flaps`, `Features`, etc. via
+`config_cell_value`.
+
+**Crucial naming gotcha**: the config.xbr file has TWO
+keyed tables with overlapping names:
+
+| File offset | TOC label | Actual columns | Engine use |
+|---|---|---|---|
+| 0x3000 (inside TOC[0] extent 0x2000) | "armor_hit_fx" in section-name table | 15×19 — Name, Type, Level, Strong vs, Weak vs, ..., Flaps, Features | THIS is loaded as `config/armor_properties` |
+| 0x5000 (TOC[1], offset 0x4000) | "armor_properties" in section-name table | 16×24 — name, Anim, Damage multiplier, Fuel multiplier, Rate, ..., Sound 4 | Probably attack-animation data |
+
+The engine's asset-manager lookup-by-filename resolves
+`config/armor_properties` to the 0x3000 table, not the TOC[1]
+table that shares the string.  Our `keyed_tables.py` labels
+the 0x3000 table as `armor_properties_real` to avoid the
+ambiguity — the Entity Editor writes to this label, which is
+correct for the engine's read path.
+
+Flaps conversion: `config_cell_value` reads the 8-byte double
+at cell+8, `FUN_000F5A40` (FPU FISTP) converts to int64, the
+low 32 bits land at `puVar1[0xE]` (struct offset 0x38).  The
+wing-flap runtime read at VA 0x89321 (`MOV EAX, [EDX+0x38]`)
+picks up whatever we wrote.
+
+Users can verify their edits round-trip by extracting config.xbr
+from a built ISO and running
+`azurik-mod dump -i built.iso -s armor_properties_real -e air_shield_3`
+— the output shows the live double value as stored, not the
+registry default.
+
+### Animation root-motion vtable-commit hook (round 11.11, experimental — DEPRECATED 11.13)
 
 Round-8 installed `root_motion_roll` / `root_motion_climb` /
 `slope_slide_speed` as post-CALL shims that scaled
@@ -471,6 +508,14 @@ randomizer-QoL set; it's slider-controlled via the GUI's
 the old `root_motion_roll` / `root_motion_climb` packs can
 probably be retired in favour of gated versions of this
 central shim.
+
+**Update (round 11.13, DEPRECATED)**: user testing confirmed
+no observable in-game effect at any scale (0.1, 0.5, 2.0,
+5.0).  Either the vtable slot doesn't commit the deltas at
+`param_1[0x6C..0x71]`, or a sibling anim-apply dispatcher
+around 0x42E40 is the real commit site.  Pack marked
+`deprecated=True`, hidden from GUI, retained as a known-good
+38-byte shim template for future iteration.
 
 ### Air-control speed has TWO dominant writer sites — FUN_00083F90 (April 2026)
 
