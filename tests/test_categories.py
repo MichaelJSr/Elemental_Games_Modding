@@ -298,14 +298,12 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         browser = PackBrowser(self._root, all_packs(), {},
                               pack_params=params)
         slider_keys = sorted(browser.sliders().keys())
-        # Slider inventory as of round 11.13:
+        # Slider inventory as of round 11.14:
         #
-        #   player_physics owns 10 sliders.
+        #   player_physics owns 10 sliders — the only active
+        #   player-physics surface left.
         #
-        #   flap_at_peak stays visible — the v0-floor shim at
-        #   0x89409 composes orthogonally with wing_flap_ceiling.
-        #
-        #   root_motion_roll / root_motion_climb /
+        #   flap_at_peak / root_motion_roll / root_motion_climb /
         #   slope_slide_speed / animation_root_motion_scale all
         #   registered but marked deprecated=True — user-verified
         #   they produce no observable in-game effect.  Hidden
@@ -315,8 +313,7 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         #   still deleted outright (config-editor replaces them).
         self.assertEqual(
             slider_keys,
-            [("flap_at_peak",       "flap_at_peak_scale"),
-             ("player_physics",     "air_control_scale"),
+            [("player_physics",     "air_control_scale"),
              ("player_physics",     "flap_below_peak_scale"),
              ("player_physics",     "flap_descent_fuel_cost_scale"),
              ("player_physics",     "flap_entry_fuel_cost_scale"),
@@ -328,14 +325,8 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
              ("player_physics",     "wing_flap_ceiling_scale")])
         self.assertIn("player_physics", params)
         self.assertEqual(len(params["player_physics"]), 10)
-        for pack_name in ("flap_at_peak",):
-            self.assertIn(pack_name, params,
-                msg=f"{pack_name} restored in round 11.8; its "
-                    f"single-slider bucket must be rendered")
-            self.assertEqual(len(params[pack_name]), 1,
-                msg=f"{pack_name} exposes exactly one slider")
-        for pack_name in ("root_motion_roll", "root_motion_climb",
-                          "slope_slide_speed",
+        for pack_name in ("flap_at_peak", "root_motion_roll",
+                          "root_motion_climb", "slope_slide_speed",
                           "animation_root_motion_scale"):
             self.assertNotIn(pack_name, params,
                 msg=f"{pack_name} is deprecated — "
@@ -351,8 +342,8 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         CLI + tests — only the GUI browser hides them.  Pins the
         ``Feature.deprecated`` flag introduced in round 11.10."""
         from azurik_mod.patching.registry import get_pack
-        for pack_name in ("root_motion_roll", "root_motion_climb",
-                          "slope_slide_speed",
+        for pack_name in ("flap_at_peak", "root_motion_roll",
+                          "root_motion_climb", "slope_slide_speed",
                           "animation_root_motion_scale"):
             pack = get_pack(pack_name)
             self.assertIsNotNone(pack,

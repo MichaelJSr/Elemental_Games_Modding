@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Deprecate flap_at_peak (round 11.14)
+
+User testing confirmed the 43-byte FSTP-replay shim at
+VA 0x89409 produces no observable change to 2nd+ flap
+strength in-game at any scale.  Pack marked
+`deprecated=True`, hidden from GUI, retained as RE
+scaffolding.  Users wanting higher flap ceilings should
+use `wing_flap_ceiling_scale` instead.
+
+This leaves `player_physics` as the only active
+player-physics surface in the GUI (10 sliders).
+
 ### Cleanup pass: deprecations + UI simplification (round 11.13)
 
 **Slider range**: `flap_entry_fuel_cost_scale` widened from

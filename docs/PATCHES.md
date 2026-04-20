@@ -42,11 +42,12 @@ register_category(Category(
 | Pack                 | Sites | Default-on | Category       | Tags          | Folder |
 |----------------------|-------|------------|----------------|---------------|--------|
 | `fps_unlock`         | 50    | no         | `performance`  | fps           | [azurik_mod/patches/fps_unlock/](../azurik_mod/patches/fps_unlock/) |
-| `player_physics`     | 9     | no         | `player`       | physics, c-shim | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
-| `flap_at_peak`       | 1     | no         | `player`       | physics, c-shim, cheat | [azurik_mod/patches/flap_at_peak/](../azurik_mod/patches/flap_at_peak/) |
-| `root_motion_roll`   | 1     | no         | `player`       | physics, c-shim, root-motion | [azurik_mod/patches/root_motion_roll/](../azurik_mod/patches/root_motion_roll/) |
-| `root_motion_climb`  | 1     | no         | `player`       | physics, c-shim, root-motion | [azurik_mod/patches/root_motion_climb/](../azurik_mod/patches/root_motion_climb/) |
-| `slope_slide_speed`  | 1     | no         | `player`       | physics, c-shim | [azurik_mod/patches/slope_slide_speed/](../azurik_mod/patches/slope_slide_speed/) |
+| `player_physics`     | 10    | no         | `player`       | physics, c-shim | [azurik_mod/patches/player_physics/](../azurik_mod/patches/player_physics/) |
+| `flap_at_peak` *(DEPRECATED)*            | 1 | no | `player` | physics, c-shim, deprecated | [azurik_mod/patches/flap_at_peak/](../azurik_mod/patches/flap_at_peak/) |
+| `root_motion_roll` *(DEPRECATED)*        | 1 | no | `player` | physics, c-shim, deprecated | [azurik_mod/patches/root_motion_roll/](../azurik_mod/patches/root_motion_roll/) |
+| `root_motion_climb` *(DEPRECATED)*       | 1 | no | `player` | physics, c-shim, deprecated | [azurik_mod/patches/root_motion_climb/](../azurik_mod/patches/root_motion_climb/) |
+| `slope_slide_speed` *(DEPRECATED)*       | 1 | no | `player` | physics, c-shim, deprecated | [azurik_mod/patches/slope_slide_speed/](../azurik_mod/patches/slope_slide_speed/) |
+| `animation_root_motion_scale` *(DEPRECATED)* | 1 | no | `player` | physics, c-shim, deprecated | [azurik_mod/patches/animation_root_motion_scale/](../azurik_mod/patches/animation_root_motion_scale/) |
 | `qol_skip_logo`      | 1     | no         | `boot`         | c-shim        | [azurik_mod/patches/qol_skip_logo/](../azurik_mod/patches/qol_skip_logo/) |
 | `qol_gem_popups`     | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_gem_popups/](../azurik_mod/patches/qol_gem_popups/) |
 | `qol_other_popups`   | 0     | no         | `qol`          | —             | [azurik_mod/patches/qol_other_popups/](../azurik_mod/patches/qol_other_popups/) |
@@ -350,7 +351,7 @@ deprecated aliases for `--player-roll-scale` / `--roll-speed`.
 
 The Patches page renders 10 working `ParametricSlider` widgets under `player_physics`: `gravity`, `walk_speed_scale`, `swim_speed_scale`, `jump_speed_scale`, `air_control_scale`, `flap_height_scale` ("Wing-flap: 1st flap height"), `flap_below_peak_scale` ("Wing-flap: far-descent recovery"), `wing_flap_ceiling_scale` ("Wing-flap: altitude ceiling"), `flap_entry_fuel_cost_scale` ("Wing-flap: fuel cost per flap", range [-5, 5] step 0.1 — vanilla 1.0, 0.0 = infinite, negative = refund), and `flap_descent_fuel_cost_scale` ("Wing-flap: descent penalty fuel", range [-0.05, 0.05] step 0.001).  Slider values live on `AppState.pack_params["player_physics"]` and carry a long-form description rendered via a hover-tooltip `ⓘ` glyph next to the label.
 
-The `flap_at_peak` pack remains registered with its own single-slider `ParametricPatch` (enforces a v0 floor on every flap).  All other restored shim packs (`root_motion_roll`, `root_motion_climb`, `slope_slide_speed`, `animation_root_motion_scale`) are registered but marked `deprecated=True` — user testing confirmed no observable in-game effect.  They're hidden from the Patches page but remain importable for CLI / RE use.  `no_fall_damage`, `infinite_fuel`, and `wing_flap_count` remain deleted in favour of config-editor workarounds.
+All five restored shim packs (`flap_at_peak`, `root_motion_roll`, `root_motion_climb`, `slope_slide_speed`, `animation_root_motion_scale`) are registered but marked `deprecated=True` — user testing confirmed no observable in-game effect for any of them.  They're hidden from the Patches page but remain importable for CLI / RE use.  `no_fall_damage`, `infinite_fuel`, and `wing_flap_count` remain deleted in favour of config-editor workarounds.  The only active player-physics surface is `player_physics` (10 sliders).
 
 **Config-editor workarounds for the deleted cheat packs**:
 - **No fall damage** → `config.xbr` / `damage` section: raise fall-height thresholds.  Or `critters_damage` → bump player row's `hitPoints`.

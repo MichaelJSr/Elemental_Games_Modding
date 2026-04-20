@@ -1679,8 +1679,9 @@ def cmd_verify_patches(args):
         all_patch_specs,
         all_trampoline_sites,
     )
-    # Importing patches package ensures every pack has registered.
-    import azurik_mod.patches  # noqa: F401
+    # Module-level ``import azurik_mod.patches`` (line 38) has
+    # already triggered every pack's register_feature(...) side
+    # effect by the time this function runs — no need to re-import.
 
     target = Path(args.xbe if args.xbe else args.iso)
     if not target.exists():

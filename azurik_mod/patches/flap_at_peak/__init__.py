@@ -1,4 +1,20 @@
-"""flap_at_peak — give 2nd+ wing flaps a guaranteed minimum v0.
+"""flap_at_peak — DEPRECATED (round 11.14).
+
+User testing confirmed the 43-byte FSTP-replay shim at
+VA 0x89409 produces no observable change in 2nd+ flap
+strength in-game at any scale.  Likely cause: either another
+clamp downstream of the FSTP zeroes the velocity again, or
+the ``[ESI+0x2C]`` slot is overwritten by
+``player_airborne_tick`` before it feeds a position update.
+
+Superseded by ``wing_flap_ceiling_scale`` (which raises
+``peak_z`` at jump-init so the vanilla clamp is no longer
+restrictive).  Hidden from the GUI via ``deprecated=True``;
+retained as RE scaffolding + a known-good shim template.
+
+### Background (pre-deprecation)
+
+Give 2nd+ wing flaps a guaranteed minimum v0.
 
 ## Why this is a shim, not a byte patch
 
@@ -300,18 +316,19 @@ def _custom_apply(
 FEATURE = register_feature(Feature(
     name="flap_at_peak",
     description=(
-        "Enforces a v0 floor on every wing flap so flaps near "
-        "peak still give lift.  Companion to "
-        "wing_flap_ceiling_scale."
+        "[DEPRECATED] v0-floor FSTP-replay shim at VA 0x89409.  "
+        "User testing round 11.14 confirmed no observable "
+        "in-game effect.  Use wing_flap_ceiling_scale instead."
     ),
     sites=FLAP_AT_PEAK_SITES,
     apply=lambda xbe_data: None,   # no-op; custom_apply is used
     default_on=False,
     included_in_randomizer_qol=False,
     category="player",
-    tags=("cheat", "movement", "air-power", "c-shim"),
+    tags=("cheat", "movement", "air-power", "c-shim", "deprecated"),
     dynamic_whitelist_from_xbe=_flap_at_peak_dynamic_whitelist,
     custom_apply=_custom_apply,
+    deprecated=True,
 ))
 
 
