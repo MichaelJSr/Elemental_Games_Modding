@@ -203,6 +203,20 @@ class BuildPage(Page):
         self._log.append(
             f"  + Entity Editor contributes "
             f"{tab.get_edit_count()} pending edits\n")
+
+        # 3. Merge pending edits from the XBR Editor page (Phase 4).
+        #    The editor emits ``{"xbr_edits": [XbrEditSpec-dicts]}``;
+        #    we tuck them under the top-level key so downstream
+        #    plumbing that consumes ``config_edits["xbr_edits"]``
+        #    picks them up alongside the existing keyed patches.
+        xbr_tab = getattr(self.app, "tab_xbr_editor", None)
+        xbr_mod = xbr_tab.get_pending_mod() if xbr_tab is not None else None
+        if xbr_mod and xbr_mod.get("xbr_edits"):
+            merged.setdefault("xbr_edits", []).extend(
+                xbr_mod["xbr_edits"])
+            self._log.append(
+                f"  + XBR Editor contributes "
+                f"{len(xbr_mod['xbr_edits'])} edits\n")
         return merged
 
     def _merge_packs(self) -> tuple[dict[str, bool], dict[str, dict[str, float]]]:

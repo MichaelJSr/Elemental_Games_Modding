@@ -16,6 +16,7 @@ from .pages.patches import PatchesPage
 from .pages.project import ProjectPage
 from .pages.randomize import RandomizePage
 from .pages.settings import SettingsPage
+from .pages.xbr_editor import get_page_class as _get_xbr_editor_page
 from .widgets import Sidebar
 
 # The sidebar order and labels.  Each id matches a self._pages key below.
@@ -24,6 +25,7 @@ _PAGE_SPECS: list[tuple[str, str]] = [
     ("randomize", "Randomize"),
     ("patches", "Patches"),
     ("entity_editor", "Entity Editor"),
+    ("xbr_editor", "XBR Editor"),
     ("build", "Build & Logs"),
     ("settings", "Settings"),
 ]
@@ -99,6 +101,7 @@ class AzurikApp:
             "randomize": RandomizePage,
             "patches": PatchesPage,
             "entity_editor": EntityEditorTab,  # legacy tab class still fine
+            "xbr_editor": _get_xbr_editor_page(),
             "build": BuildPage,
             "settings": SettingsPage,
         }.items():
@@ -111,6 +114,11 @@ class AzurikApp:
         self.tab_randomizer = self._pages["randomize"]
         self.tab_qol = self._pages["patches"]
         self.tab_entity = self._pages["entity_editor"]
+        # Phase-4 addition: XBR editor page.  Exposed by attribute
+        # so the Build page can pull its pending-mod blob via
+        # ``app.tab_xbr_editor.get_pending_mod()`` alongside the
+        # Entity Editor's existing channel.
+        self.tab_xbr_editor = self._pages["xbr_editor"]
 
         # Show the first page.
         self.show_page("project")
