@@ -121,5 +121,74 @@ class CheatEntityHpApply(unittest.TestCase):
                        xbr_files=staging)
 
 
+class PackBrowserRendersXbrSliders(unittest.TestCase):
+    """``cheat_entity_hp``'s slider is an :class:`XbrParametricEdit`
+    (lives in ``xbr_sites``, not ``sites``).  The Patches-page
+    slider renderer must pick up both kinds — a regression where
+    it only rendered ``parametric_sites()`` would leave this
+    feature with a bare checkbox and no way for the user to
+    change the HP value.
+
+    Exercised through :class:`gui.widgets.PackBrowser` — the
+    actual widget the GUI builds — with a dummy Tk root so we
+    catch real rendering bugs, not just dict plumbing.
+    """
+
+    def setUp(self):
+        import azurik_mod.patches  # noqa: F401
+        import tkinter as tk
+        try:
+            self.root = tk.Tk()
+        except tk.TclError as exc:
+            self.skipTest(f"Tk not available: {exc}")
+        self.root.withdraw()
+
+    def tearDown(self):
+        try:
+            self.root.destroy()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def test_cheat_entity_hp_gets_a_slider_widget(self):
+        from gui.widgets import PackBrowser
+        from azurik_mod.patching.registry import all_packs
+        import tkinter as tk
+        vars_: dict[str, tk.BooleanVar] = {}
+        pack_params: dict[str, dict[str, float]] = {}
+        browser = PackBrowser(
+            self.root, all_packs(), vars_,
+            pack_params=pack_params, on_param_change=None)
+        sliders = browser.sliders()
+        key = ("cheat_entity_hp", "garret4_hit_points")
+        self.assertIn(
+            key, sliders,
+            msg=f"cheat_entity_hp's garret4_hit_points slider "
+                f"isn't in the PackBrowser's rendered slider map "
+                f"({sorted(sliders)!r}).  Likely cause: "
+                f"PackBrowser only iterates parametric_sites() "
+                f"and skips xbr_parametric_sites(), so XBR-only "
+                f"features render as bare checkboxes.")
+
+    def test_xbe_sliders_still_render(self):
+        """Sanity check: the XBE-side slider path still works.
+        player_physics has ~14 ParametricPatch sliders — they
+        must all survive the XBR-site addition."""
+        from gui.widgets import PackBrowser
+        from azurik_mod.patching.registry import all_packs
+        import tkinter as tk
+        vars_: dict[str, tk.BooleanVar] = {}
+        pack_params: dict[str, dict[str, float]] = {}
+        browser = PackBrowser(
+            self.root, all_packs(), vars_,
+            pack_params=pack_params, on_param_change=None)
+        sliders = browser.sliders()
+        pp_sliders = [k for k in sliders
+                      if k[0] == "player_physics"]
+        self.assertGreater(
+            len(pp_sliders), 0,
+            msg="player_physics XBE-side sliders vanished — "
+                "the xbr_parametric_sites() merge broke something.")
+
+
 if __name__ == "__main__":
     unittest.main()

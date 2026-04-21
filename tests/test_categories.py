@@ -282,49 +282,55 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         self.assertEqual(len(titles), 5)
 
     def test_parametric_sliders_rendered_inside_their_tab(self):
-        """``player_physics`` lives in the Player tab AND exposes 4
-        sliders (gravity, walk, roll, swim).  The browser must
-        create one ParametricSlider per site and register it under
-        the (pack, param) key.
+        """``player_physics`` lives in the Player tab AND exposes
+        its 10 XBE-side sliders.  The browser must create one
+        ParametricSlider per site and register it under the
+        (pack, param) key.  XBR-side sliders (from ``xbr_sites``)
+        render through the same path.
 
         The 3.0 multiplier that the ``roll`` slider targets was
         previously labelled ``run`` but that was a documentation
         mistake — see docs/LEARNINGS.md § "Roll, not run".  Swim
         was added April 2026 after we found the dedicated 10.0
-        FMUL in FUN_0008b700."""
+        FMUL in FUN_0008b700.
+        """
         from azurik_mod.patching.registry import all_packs
         from gui.widgets import PackBrowser
         params: dict = {}
         browser = PackBrowser(self._root, all_packs(), {},
                               pack_params=params)
         slider_keys = sorted(browser.sliders().keys())
-        # Slider inventory as of round 11.14:
+        # Expected slider inventory, broken down by source:
         #
-        #   player_physics owns 10 sliders — the only active
-        #   player-physics surface left.
+        #   player_physics owns 10 XBE-side sliders (gravity +
+        #   speed / flap modifiers).  Every one is a
+        #   ParametricPatch in ``sites``.
         #
-        #   flap_at_peak / root_motion_roll / root_motion_climb /
-        #   slope_slide_speed / animation_root_motion_scale all
-        #   registered but marked deprecated=True — user-verified
-        #   they produce no observable in-game effect.  Hidden
-        #   from the PackBrowser, kept for CLI/test / future RE.
+        #   cheat_entity_hp owns 1 XBR-side slider (garret4 hit
+        #   points) via ``xbr_sites``.  The browser renders BOTH
+        #   site kinds through the same ParametricSlider widget,
+        #   so the two lists merge here.
         #
-        #   wing_flap_count / no_fall_damage / infinite_fuel are
-        #   still deleted outright (config-editor replaces them).
-        self.assertEqual(
-            slider_keys,
-            [("player_physics",     "air_control_scale"),
-             ("player_physics",     "flap_below_peak_scale"),
-             ("player_physics",     "flap_descent_fuel_cost_scale"),
-             ("player_physics",     "flap_entry_fuel_cost_scale"),
-             ("player_physics",     "flap_height_scale"),
-             ("player_physics",     "gravity"),
-             ("player_physics",     "jump_speed_scale"),
-             ("player_physics",     "swim_speed_scale"),
-             ("player_physics",     "walk_speed_scale"),
-             ("player_physics",     "wing_flap_ceiling_scale")])
+        #   Deprecated packs (flap_at_peak / root_motion_roll /
+        #   etc.) register but are hidden by the PackBrowser.
+        expected_keys = [
+            ("cheat_entity_hp",    "garret4_hit_points"),
+            ("player_physics",     "air_control_scale"),
+            ("player_physics",     "flap_below_peak_scale"),
+            ("player_physics",     "flap_descent_fuel_cost_scale"),
+            ("player_physics",     "flap_entry_fuel_cost_scale"),
+            ("player_physics",     "flap_height_scale"),
+            ("player_physics",     "gravity"),
+            ("player_physics",     "jump_speed_scale"),
+            ("player_physics",     "swim_speed_scale"),
+            ("player_physics",     "walk_speed_scale"),
+            ("player_physics",     "wing_flap_ceiling_scale"),
+        ]
+        self.assertEqual(slider_keys, expected_keys)
         self.assertIn("player_physics", params)
         self.assertEqual(len(params["player_physics"]), 10)
+        self.assertIn("cheat_entity_hp", params)
+        self.assertEqual(len(params["cheat_entity_hp"]), 1)
         for pack_name in ("flap_at_peak", "root_motion_roll",
                           "root_motion_climb", "slope_slide_speed",
                           "animation_root_motion_scale"):

@@ -696,12 +696,25 @@ class PackBrowser(ttk.Frame):
 
         # Parametric sliders live right under the pack so the spatial
         # relationship is obvious — no more separate bottom section.
-        if self._pack_params is not None and pack.parametric_sites():
+        #
+        # We render BOTH XBE-side ``parametric_sites()`` and XBR-side
+        # ``xbr_parametric_sites()`` here because the two carry the
+        # same slider-shaped API (name, label, default, slider_min,
+        # slider_max, slider_step, unit, description) — from the
+        # user's perspective a tunable is a tunable, no matter
+        # whether the value ends up in the XBE or in a data file.
+        # Without this merge a Feature whose only slider is an
+        # ``XbrParametricEdit`` (e.g. ``cheat_entity_hp``) would
+        # render a bare checkbox with no way to change the value.
+        slider_entries = (
+            list(pack.parametric_sites())
+            + list(pack.xbr_parametric_sites()))
+        if self._pack_params is not None and slider_entries:
             slider_host = ttk.Frame(row)
             slider_host.pack(anchor=tk.W, padx=(25, 0),
                              pady=(4, 0), fill=tk.X)
             self._pack_params.setdefault(pack.name, {})
-            for pp in pack.parametric_sites():
+            for pp in slider_entries:
                 initial = self._pack_params[pack.name].get(
                     pp.name, pp.default)
                 self._pack_params[pack.name][pp.name] = initial
