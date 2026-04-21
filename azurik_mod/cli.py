@@ -248,6 +248,14 @@ def main() -> None:
     p_full.add_argument("--fps-unlock", action="store_true",
                         help="Run the game at 60 FPS instead of 30.  "
                              "Experimental.")
+    p_full.add_argument("--enable-pack", action="append", default=None,
+                        metavar="NAME",
+                        help="Enable any registered pack by name — "
+                             "works for feature packs that don't "
+                             "have a dedicated CLI flag (xbr-only "
+                             "packs, third-party plugins).  "
+                             "Repeatable.  Example: --enable-pack "
+                             "cheat_entity_hp.")
     p_full.add_argument("--config-mod",
                         help="Apply a config mod JSON (inline or file path) "
                              "that tweaks per-entity values (damage, speed, "
@@ -1294,6 +1302,51 @@ def main() -> None:
     p_xbre.add_argument("--replace-bytes", action="append",
         default=None,
         help="'OFFSET:HEX' raw byte replacement; repeatable")
+    # Phase-2 structural ops — route through azurik_mod.xbr.edits.
+    p_xbre.add_argument("--set-value", action="append",
+        default=None,
+        help="'section/entity/prop=float' — set a keyed-table "
+             "double value.  Repeatable.")
+    p_xbre.add_argument("--set-keyed-string", action="append",
+        default=None,
+        help="'section/entity/prop=string' — in-place string "
+             "replacement in a keyed-table type-2 cell.  New "
+             "string must fit the existing slot.  Repeatable.")
+    p_xbre.add_argument("--add-row", action="append",
+        default=None,
+        help="Currently unavailable (blocked on config.xbr pool "
+             "reversal — see docs/XBR_FORMAT.md § Backlog).")
+    p_xbre.add_argument("--remove-row", action="append",
+        default=None,
+        help="Currently unavailable (blocked on config.xbr pool "
+             "reversal — see docs/XBR_FORMAT.md § Backlog).")
+    p_xbre.add_argument("--grow-pool", action="append",
+        default=None,
+        help="Currently unavailable (blocked on config.xbr pool "
+             "reversal — see docs/XBR_FORMAT.md § Backlog).")
+
+    # Phase 1 xbr xref — pointer-graph listing (see
+    # docs/XBR_FORMAT.md § Pointer graph).
+    from azurik_mod.xbe_tools.xbr_xref import build_arg_parser \
+        as _build_xbr_xref_parser
+    _build_xbr_xref_parser(_xbr_sub)
+
+    # Phase-5 xbr verify — round-trip + xref integrity check.
+    p_xbrv = _xbr_sub.add_parser(
+        "verify",
+        help="Verify an XBR's round-trip + pointer-graph integrity",
+        description=(
+            "Load a .xbr, re-serialise it, and confirm:\n"
+            "  - byte-identity round-trip,\n"
+            "  - every modelled pointer ref resolves in-bounds,\n"
+            "  - unmodeled tag types are reported (informational).\n"
+            "\n"
+            "Exit 0 on success, 1 on drift.  Useful as a sanity\n"
+            "check after manual xbr edit invocations."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_xbrv.add_argument("path", help="Path to a .xbr file")
 
     # #24 level preview
     p_lp = sub.add_parser(
@@ -1459,11 +1512,14 @@ def _dispatch_entity(args) -> None:
 
 def _dispatch_xbr(args) -> None:
     from azurik_mod.xbe_tools.commands import (
-        cmd_xbr_diff, cmd_xbr_edit, cmd_xbr_inspect)
+        cmd_xbr_diff, cmd_xbr_edit, cmd_xbr_inspect, cmd_xbr_verify)
+    from azurik_mod.xbe_tools.xbr_xref import cmd_xbr_xref
     verbs = {
         "inspect": cmd_xbr_inspect,
         "diff": cmd_xbr_diff,
         "edit": cmd_xbr_edit,
+        "xref": cmd_xbr_xref,
+        "verify": cmd_xbr_verify,
     }
     verb = verbs.get(args.xbr_command)
     if verb is None:

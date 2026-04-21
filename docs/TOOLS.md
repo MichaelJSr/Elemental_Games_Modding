@@ -185,10 +185,54 @@ Shows added/removed/resized tags + string changes.
 azurik-mod xbr diff gamedata/town.xbr modded/town.xbr
 ```
 
-### `xbr edit` — safe same-size byte + string replacement
+### `xbr edit` — structured + byte-level edits
+Supports same-size byte / ASCII-string replacement AND the Phase-2
+structured primitives from
+[`azurik_mod/xbr/edits.py`](../azurik_mod/xbr/edits.py).
+
 ```bash
-azurik-mod xbr edit in.xbr out.xbr --set-string 'Hello=World' --tag surf
+# Same-size byte replacement at a file offset.
 azurik-mod xbr edit in.xbr out.xbr --replace-bytes 0x40:DEADBEEF
+
+# Same-size ASCII string replacement inside a TOC tag's payload.
+azurik-mod xbr edit in.xbr out.xbr --set-string 'Hello=World' --tag surf
+
+# Phase-2 structured primitives — keyed-table cells addressed by
+# section / entity / property name (no need to know file offsets).
+azurik-mod xbr edit in.xbr out.xbr \
+    --set-value attacks_transitions/garret4/walkSpeed=42.0
+azurik-mod xbr edit in.xbr out.xbr \
+    --set-keyed-string critters_critter_data/garret4/name=abc
+```
+
+Structural row / pool ops (``--add-row``, ``--remove-row``,
+``--grow-pool``) are recognised but fail non-zero with a pointer at
+the RE backlog — see [`XBR_FORMAT.md`](XBR_FORMAT.md#backlog) for the
+unblock path.
+
+### `xbr xref` — enumerate pointer fields (Phase 1)
+Walks the XBR's pointer graph and reports every modelled
+source → target, plus any unmodeled tags the parser couldn't
+decode.  Drives the
+[`docs/xbr_graph_snapshot.json`](xbr_graph_snapshot.json)
+drift guard.
+
+```bash
+azurik-mod xbr xref gamedata/config.xbr
+azurik-mod xbr xref gamedata/config.xbr --tag tabl --list-all
+azurik-mod xbr xref gamedata/a1.xbr --format json
+```
+
+### `xbr verify` — round-trip + xref integrity check
+Round-trips the XBR through
+[`azurik_mod.xbr.XbrDocument`](../azurik_mod/xbr/document.py),
+confirms byte-identity, and reports unresolved refs.  Exit 0 on
+success, 1 on drift — useful after manual ``xbr edit`` runs or
+when integrating a non-vanilla XBR into the tooling.
+
+```bash
+azurik-mod xbr verify gamedata/config.xbr
+azurik-mod xbr verify my_modded.xbr
 ```
 
 ### `entity diff` — compare config.xbr entity values

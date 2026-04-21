@@ -1463,10 +1463,63 @@ def cmd_randomize_full(args):
                                or flap_descent_fuel_cost_scale != 1.0),
         }
 
-        needs_xbe = any(_FLAG_PACKS.values()) or bool(player_char)
+        # Generic pack enablement — ``--enable-pack NAME`` + the
+        # GUI-origin ``enabled_packs_json`` channel let any
+        # registered pack (shipped or plugin) opt in without
+        # touching cli.py's argparse surface.  Merged into
+        # ``_FLAG_PACKS`` so downstream code only deals with one
+        # enablement lookup.
+        from azurik_mod.patching.registry import get_pack as _get_pack
+        generic_names: set[str] = set(
+            getattr(args, 'enable_pack', None) or ())
+        enabled_json = getattr(args, 'enabled_packs_json', None)
+        if enabled_json:
+            try:
+                extra = json.loads(enabled_json)
+                if isinstance(extra, dict):
+                    # {pack_name: bool} shape (GUI).
+                    generic_names.update(
+                        name for name, on in extra.items() if on)
+                elif isinstance(extra, list):
+                    generic_names.update(extra)
+            except (ValueError, TypeError):
+                print(f"  WARNING: invalid enabled_packs_json; "
+                      f"ignoring.")
+        for name in generic_names:
+            # Ignore unknown names silently — they may refer to
+            # plugins not installed on this host.  A typo still
+            # fails loudly: the pack just won't apply and the log
+            # will show no action for it.
+            try:
+                _get_pack(name)
+            except KeyError:
+                continue
+            _FLAG_PACKS[name] = True
 
-        if needs_xbe:
-            print(f"\n[7/7] Applying XBE patches to default.xbe...")
+        # Does any enabled pack touch XBR data (even if it has no
+        # XBE sites)?  XBR-only packs like ``cheat_entity_hp``
+        # would silently no-op if this wasn't taken into account.
+        def _any_enabled_pack_has_xbr_sites() -> bool:
+            for pack in all_packs():
+                if not _FLAG_PACKS.get(pack.name, False):
+                    continue
+                if getattr(pack, "xbr_sites", ()):
+                    return True
+            return False
+
+        needs_xbe = any(_FLAG_PACKS.values()) or bool(player_char)
+        needs_apply = needs_xbe or _any_enabled_pack_has_xbr_sites()
+
+        if needs_apply:
+            # Phrasing reflects what's actually happening: XBE-
+            # touching packs produce byte patches, XBR-only packs
+            # write data files instead.  Both arrive via the same
+            # apply_pack dispatch below.
+            if needs_xbe:
+                print(f"\n[7/7] Applying patches "
+                      f"(XBE + XBR data files)...")
+            else:
+                print(f"\n[7/7] Applying XBR data-file patches...")
             xbe_data = bytearray(xbe_path.read_bytes())
 
             # Collect parameter values each pack might consume.
@@ -1534,18 +1587,39 @@ def cmd_randomize_full(args):
                     for k, v in params_dict.items():
                         bucket.setdefault(k, v)
 
+            # Stage any XBR files packs want to edit alongside their
+            # XBE bytes.  Lazy: only XBRs actually referenced by a
+            # pack's ``xbr_sites`` are loaded; XBE-only packs pay
+            # zero cost.
+            from azurik_mod.patching.xbr_staging import XbrStaging
+            xbr_staging = XbrStaging(extract_dir)
+
             for pack in all_packs():
                 if not _FLAG_PACKS.get(pack.name, False):
                     continue
                 params = _PACK_PARAMS.get(pack.name, {})
                 apply_pack(pack, xbe_data, params,
-                           repo_root=_REPO_ROOT_FOR_RANDOMIZER)
+                           repo_root=_REPO_ROOT_FOR_RANDOMIZER,
+                           xbr_files=xbr_staging)
 
             # Non-pack helper — standalone string-valued CLI flag.
             if player_char:
                 apply_player_character_patch(xbe_data, player_char)
 
-            xbe_path.write_bytes(xbe_data)
+            # Only write the XBE back to disk when something
+            # actually needed to touch it.  XBR-only runs leave
+            # default.xbe untouched so xdvdfs doesn't pack a
+            # byte-identical copy.
+            if needs_xbe:
+                xbe_path.write_bytes(xbe_data)
+
+            # Flush every touched XBR back to the staging tree so
+            # xdvdfs pack picks up the mutations.
+            written_xbrs = xbr_staging.flush()
+            if written_xbrs:
+                print(f"  wrote {len(written_xbrs)} XBR "
+                      f"file{'s' if len(written_xbrs) != 1 else ''}: "
+                      f"{', '.join(written_xbrs)}")
         else:
             print(f"\n[7/7] XBE patches — skipped (no patches opted in)")
 
@@ -1553,67 +1627,102 @@ def cmd_randomize_full(args):
         config_mod_arg = getattr(args, 'config_mod', None)
         if config_mod_arg:
             config_xbr = extract_dir / CONFIG_XBR_REL
-            if config_xbr.exists():
+            # Parse the --config-mod blob ONCE even if config.xbr
+            # is missing — the ``xbr_edits`` channel (further
+            # down) may target other files (level XBRs) that
+            # don't need config.xbr at all.
+            try:
+                mod_path = Path(config_mod_arg)
+                if mod_path.exists():
+                    mod = load_mod(str(mod_path))
+                else:
+                    mod = json.loads(config_mod_arg)
+            except Exception as e:
+                print(f"  WARNING: Could not parse --config-mod: {e}")
+                mod = None
+
+            if mod and config_xbr.exists():
                 print(f"\n  Applying config patches...")
                 registry = load_registry()
-                # Load the mod JSON (file path or inline JSON)
+                config_data = bytearray(config_xbr.read_bytes())
+                applied = 0
+
+                # Variant-record patches (via config_registry)
+                patches = flatten_mod(mod, registry)
+                for p in patches:
+                    prop = resolve_prop(registry, p["section"], p["entity"], p["property"])
+                    if not prop:
+                        continue
+                    offset = int(prop["value_file_offset"], 16)
+                    tf = prop.get("type_flag", 0)
+                    if offset + 8 > len(config_data):
+                        continue
+                    write_value(config_data, offset, p["value"], tf)
+                    applied += 1
+
+                # Keyed-table patches (direct cell offset doubles)
+                keyed = mod.get("_keyed_patches", {})
+                if keyed:
+                    # keyed_tables ships as a proper submodule under
+                    # azurik_mod.config; no need to dynamically load
+                    # it from disk.
+                    from azurik_mod.config import keyed_tables as ktp
+                    # Only parse the sections we actually patch —
+                    # load_all_tables is O(sections) so skipping
+                    # the rest is a meaningful saving when the
+                    # user is only editing one or two tables.
+                    tables = ktp.load_all_tables(
+                        str(config_xbr), sections=list(keyed.keys()))
+                    for section_key, entities in keyed.items():
+                        if section_key not in tables:
+                            print(f"    WARNING: keyed section '{section_key}' not found")
+                            continue
+                        table = tables[section_key]
+                        for entity_name, props in entities.items():
+                            for prop_name, value in props.items():
+                                cell = table.get_value(entity_name, prop_name)
+                                if cell and cell[0] == "double":
+                                    cell_off = cell[2]
+                                    # Write double at cell_offset + 8
+                                    struct.pack_into("<d", config_data,
+                                                     cell_off + 8, float(value))
+                                    applied += 1
+
+                config_xbr.write_bytes(config_data)
+                print(f"  Config patches: {applied} applied")
+
+            # Phase-3/4 GUI-editor channel: apply any declarative
+            # ``xbr_edits`` bundled in the same mod JSON.  Each
+            # dict carries ``{op, xbr_file, section, entity, prop,
+            # value, ...}`` and routes through the XBR pack
+            # infrastructure, so GUI edits land using the same
+            # primitives as feature-pack ``xbr_sites``.  Hoisted
+            # out of the ``config_xbr.exists()`` branch so edits
+            # that target ONLY level XBRs still apply when
+            # config.xbr is absent or untouched.  Fresh XbrStaging
+            # so it reads the just-written config.xbr (if any)
+            # rather than the pre-mod baseline.
+            xbr_edits = (mod.get("xbr_edits")
+                         if isinstance(mod, dict) else None)
+            if xbr_edits:
+                from azurik_mod.patching.xbr_spec import (
+                    apply_xbr_edit_dicts)
+                from azurik_mod.patching.xbr_staging import (
+                    XbrStaging)
+                gui_staging = XbrStaging(extract_dir)
                 try:
-                    mod_path = Path(config_mod_arg)
-                    if mod_path.exists():
-                        mod = load_mod(str(mod_path))
-                    else:
-                        mod = json.loads(config_mod_arg)
-                except Exception as e:
-                    print(f"  WARNING: Could not parse --config-mod: {e}")
-                    mod = None
-
-                if mod:
-                    config_data = bytearray(config_xbr.read_bytes())
-                    applied = 0
-
-                    # Variant-record patches (via config_registry)
-                    patches = flatten_mod(mod, registry)
-                    for p in patches:
-                        prop = resolve_prop(registry, p["section"], p["entity"], p["property"])
-                        if not prop:
-                            continue
-                        offset = int(prop["value_file_offset"], 16)
-                        tf = prop.get("type_flag", 0)
-                        if offset + 8 > len(config_data):
-                            continue
-                        write_value(config_data, offset, p["value"], tf)
-                        applied += 1
-
-                    # Keyed-table patches (direct cell offset doubles)
-                    keyed = mod.get("_keyed_patches", {})
-                    if keyed:
-                        # keyed_tables ships as a proper submodule under
-                        # azurik_mod.config; no need to dynamically load
-                        # it from disk.
-                        from azurik_mod.config import keyed_tables as ktp
-                        # Only parse the sections we actually patch —
-                        # load_all_tables is O(sections) so skipping
-                        # the rest is a meaningful saving when the
-                        # user is only editing one or two tables.
-                        tables = ktp.load_all_tables(
-                            str(config_xbr), sections=list(keyed.keys()))
-                        for section_key, entities in keyed.items():
-                            if section_key not in tables:
-                                print(f"    WARNING: keyed section '{section_key}' not found")
-                                continue
-                            table = tables[section_key]
-                            for entity_name, props in entities.items():
-                                for prop_name, value in props.items():
-                                    cell = table.get_value(entity_name, prop_name)
-                                    if cell and cell[0] == "double":
-                                        cell_off = cell[2]
-                                        # Write double at cell_offset + 8
-                                        struct.pack_into("<d", config_data,
-                                                         cell_off + 8, float(value))
-                                        applied += 1
-
-                    config_xbr.write_bytes(config_data)
-                    print(f"  Config patches: {applied} applied")
+                    count = apply_xbr_edit_dicts(
+                        gui_staging, list(xbr_edits))
+                except ValueError as exc:
+                    print(f"  WARNING: xbr_edits apply "
+                          f"failed: {exc}")
+                    count = 0
+                written = gui_staging.flush()
+                if count:
+                    print(f"  GUI xbr_edits: {count} applied, "
+                          f"{len(written)} file"
+                          f"{'s' if len(written) != 1 else ''} "
+                          f"updated: {', '.join(written)}")
 
         # Obsidian lock thresholds (patched in town.xbr)
         if obsidian_cost is not None and "town" in modified_levels:

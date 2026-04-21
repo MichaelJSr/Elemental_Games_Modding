@@ -392,6 +392,19 @@ def run_randomizer(
             # extracted pack_params["player_physics"].
             pack_params_json=(
                 json.dumps(pack_params) if pack_params else None),
+            # Generic pack-enablement channel.  The hardcoded
+            # ``gem_popups=``/``fps_unlock=`` fields above cover
+            # every shipped XBE-side pack that pre-dates the
+            # folder-per-feature reorg; any pack that WASN'T in
+            # that original set (XBR-only packs like
+            # ``cheat_entity_hp``, any third-party plugin pack)
+            # rides through here as a JSON-encoded
+            # ``{name: true}`` dict.  cmd_randomize_full merges
+            # both channels into its single ``_FLAG_PACKS``
+            # lookup so the dispatch loop is pack-type-agnostic.
+            enabled_packs_json=(
+                json.dumps({n: True for n, v in packs.items() if v})
+                if packs else None),
         )
 
         result: BuildResult

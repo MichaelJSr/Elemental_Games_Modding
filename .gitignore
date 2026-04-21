@@ -44,3 +44,11 @@ Azurik Audio/
 **/audio_out/
 **/Azurik Audio/
 **/waves/
+
+# XBR Editor workspace — per-user cache + persistent pending edits.
+# The GUI extracts the base ISO's data files here on first use so
+# the editor can read them without re-extracting each session, and
+# pending edits round-trip through pending_edits.json between
+# runs.  Everything inside is derived from the user's own ISO or
+# typed into the editor; none of it belongs in source control.
+.xbr_workspace/

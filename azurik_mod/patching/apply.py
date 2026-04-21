@@ -729,8 +729,17 @@ def apply_pack(
     params: dict[str, float] | None = None,
     *,
     repo_root: Path | None = None,
+    xbr_files: dict[str, bytearray] | None = None,
 ) -> None:
     """Apply every site in ``pack`` to ``xbe_data``.
+
+    If the pack has any ``xbr_sites`` and the caller provides an
+    ``xbr_files`` dict (``{filename: bytearray}``), each XBR edit
+    is dispatched against the matching buffer via
+    :mod:`azurik_mod.patching.xbr_spec`.  Packs without xbr_sites
+    ignore ``xbr_files`` completely; packs with xbr_sites but no
+    buffers surface a clear error (can't silently no-op a data
+    edit, the user asked for it).
 
     Dispatch rules, in order:
 
@@ -779,6 +788,7 @@ def apply_pack(
     #    opt in via the `custom_apply` field.
     if pack.custom_apply is not None:
         pack.custom_apply(xbe_data, **params)
+        _dispatch_xbr_sites(pack, xbr_files, params)
         return
 
     # 2. Derive the effective site list.  AZURIK_NO_SHIMS swaps every
@@ -826,6 +836,54 @@ def apply_pack(
             raise TypeError(
                 f"pack {pack.name!r} has site of unsupported type "
                 f"{type(site).__name__}")
+
+    # 5. XBR-side edits.  Skipped for packs without xbr_sites
+    #    (byte / shim-only packs pay zero cost).
+    _dispatch_xbr_sites(pack, xbr_files, params)
+
+
+def _dispatch_xbr_sites(
+    pack,
+    xbr_files: dict[str, bytearray] | None,
+    params: dict[str, float],
+) -> None:
+    """Walk ``pack.xbr_sites`` and apply each one.
+
+    Packs with no xbr_sites are silent no-ops.  Packs with
+    xbr_sites but no ``xbr_files`` buffers raise cleanly — the
+    apply was asked to mutate XBR data without being handed any,
+    so a silent no-op would corrupt the user's expectation.
+    """
+    sites = getattr(pack, "xbr_sites", None)
+    if not sites:
+        return
+    if xbr_files is None:
+        raise ValueError(
+            f"pack {pack.name!r} has {len(sites)} xbr_sites but "
+            f"apply_pack was called without xbr_files={{}} — the "
+            f"ISO build pipeline must load and hand in the XBR "
+            f"buffers this pack edits.  Touched files: "
+            f"{list(getattr(pack, 'touched_xbr_files', lambda: ())())}")
+    # Lazy imports keep the XBR plumbing off the hot path for
+    # every XBE-only pack.
+    from azurik_mod.patching.xbr_spec import (
+        XbrEditSpec,
+        XbrParametricEdit,
+        apply_xbr_edit_spec,
+        apply_xbr_parametric_edit,
+    )
+    for site in sites:
+        if isinstance(site, XbrEditSpec):
+            print(f"  {site.label}")
+            apply_xbr_edit_spec(xbr_files, site)
+        elif isinstance(site, XbrParametricEdit):
+            value = float(params.get(site.name, site.default))
+            print(f"  {site.label} = {value} {site.unit}")
+            apply_xbr_parametric_edit(xbr_files, site, value)
+        else:
+            raise TypeError(
+                f"pack {pack.name!r} has xbr_site of unsupported "
+                f"type {type(site).__name__}")
 
 
 def verify_trampoline_patch(xbe_data: bytes, patch: TrampolinePatch) -> str:

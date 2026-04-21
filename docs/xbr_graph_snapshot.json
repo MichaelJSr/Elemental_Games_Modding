@@ -1,0 +1,773 @@
+{
+  "schema_version": 1,
+  "description": "Pointer-graph summary snapshot for every vanilla Azurik XBR.  Regenerate with scripts/xbr_graph_snapshot.py after intentional parser changes.",
+  "file_count": 42,
+  "files": {
+    "a1.xbr": {
+      "size_bytes": 33246174,
+      "toc_entries": 2696,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 845,
+        "pbrw": 222,
+        "rdms": 1066,
+        "sdsr": 7,
+        "sprv": 1,
+        "surf": 179,
+        "tern": 331,
+        "wave": 40
+      }
+    },
+    "a3.xbr": {
+      "size_bytes": 30721030,
+      "toc_entries": 3385,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 1154,
+        "pbrw": 324,
+        "rdms": 1478,
+        "sdsr": 6,
+        "sprv": 1,
+        "surf": 183,
+        "tern": 192,
+        "wave": 43
+      }
+    },
+    "a5.xbr": {
+      "size_bytes": 27950322,
+      "toc_entries": 3084,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 941,
+        "pbrw": 252,
+        "rdms": 1193,
+        "sdsr": 6,
+        "sprv": 1,
+        "surf": 193,
+        "tern": 445,
+        "wave": 49
+      }
+    },
+    "a6.xbr": {
+      "size_bytes": 21902518,
+      "toc_entries": 1313,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 422,
+        "pbrw": 102,
+        "rdms": 524,
+        "sdsr": 7,
+        "sprv": 1,
+        "surf": 137,
+        "tern": 78,
+        "wave": 38
+      }
+    },
+    "airship.xbr": {
+      "size_bytes": 10159755,
+      "toc_entries": 920,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 317,
+        "pbrw": 51,
+        "rdms": 368,
+        "sdsr": 2,
+        "sprv": 1,
+        "surf": 76,
+        "tern": 83,
+        "wave": 18
+      }
+    },
+    "airship_docking.xbr": {
+      "size_bytes": 7758898,
+      "toc_entries": 1481,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 618,
+        "pbrw": 61,
+        "rdms": 679,
+        "sdsr": 4,
+        "sprv": 1,
+        "surf": 76,
+        "tern": 26,
+        "wave": 12
+      }
+    },
+    "airship_docking_water.xbr": {
+      "size_bytes": 12273920,
+      "toc_entries": 1786,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 618,
+        "pbrw": 62,
+        "rdms": 680,
+        "sdsr": 4,
+        "sprv": 1,
+        "surf": 379,
+        "tern": 26,
+        "wave": 12
+      }
+    },
+    "airship_trans.xbr": {
+      "size_bytes": 15039012,
+      "toc_entries": 1815,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 625,
+        "pbrw": 65,
+        "rdms": 690,
+        "sdsr": 5,
+        "sprv": 1,
+        "surf": 386,
+        "tern": 25,
+        "wave": 14
+      }
+    },
+    "characters.xbr": {
+      "size_bytes": 67672859,
+      "toc_entries": 3394,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "banm": 709,
+        "bmsh": 238,
+        "body": 158,
+        "gshd": 271,
+        "ndbg": 113,
+        "node": 113,
+        "pbrc": 279,
+        "pbrw": 10,
+        "rdms": 289,
+        "sprv": 271,
+        "surf": 919,
+        "tern": 12,
+        "wave": 11
+      }
+    },
+    "config.xbr": {
+      "size_bytes": 565818,
+      "toc_entries": 18,
+      "total_refs": 10112,
+      "refs_by_tag": {
+        "tabl": 10112
+      },
+      "unmodeled_tags": {}
+    },
+    "d1.xbr": {
+      "size_bytes": 30388628,
+      "toc_entries": 1993,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 596,
+        "pbrw": 144,
+        "rdms": 740,
+        "sdsr": 8,
+        "sprv": 1,
+        "surf": 166,
+        "tern": 285,
+        "wave": 49
+      }
+    },
+    "d2.xbr": {
+      "size_bytes": 28997352,
+      "toc_entries": 4081,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 1329,
+        "pbrw": 268,
+        "rdms": 1597,
+        "sdsr": 6,
+        "sprv": 1,
+        "surf": 215,
+        "tern": 619,
+        "wave": 42
+      }
+    },
+    "diskreplace_air.xbr": {
+      "size_bytes": 9392034,
+      "toc_entries": 612,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 163,
+        "pbrw": 60,
+        "rdms": 222,
+        "sdsr": 6,
+        "sprv": 1,
+        "surf": 124,
+        "tern": 19,
+        "wave": 12
+      }
+    },
+    "diskreplace_earth.xbr": {
+      "size_bytes": 9314024,
+      "toc_entries": 577,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 153,
+        "pbrw": 61,
+        "rdms": 213,
+        "sdsr": 6,
+        "sprv": 1,
+        "surf": 117,
+        "tern": 9,
+        "wave": 12
+      }
+    },
+    "diskreplace_fire.xbr": {
+      "size_bytes": 9391887,
+      "toc_entries": 587,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 154,
+        "pbrw": 61,
+        "rdms": 214,
+        "sdsr": 6,
+        "sprv": 1,
+        "surf": 124,
+        "tern": 10,
+        "wave": 12
+      }
+    },
+    "diskreplace_life.xbr": {
+      "size_bytes": 9404211,
+      "toc_entries": 593,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 155,
+        "pbrw": 62,
+        "rdms": 216,
+        "sdsr": 6,
+        "sprv": 1,
+        "surf": 124,
+        "tern": 12,
+        "wave": 12
+      }
+    },
+    "diskreplace_water.xbr": {
+      "size_bytes": 9387824,
+      "toc_entries": 592,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 156,
+        "pbrw": 61,
+        "rdms": 216,
+        "sdsr": 6,
+        "sprv": 1,
+        "surf": 123,
+        "tern": 12,
+        "wave": 12
+      }
+    },
+    "diskreplchars.xbr": {
+      "size_bytes": 1249662,
+      "toc_entries": 17,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "banm": 2,
+        "bmsh": 2,
+        "body": 2,
+        "gshd": 2,
+        "sprv": 2,
+        "surf": 7
+      }
+    },
+    "e2.xbr": {
+      "size_bytes": 85394672,
+      "toc_entries": 8260,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 2931,
+        "pbrw": 629,
+        "rdms": 3560,
+        "sdsr": 24,
+        "sprv": 1,
+        "surf": 577,
+        "tern": 423,
+        "wave": 111
+      }
+    },
+    "e5.xbr": {
+      "size_bytes": 50845868,
+      "toc_entries": 6311,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 1929,
+        "pbrw": 647,
+        "rdms": 2576,
+        "sdsr": 16,
+        "sprv": 1,
+        "surf": 221,
+        "tern": 863,
+        "wave": 54
+      }
+    },
+    "e6.xbr": {
+      "size_bytes": 36012468,
+      "toc_entries": 3468,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 1028,
+        "pbrw": 268,
+        "rdms": 1296,
+        "sdsr": 8,
+        "sprv": 1,
+        "surf": 481,
+        "tern": 310,
+        "wave": 72
+      }
+    },
+    "e7.xbr": {
+      "size_bytes": 15404796,
+      "toc_entries": 1732,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 641,
+        "pbrw": 67,
+        "rdms": 708,
+        "sdsr": 12,
+        "sprv": 1,
+        "surf": 157,
+        "tern": 96,
+        "wave": 45
+      }
+    },
+    "english.xbr": {
+      "size_bytes": 37053388,
+      "toc_entries": 493,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "sdsr": 134,
+        "surf": 125,
+        "wave": 234
+      }
+    },
+    "f1.xbr": {
+      "size_bytes": 22553279,
+      "toc_entries": 1978,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 638,
+        "pbrw": 186,
+        "rdms": 824,
+        "sdsr": 10,
+        "sprv": 1,
+        "surf": 148,
+        "tern": 100,
+        "wave": 67
+      }
+    },
+    "f2.xbr": {
+      "size_bytes": 19096487,
+      "toc_entries": 2032,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 680,
+        "pbrw": 152,
+        "rdms": 832,
+        "sdsr": 10,
+        "sprv": 1,
+        "surf": 79,
+        "tern": 223,
+        "wave": 51
+      }
+    },
+    "f3.xbr": {
+      "size_bytes": 25695679,
+      "toc_entries": 2183,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 622,
+        "pbrw": 114,
+        "rdms": 736,
+        "sdsr": 8,
+        "sprv": 1,
+        "surf": 475,
+        "tern": 162,
+        "wave": 61
+      }
+    },
+    "f4.xbr": {
+      "size_bytes": 23230579,
+      "toc_entries": 1414,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 351,
+        "pbrw": 171,
+        "rdms": 522,
+        "sdsr": 7,
+        "sprv": 1,
+        "surf": 163,
+        "tern": 128,
+        "wave": 67
+      }
+    },
+    "f6.xbr": {
+      "size_bytes": 20989579,
+      "toc_entries": 1556,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 550,
+        "pbrw": 110,
+        "rdms": 660,
+        "sdsr": 8,
+        "sprv": 1,
+        "surf": 106,
+        "tern": 70,
+        "wave": 47
+      }
+    },
+    "fx.xbr": {
+      "size_bytes": 38238150,
+      "toc_entries": 3572,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 113,
+        "ndbg": 113,
+        "node": 113,
+        "pbrc": 764,
+        "pbrw": 101,
+        "rdms": 865,
+        "sdsr": 31,
+        "sprv": 113,
+        "surf": 648,
+        "tern": 9,
+        "wave": 700
+      }
+    },
+    "hourglass.xbr": {
+      "size_bytes": 37432,
+      "toc_entries": 20,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "surf": 20
+      }
+    },
+    "index/index.xbr": {
+      "size_bytes": 167958,
+      "toc_entries": 1,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {}
+    },
+    "interface.xbr": {
+      "size_bytes": 45042338,
+      "toc_entries": 1116,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "font": 4,
+        "sdsr": 1,
+        "surf": 1102,
+        "wave": 8
+      }
+    },
+    "life.xbr": {
+      "size_bytes": 17649848,
+      "toc_entries": 1244,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 423,
+        "pbrw": 74,
+        "rdms": 497,
+        "sdsr": 7,
+        "sprv": 1,
+        "surf": 123,
+        "tern": 88,
+        "wave": 27
+      }
+    },
+    "loc.xbr": {
+      "size_bytes": 60,
+      "toc_entries": 0,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {}
+    },
+    "selector.xbr": {
+      "size_bytes": 2700556,
+      "toc_entries": 214,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 37,
+        "pbrw": 30,
+        "rdms": 67,
+        "sprv": 1,
+        "surf": 39,
+        "tern": 36
+      }
+    },
+    "town.xbr": {
+      "size_bytes": 63224342,
+      "toc_entries": 3413,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 2,
+        "levl": 1,
+        "ndbg": 2,
+        "node": 2,
+        "pbrc": 778,
+        "pbrw": 538,
+        "rdms": 1316,
+        "sdsr": 25,
+        "sprv": 2,
+        "surf": 348,
+        "tern": 319,
+        "wave": 79
+      }
+    },
+    "training_room.xbr": {
+      "size_bytes": 4618688,
+      "toc_entries": 327,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 3,
+        "levl": 1,
+        "ndbg": 3,
+        "node": 3,
+        "pbrc": 93,
+        "pbrw": 40,
+        "rdms": 133,
+        "sdsr": 1,
+        "sprv": 3,
+        "surf": 28,
+        "tern": 13,
+        "wave": 6
+      }
+    },
+    "w1.xbr": {
+      "size_bytes": 42678296,
+      "toc_entries": 3021,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 738,
+        "pbrw": 234,
+        "rdms": 972,
+        "sdsr": 13,
+        "sprv": 1,
+        "surf": 625,
+        "tern": 345,
+        "wave": 89
+      }
+    },
+    "w2.xbr": {
+      "size_bytes": 32952732,
+      "toc_entries": 1393,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 248,
+        "pbrw": 135,
+        "rdms": 383,
+        "sdsr": 7,
+        "sprv": 1,
+        "surf": 432,
+        "tern": 123,
+        "wave": 60
+      }
+    },
+    "w3.xbr": {
+      "size_bytes": 28930025,
+      "toc_entries": 2519,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 2,
+        "levl": 1,
+        "ndbg": 2,
+        "node": 2,
+        "pbrc": 781,
+        "pbrw": 127,
+        "rdms": 908,
+        "sdsr": 9,
+        "sprv": 2,
+        "surf": 461,
+        "tern": 174,
+        "wave": 49
+      }
+    },
+    "w4.xbr": {
+      "size_bytes": 40635260,
+      "toc_entries": 2984,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 848,
+        "pbrw": 314,
+        "rdms": 1162,
+        "sdsr": 9,
+        "sprv": 1,
+        "surf": 286,
+        "tern": 310,
+        "wave": 50
+      }
+    },
+    "wirlpoolfixed.xbr": {
+      "size_bytes": 9460992,
+      "toc_entries": 615,
+      "total_refs": 0,
+      "refs_by_tag": {},
+      "unmodeled_tags": {
+        "gshd": 1,
+        "levl": 1,
+        "ndbg": 1,
+        "node": 1,
+        "pbrc": 116,
+        "pbrw": 22,
+        "rdms": 137,
+        "sdsr": 1,
+        "sprv": 1,
+        "surf": 331,
+        "wave": 1
+      }
+    }
+  }
+}

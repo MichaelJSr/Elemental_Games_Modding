@@ -27,6 +27,11 @@ from azurik_mod.patching.spec import (
     PatchSpec,
     TrampolinePatch,
 )
+from azurik_mod.patching.xbr_spec import (
+    XbrEditSpec,
+    XbrParametricEdit,
+    XbrSite,
+)
 
 SiteType = Union[PatchSpec, ParametricPatch, TrampolinePatch]
 
@@ -140,6 +145,27 @@ class PatchPack:
     Use sparingly — every custom_apply is a special case that
     downstream tooling has to understand separately."""
 
+    xbr_sites: tuple[XbrSite, ...] = field(default_factory=tuple)
+    """Declarative XBR edits bundled with this feature.
+
+    Mirror of :attr:`sites` but for ``.xbr`` data files (config.xbr,
+    level XBRs).  Supported shapes:
+
+    - :class:`~azurik_mod.patching.xbr_spec.XbrEditSpec` — fixed
+      edit (set value / rewrite string / replace bytes).  Analogous
+      to :class:`PatchSpec`.
+    - :class:`~azurik_mod.patching.xbr_spec.XbrParametricEdit` —
+      slider-driven numeric edit.  Analogous to
+      :class:`ParametricPatch`.
+
+    At ISO-build time, :func:`apply_pack` receives a dict of
+    ``{xbr_filename: bytearray}`` and dispatches each xbr site
+    against it via
+    :func:`~azurik_mod.patching.xbr_spec.apply_xbr_edit_spec` /
+    :func:`~azurik_mod.patching.xbr_spec.apply_xbr_parametric_edit`.
+
+    Byte-only / XBE-only packs leave this empty — no build cost."""
+
     deprecated: bool = False
     """When True, the pack stays registered (so CLI + tests + direct
     ``apply_pack`` calls still work) but the GUI's Patches page hides
@@ -165,10 +191,40 @@ class PatchPack:
         """Return only the TrampolinePatch entries in this pack."""
         return [s for s in self.sites if isinstance(s, TrampolinePatch)]
 
+    def xbr_parametric_sites(self) -> list[XbrParametricEdit]:
+        """Return only the XbrParametricEdit entries in ``xbr_sites``."""
+        return [s for s in self.xbr_sites
+                if isinstance(s, XbrParametricEdit)]
+
+    def xbr_static_sites(self) -> list[XbrEditSpec]:
+        """Return only the static XbrEditSpec entries in ``xbr_sites``."""
+        return [s for s in self.xbr_sites
+                if isinstance(s, XbrEditSpec)]
+
+    def touched_xbr_files(self) -> tuple[str, ...]:
+        """Filenames (``"config.xbr"``, ``"a1.xbr"``, …) this pack
+        edits.  Deduped but declaration-order-preserving."""
+        seen: set[str] = set()
+        out: list[str] = []
+        for site in self.xbr_sites:
+            if site.xbr_file in seen:
+                continue
+            seen.add(site.xbr_file)
+            out.append(site.xbr_file)
+        return tuple(out)
+
     @property
     def parameters(self) -> tuple[str, ...]:
-        """Names of every slider exposed by this pack (in declaration order)."""
-        return tuple(p.name for p in self.parametric_sites())
+        """Names of every slider exposed by this pack (in declaration order).
+
+        Includes both XBE-side ParametricPatch sliders and XBR-side
+        XbrParametricEdit sliders — GUI consumers need the unified
+        view to render one slider UI per parameter regardless of
+        where the bytes land.
+        """
+        xbe = tuple(p.name for p in self.parametric_sites())
+        xbr = tuple(p.name for p in self.xbr_parametric_sites())
+        return xbe + xbr
 
 
 #: Primary feature-authoring type — identical to :class:`PatchPack`.

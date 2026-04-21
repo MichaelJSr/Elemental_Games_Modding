@@ -1130,8 +1130,36 @@ def cmd_save_edit(args) -> None:
 
 
 def cmd_xbr_edit(args) -> None:
-    """``azurik-mod xbr edit <in> <out>``."""
+    """``azurik-mod xbr edit <in> <out>``.
+
+    Supports both the legacy same-size byte / string replacements
+    (via :class:`azurik_mod.xbe_tools.xbr_edit.XbrEditor`) and the
+    Phase-2 structural primitives (via
+    :mod:`azurik_mod.xbr.edits`) when ``--set-value`` is passed.
+    The two modes share the same XBR buffer so you can mix them
+    in one invocation.
+    """
     from .xbr_edit import XbrEditError, XbrEditor
+    from azurik_mod.xbr import XbrDocument
+    from azurik_mod.xbr.edits import (
+        XbrStructuralError,
+        set_keyed_double,
+        set_keyed_string,
+    )
+
+    # Reject blocked-on-RE flags up front so partial state never
+    # hits disk when the user mixed a shippable op with a blocked
+    # one in the same invocation.
+    blocked_flags = (
+        getattr(args, "add_row", None),
+        getattr(args, "remove_row", None),
+        getattr(args, "grow_pool", None),
+    )
+    if any(blocked_flags):
+        print("xbr edit: --add-row / --remove-row / --grow-pool are "
+              "not shippable yet.  See docs/XBR_FORMAT.md § Backlog "
+              "for the unblock path.", file=sys.stderr)
+        sys.exit(2)
 
     editor = XbrEditor.load(Path(args.input))
     try:
@@ -1154,8 +1182,123 @@ def cmd_xbr_edit(args) -> None:
     except XbrEditError as exc:
         print(f"xbr edit: {exc}", file=sys.stderr)
         sys.exit(1)
+
+    # Structural edits (Phase 2).  Reuse the same bytearray so the
+    # legacy XbrEditor log and the structural edits end up in one
+    # output file.
+    structural = list(getattr(args, "set_value", None) or ())
+    structural_str = list(getattr(args, "set_keyed_string", None) or ())
+    if structural or structural_str:
+        # XbrDocument always copies on construction so mutations
+        # happen on a fresh buffer; we reflect them back into the
+        # editor's buffer at the end of the structural block.
+        doc = XbrDocument.from_bytes(editor._data)
+        try:
+            for spec in structural:
+                # "section/entity/prop=value"
+                if "=" not in spec or "/" not in spec:
+                    raise XbrStructuralError(
+                        f"bad --set-value spec {spec!r}: expected "
+                        f"'section/entity/prop=value'")
+                path, val = spec.split("=", 1)
+                try:
+                    section, entity, prop = path.split("/", 2)
+                except ValueError:
+                    raise XbrStructuralError(
+                        f"bad --set-value path {path!r}: expected "
+                        f"'section/entity/prop'")
+                sec = doc.keyed_sections().get(section)
+                if sec is None:
+                    raise XbrStructuralError(
+                        f"section {section!r} not a keyed table in "
+                        f"{args.input}")
+                set_keyed_double(sec, entity, prop, float(val))
+                editor.log.record(
+                    f"set_value: {section}/{entity}/{prop} = {val}")
+            for spec in structural_str:
+                if "=" not in spec or "/" not in spec:
+                    raise XbrStructuralError(
+                        f"bad --set-keyed-string spec {spec!r}: "
+                        f"expected 'section/entity/prop=string'")
+                path, val = spec.split("=", 1)
+                section, entity, prop = path.split("/", 2)
+                sec = doc.keyed_sections().get(section)
+                if sec is None:
+                    raise XbrStructuralError(
+                        f"section {section!r} not a keyed table in "
+                        f"{args.input}")
+                set_keyed_string(sec, entity, prop, val)
+                editor.log.record(
+                    f"set_keyed_string: {section}/{entity}/{prop} "
+                    f"= {val!r}")
+        except XbrStructuralError as exc:
+            print(f"xbr edit: {exc}", file=sys.stderr)
+            sys.exit(1)
+        # Commit mutations back into the editor's buffer so the
+        # subsequent write() picks them up.
+        editor._data[:] = doc.raw
+
     editor.write(Path(args.output))
     print(editor.log.format())
+
+
+def cmd_xbr_verify(args) -> None:
+    """``azurik-mod xbr verify <file>``.
+
+    Round-trips the file through :class:`XbrDocument` and reports:
+
+    - Whether the raw bytes round-trip losslessly.
+    - Whether every pointer ref resolves to an in-bounds target.
+    - Whether any unmodeled tag types are present (informational —
+      not a failure).
+
+    Exit code 0 when every invariant holds; 1 on drift.
+    """
+    from azurik_mod.xbr import PointerGraph, XbrDocument
+    from azurik_mod.xbr.sections import RawSection
+
+    path = Path(args.path)
+    if not path.exists():
+        print(f"ERROR: {path} does not exist", file=sys.stderr)
+        sys.exit(1)
+
+    raw = path.read_bytes()
+    try:
+        doc = XbrDocument.load(path)
+    except ValueError as exc:
+        print(f"xbr verify: parse failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    ok = True
+    if doc.dumps() != raw:
+        print("xbr verify: FAIL — round-trip byte-identity broken",
+              file=sys.stderr)
+        ok = False
+
+    graph = PointerGraph(doc)
+    unresolved = [rr for rr in graph if rr.target_offset is None]
+    if unresolved:
+        print(f"xbr verify: WARN — {len(unresolved)} refs didn't "
+              f"resolve (partial parser coverage?)")
+
+    sz = len(doc.raw)
+    out_of_bounds = [rr for rr in graph
+                     if rr.target_offset is not None
+                     and not (0 <= rr.target_offset < sz)]
+    if out_of_bounds:
+        print(f"xbr verify: FAIL — {len(out_of_bounds)} refs point "
+              f"past EOF", file=sys.stderr)
+        ok = False
+
+    raw_count = sum(1 for i in range(len(doc.toc))
+                    if isinstance(doc.section_for(i), RawSection))
+
+    if ok:
+        print(f"xbr verify: OK  ({len(doc.toc)} TOC entries, "
+              f"{len(graph)} refs, {raw_count} unmodeled sections)")
+        sys.exit(0)
+    else:
+        sys.exit(1)
 
 
 def cmd_level_preview(args) -> None:
@@ -1248,6 +1391,7 @@ __all__ = [
     "cmd_shim_inspect",
     "cmd_struct_diff",
     "cmd_test_for_va",
+    "cmd_xbr_verify",
     "cmd_xbe_addr",
     "cmd_xbe_find_floats",
     "cmd_xbe_find_refs",

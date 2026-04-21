@@ -66,6 +66,19 @@ table when you're looking for something specific.
   time).
 - [`DECOMP.md`](DECOMP.md) — XBE section map + notable function
   reference (FPS patch territory, input, collision, globals).
+- [`XBR_FORMAT.md`](XBR_FORMAT.md) — **`.xbr` container
+  byte-level reference**.  Header + TOC + per-tag section
+  layouts; explicit "UNKNOWN" markers for unreversed fields;
+  backlog of RE work that unblocks structural edits on levels /
+  index.xbr.
+- [`XBR_PACKS.md`](XBR_PACKS.md) — **XBR-side feature authoring
+  guide**.  How to bundle declarative ``.xbr`` edits into a
+  feature pack via ``xbr_sites``; XBE and XBR edits combine in
+  one :func:`apply_pack` call.
+- [`xbr_graph_snapshot.json`](xbr_graph_snapshot.json) —
+  Pointer-graph summary per vanilla XBR.  Drift-guarded in
+  ``tests/test_xbr_graph_snapshot.py``; regenerate via
+  ``python scripts/xbr_graph_snapshot.py``.
 
 ### Reference data
 

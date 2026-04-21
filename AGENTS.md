@@ -79,6 +79,12 @@ Before you consider any task done:
 - **All VA anchors + function exports** →
   `shims/include/azurik.h` + `shims/include/azurik_vanilla.h`,
   both cross-referenced from `docs/ghidra_snapshot.json`.
+- **`.xbr` data-file modding** (config.xbr cells, level XBRs)
+  → the `azurik_mod/xbr/` package (document model + structural
+  edit primitives) plus `azurik_mod/patching/xbr_spec.py`
+  (declarative `XbrEditSpec` / `XbrParametricEdit` packs).  See
+  [`docs/XBR_PACKS.md`](docs/XBR_PACKS.md) for authoring,
+  [`docs/XBR_FORMAT.md`](docs/XBR_FORMAT.md) for the byte spec.
 - **Ghidra-side state snapshot** →
   [`docs/ghidra_snapshot.json`](docs/ghidra_snapshot.json) (490
   named functions, 4,926 labels, 3 structs).  Regenerate via
@@ -117,6 +123,24 @@ Before you consider any task done:
   `VanillaSymbol(name="strncmp", ...)` generates mangled
   `_strncmp`.
 
+### Pattern: add an XBR-side feature (data-file edit)
+1. Confirm the target cell via `azurik-mod xbr inspect` or the
+   GUI's XBR Editor page.
+2. Create `azurik_mod/patches/<name>/__init__.py` declaring a
+   `Feature` with `xbr_sites=(...)` — usually one
+   `XbrParametricEdit` for a slider or `XbrEditSpec` for a fixed
+   edit.  Leave `sites=[]` and `apply=lambda *_: None`.  See
+   [`docs/XBR_PACKS.md`](docs/XBR_PACKS.md) and
+   [`azurik_mod/patches/cheat_entity_hp/`](azurik_mod/patches/cheat_entity_hp/)
+   for the canonical template.
+3. Register the side-effect import in
+   [`azurik_mod/patches/__init__.py`](azurik_mod/patches/__init__.py).
+4. Add a regression test mirroring
+   [`tests/test_cheat_entity_hp.py`](tests/test_cheat_entity_hp.py).
+5. CLI users enable the pack via `--enable-pack <name>` on
+   `randomize-full`; the GUI Patches page picks it up
+   automatically once it appears in the registry.
+
 ### Gotcha: Ghidra prologue bytes
 `tests/test_va_audit.py` pins an allow-list of first-byte
 prologue patterns.  If you add a vanilla symbol whose first
@@ -152,6 +176,8 @@ byte isn't in the list, the test fails.  Either:
 - **Save-file format investigation**: [`docs/SAVE_FORMAT.md`](docs/SAVE_FORMAT.md)
 - **Decompile reference** (XBE section map + notable functions): [`docs/DECOMP.md`](docs/DECOMP.md)
 - **Plugin authoring (third-party pack distribution)**: [`docs/PLUGINS.md`](docs/PLUGINS.md)
+- **`.xbr` byte-level spec**: [`docs/XBR_FORMAT.md`](docs/XBR_FORMAT.md)
+- **XBR-side feature authoring**: [`docs/XBR_PACKS.md`](docs/XBR_PACKS.md)
 
 When in doubt, [`docs/INDEX.md`](docs/INDEX.md) is the complete
 doc map.

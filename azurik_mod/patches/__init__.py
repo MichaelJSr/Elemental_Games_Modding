@@ -92,6 +92,11 @@ import azurik_mod.patches.animation_root_motion_scale  # noqa: F401
 # patch packs.  Imported purely for its ``register_feature(...)``
 # side effects.
 import azurik_mod.patches.randomize  # noqa: F401
+# Reference implementation for the Phase-3 XBR pack API — a single
+# slider that scales garret4's hitPoints via config.xbr.  Also acts
+# as an integration canary so apply_pack ``xbr_sites`` wiring stays
+# exercised end-to-end.
+import azurik_mod.patches.cheat_entity_hp  # noqa: F401
 
 # Non-pack helpers used by the CLI (not part of the pack registry).
 from azurik_mod.patches._player_character import apply_player_character_patch

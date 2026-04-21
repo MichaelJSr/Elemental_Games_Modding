@@ -369,6 +369,31 @@ landed in the built ISO.
 
 ---
 
+## `cheat_entity_hp`  *(XBR pack reference)*
+
+Scales the player entity's starting hit points by editing
+`critters_critter_data.garret4.hitPoints` inside `config.xbr`.
+Zero XBE bytes touched.
+
+- **CLI**: `azurik-mod randomize-full --enable-pack cheat_entity_hp`
+  (combine with `--pack-params-json` to set the value).
+- **GUI**: Patches tab → Player → `cheat_entity_hp`, plus a slider
+  for the hit-point value (default 100, range 1-9999).
+
+Reference implementation for the declarative XBR pack API (Phase
+3 of the XBR mod platform).  Shows the minimal pattern every
+data-file feature follows:
+
+- `sites=[]` — no XBE byte patches.
+- `apply=lambda *_: None` — dispatcher does all the work.
+- `xbr_sites=(XbrParametricEdit(...),)` — the declarative edit.
+
+See [`azurik_mod/patches/cheat_entity_hp/__init__.py`](../azurik_mod/patches/cheat_entity_hp/__init__.py)
+for the full source and [`docs/XBR_PACKS.md`](XBR_PACKS.md) for
+the authoring walkthrough.
+
+---
+
 ## Writing a new patch pack
 
 1. Create `azurik_mod/patches/<feature>.py`.
@@ -394,3 +419,24 @@ landed in the built ISO.
 6. Update this file.
 
 The GUI's generic Patches page ([`gui/pages/patches.py`](../gui/pages/patches.py)) and `azurik-mod verify-patches` will pick the new pack up automatically.
+
+### Writing an XBR-side pack
+
+If your feature only touches data files (config.xbr / level XBRs)
+and not the XBE, skip the byte-patch machinery entirely:
+
+1. Create `azurik_mod/patches/<feature>/__init__.py`.
+2. Declare a `Feature` with `sites=[]`, `apply=lambda *_: None`,
+   and a populated `xbr_sites` tuple of
+   :class:`~azurik_mod.patching.xbr_spec.XbrEditSpec` /
+   :class:`~azurik_mod.patching.xbr_spec.XbrParametricEdit`
+   entries.
+3. Register with `register_feature(...)` as above.
+4. Add the side-effect import line to
+   [`azurik_mod/patches/__init__.py`](../azurik_mod/patches/__init__.py).
+5. Add a regression test mirroring
+   [`tests/test_cheat_entity_hp.py`](../tests/test_cheat_entity_hp.py).
+
+The unified `apply_pack` dispatcher + `XbrStaging` cache handle
+load / mutate / flush at build time automatically.  Full
+walkthrough in [`docs/XBR_PACKS.md`](XBR_PACKS.md).

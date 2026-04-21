@@ -391,13 +391,51 @@ Binary-save editing (inventory / position blobs with non-text
 keys) still requires deeper RE and is tracked in
 ``docs/SAVE_FORMAT.md``.
 
-**#18 XBR write-back support** — **SHIPPED**
-`azurik-mod xbr edit <in> <out> --set-string 'old=new' --tag <T>`
-(+ `--replace-bytes OFFSET:HEX`).  Conservative same-size
-in-place string / byte replacement via
-:mod:`azurik_mod.xbe_tools.xbr_edit`.  Full structural edits
-(add records, grow string pool) deferred until the pool layout
-is fully reversed.
+**#18 XBR write-back support** — **SHIPPED** (expanded in round 12)
+Two layers:
+
+1. Same-size byte / string replacement via
+   :mod:`azurik_mod.xbe_tools.xbr_edit` —
+   `azurik-mod xbr edit --set-string 'old=new' --tag <T>`
+   and `--replace-bytes OFFSET:HEX`.
+2. **Structural keyed-table edits** via
+   :mod:`azurik_mod.xbr.edits` —
+   `azurik-mod xbr edit --set-value section/entity/prop=float`
+   and `--set-keyed-string section/entity/prop=string`.  Cell
+   values + in-slot string rewrites work end-to-end through the
+   new :class:`~azurik_mod.xbr.XbrDocument` model.
+
+Both share the same underlying file buffer so a single
+invocation can mix all four op types.  See
+[`docs/XBR_FORMAT.md`](XBR_FORMAT.md) for the byte-level spec
+and [`docs/XBR_PACKS.md`](XBR_PACKS.md) for how to bundle XBR
+edits into a feature pack.
+
+Structural row / pool ops (`--add-row`, `--remove-row`,
+`--grow-pool`) and all level-XBR structural writes are
+**blocked on further RE** — see
+[`XBR_FORMAT.md § Backlog`](XBR_FORMAT.md#backlog) for the
+unblock path.  The CLI flags exist and fail non-zero with a
+clear message so scripts don't silently no-op.
+
+**Related new verbs**:
+- `azurik-mod xbr xref` — pointer-graph listing + unmodeled-tag
+  inventory (Phase 1 of the XBR mod platform).
+- `azurik-mod xbr verify` — round-trip + ref-integrity check
+  (Phase 5).
+
+**Pack infrastructure**: features can now declare `xbr_sites`
+alongside their XBE `sites` — :class:`XbrEditSpec` and
+:class:`XbrParametricEdit` dispatch through the unified
+:func:`apply_pack` at ISO-build time via the new
+:class:`XbrStaging` lazy-load / flush cache.  See
+[`azurik_mod/patches/cheat_entity_hp/`](../azurik_mod/patches/cheat_entity_hp/)
+for the reference implementation.
+
+**GUI**: new `XBR Editor` page opens any .xbr, renders its
+TOC + keyed-table grid, edits cells in place, and emits
+pending edits into the Build tab's config-mod JSON for merge
+at build time.
 
 **#19 Shim test generator** — **SHIPPED**
 `azurik-mod new-shim <name> --emit-test` extends the scaffolder
@@ -450,7 +488,12 @@ structural preview — strings + plausible ``(f32,f32,f32)``
 position triples per gameplay tag (``node``, ``surf``,
 ``rdms``, ``levl``, …) plus entry-count / byte-count totals.
 A graphical 3D viewer is a natural follow-up; not blocking the
-structured-data use case.
+structured-data use case.  Structural editing of level XBRs
+(add / remove entities) is blocked on per-tag reversal — see
+[`XBR_FORMAT.md` § Backlog](XBR_FORMAT.md#backlog) for the
+unblock path; the XBR mod platform's [GUI editor](../gui/pages/xbr_editor.py)
+and [`XBR_PACKS.md`](XBR_PACKS.md) declarative API are in place
+ready to consume those primitives once they ship.
 
 **#25 Asset fingerprint registry** — **SHIPPED**
 `azurik-mod assets fingerprint <root> [--out FILE]` +
