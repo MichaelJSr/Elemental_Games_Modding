@@ -2,6 +2,133 @@
 
 ## Unreleased
 
+### Level-loading-zone audit (round 13)
+
+A full audit of every level-transition zone in _Azurik — Rise of
+Perathia (USA)_, plus the canonical typed catalog that pins the
+randomizer + Ghidra + shim sources against the shipped ISO.
+Includes the 2026 deep-pass re-verification that caught three
+new findings the initial audit missed.
+
+**New catalog module.**
+`azurik_mod/randomizer/loading_zones.py` — the single source of
+truth for every loading zone in vanilla Azurik.  Defines a
+`LoadingZone` dataclass and enumerates:
+
+- **50 randomizable zones** across 22 levels (the connection
+  shuffler's shuffle set), with 4 flagged as non-shufflable:
+  `f1 -> f7` (cut level), `w1 -> airship` / `airship -> a3`
+  (one-way cutscene pair), `e2 -> e2` (bink-return self-loop
+  for `catalisks.bik`).
+- **23 `selector.xbr` zones** — every cheat-menu warp target,
+  including the dangling reference to the cut level `e4` **and**
+  the `levels/selector` self-re-entry slot (new in deep-pass;
+  plays the prophecy-intro cutscene before re-loading the
+  selector).
+- **3 cutscene-return zones** — `diskreplace_earth`,
+  `diskreplace_water`, and `wirlpoolfixed` all land in `town`.
+- **18 implicit `levelSwitch` entities** across 11 source XBRs
+  (recount from initial audit's 16; the old count inflated by
+  counting `levelSwitch` substring hits instead of null-
+  terminated entity names).  Covers boss-trigger /
+  disk-placement entities (`a6 Killed`, `w1 AirshipFight`,
+  `airship EndFight`, …), tutorial exits, airship-cutscene XBRs,
+  and disk-replace movie chains.  All carry NO `levels/...`
+  destination string; the engine resolves the destination
+  contextually via `scene_state_tick`.
+- **4 hardcoded XBE zones** — `levels/water/w1` (tutorial-end
+  fallback), `levels/selector` + `levels/training_room` (dev-
+  menu fallbacks), and the `return-to-shell` spot literal.
+- **1 ending-cutscene zone** (new in deep-pass) — the
+  `EndGame_levelSwitch` in `d1.xbr` chains seven bink movies
+  (`spideyzardeath` / `disksrestored` / `newdeath` /
+  `credits1..4`) and exits to the Xbox shell via the shared
+  `return-to-shell` spot handler.  Not randomizable
+  (destination is the shell, not a level).
+
+**Randomizer exclusions derived from the catalog.**
+`shufflers.EXCLUDE_TRANSITIONS` is now
+`loading_zones.derive_exclude_transitions(cut_levels=KNOWN_CUT_LEVELS)`.
+Adding a new cut level to `KNOWN_CUT_LEVELS` or flipping a zone's
+`kind` from `randomizable` to one of the cutscene-only tags now
+automatically flows through — no manual exclusion-set edits.
+
+**Ghidra sync.**
+Three previously-nameless Ghidra functions have been renamed and
+plate-commented:
+
+- `FUN_00053750` → **`load_level_from_path`** — the engine's core
+  level-load entrypoint; every zone in every category funnels
+  through here.
+- `FUN_00055AB0` → **`scene_state_tick`** — the scene / state
+  machine per-frame tick; resolves implicit-zone destinations
+  (tutorial-end, airship cutscenes).
+- `FUN_00052950` → **`level_teleport_helper`** — teleport /
+  shell-return helper (produces the `return-to-shell` zone).
+
+`dev_menu_flag_check` at `0x00052F50` was already named in Ghidra
+and stays as-is; its stdcall-8 ABI is unchanged.
+
+**`level_teleport_helper` calling-convention quirk (deep-pass).**
+The function is declared `cdecl` in both
+`vanilla_symbols.py` and `azurik_vanilla.h`, but its prologue
+doesn't touch the stack — it implicitly reads its scene-state
+pointer from `EDI` and its destination level-path pointer (or
+NULL for shell-return) from `EBX`.  A cdecl thunk call from a
+shim will read stale register values and either crash or no-op.
+Both surfaces now carry a **WARNING** block telling shim authors
+to call `load_level_from_path(NULL, "return-to-shell")`
+directly instead.  See `docs/LOADING_ZONES_AUDIT.md` §6a.
+
+**Python + C surfaces updated.**
+`azurik_mod/patching/vanilla_symbols.py` gained three new
+registrations (`load_level_from_path`, `scene_state_tick`,
+`level_teleport_helper`), all marked `cdecl` and fully documented
+with their role in the loading-zone flow.
+`shims/include/azurik_vanilla.h` gained matching extern
+declarations so shim authors can reference them by name.
+`docs/ghidra_snapshot.json` regenerated.  `azurik-mod
+ghidra-sync` confirms the live :8193 project + snapshot +
+registry all agree.
+
+**Drift protection — 15 new tests.**
+`tests/test_loading_zones.py` pins the catalog against both the
+shipped ISO (catalog → ISO and ISO → catalog directions) and
+catalog-shape invariants (counts, uniqueness, kind coverage,
+`EXCLUDE_TRANSITIONS` derivation).  Skips the ISO-backed layer
+when no `gamedata/` directory is available.  Deep-pass added
+four new shape tests:
+`test_selector_has_self_reentry_slot` (23 slots + self-entry),
+`test_ending_zones_include_credits_chain` (`d1` Spideyzar),
+`test_implicit_zones_include_2026_discoveries` (pins the 18
+named entities), and a tightened
+`test_hardcoded_xbe_zones_cover_known_ghidra_anchors`.
+
+**Deep-pass methodology — six verification phases.**
+The 2026 re-verification phase ran six exhaustive sweeps against
+the shipped USA ISO:
+(1) enumerate every `levels/…` string across all XBRs + the
+XBE; (2) analyze every `load_level_from_path` caller
+(scene_state_tick, level_teleport_helper, dev_menu_flag_check);
+(3) scan every null-terminated `_levelSwitch` entity tag;
+(4) survey other entity types (`portal`, `teleport`, `door`) —
+none load levels; (5) verify the save-game load path funnels
+through the catalogued mechanisms; (6) double-check every
+`bink:` chain for semicolon-delimited sequences that end in a
+level load.  Phase 1 surfaced the selector self-re-entry, phase
+3 fixed the implicit-entity recount, and phase 6 surfaced the
+Spideyzar credits chain.  Full methodology in
+`docs/LOADING_ZONES_AUDIT.md` §9.
+
+**Docs.**
+`docs/LOADING_ZONES_AUDIT.md` is the new human-readable
+companion: counts per source level, full Ghidra VA map, deep-
+pass methodology, `level_teleport_helper` ABI caveat, known
+limitations, and the drift-protection workflow.
+
+Test run: 1115 passed, 1 skipped, 828 subtests passed
+(`pytest tests/` on a vanilla-ISO-equipped workstation).
+
 ### Quick Stats sub-group + flap / HP dead-cell fix (round 12.1)
 
 Two bug-class fixes rolled up into one user-facing release:

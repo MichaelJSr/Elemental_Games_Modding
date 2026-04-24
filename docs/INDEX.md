@@ -96,6 +96,12 @@ table when you're looking for something specific.
   derivation), recovery workflows.
 - [`RANDOMIZER_AUDIT.md`](RANDOMIZER_AUDIT.md) — Randomizer code
   audit: pools, solvability, gem-skip identifier collisions.
+- [`LOADING_ZONES_AUDIT.md`](LOADING_ZONES_AUDIT.md) — **Every
+  level-transition zone in the shipped USA ISO** (randomizable,
+  selector, cutscene-return, implicit, hardcoded-XBE, and the
+  end-game credits chain).  Backed by the canonical
+  `azurik_mod/randomizer/loading_zones.py` catalog and the
+  three-layer drift guard in `tests/test_loading_zones.py`.
 - [`PLUGINS.md`](PLUGINS.md) — **Plugin authoring guide**.  How
   to ship a third-party patch pack via `importlib.metadata`
   entry points.

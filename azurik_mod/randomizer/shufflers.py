@@ -526,11 +526,33 @@ LEVEL_PATHS = {
 # Valid destination levels for randomization (exclude cut levels)
 VALID_DEST_LEVELS = set(LEVEL_PATHS.keys()) - {"airship"}  # airship is one-way, special
 
-# Transitions to exclude from randomization
-EXCLUDE_TRANSITIONS = {
-    ("f1", "f7"),     # cut level
-    ("e2", "e2"),     # self-reference (bink movie)
-}
+# Transitions to exclude from randomization.
+#
+# Derived from the canonical
+# :mod:`azurik_mod.randomizer.loading_zones` catalog so that any
+# new cut level added to :data:`azurik_mod.assets.KNOWN_CUT_LEVELS`
+# or any newly-catalogued non-randomizable zone (airship one-way,
+# bink-return self-loop, etc.) automatically flows into the
+# randomizer's exclusion set.  The snapshot below pins the
+# currently-known set for readability + diffing.
+#
+# Current snapshot (vanilla USA ISO, April 2026):
+#
+#    - ("f1",      "f7")       cut level (KNOWN_CUT_LEVELS)
+#    - ("w1",      "airship")  one-way cutscene into airship
+#    - ("airship", "a3")       airship arrival cutscene (always W1_A3)
+#    - ("e2",      "e2")       bink-return self-loop (catalisks.bik)
+#
+# Any drift against the live game is caught by
+# ``tests/test_loading_zones.py``.
+from azurik_mod.assets import KNOWN_CUT_LEVELS as _KNOWN_CUT_LEVELS
+from azurik_mod.randomizer.loading_zones import (
+    derive_exclude_transitions as _derive_exclude_transitions,
+)
+
+EXCLUDE_TRANSITIONS: frozenset[tuple[str, str]] = _derive_exclude_transitions(
+    cut_levels=_KNOWN_CUT_LEVELS,
+)
 
 
 def _find_level_transitions(data: bytes, level_name: str) -> list[dict]:

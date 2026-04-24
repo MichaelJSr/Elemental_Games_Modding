@@ -106,10 +106,10 @@ Run `azurik-mod --help` for the full verb list; `azurik-mod <verb> --help` for p
 
 ```bash
 pip install -e .[dev]
-pytest                # ~40 s on a modern CPU; 780+ tests
+pytest                # ~50 s on a modern CPU; 1100+ tests
 ```
 
-Coverage: patch loader round-trip, every pack's apply/verify, FPS safety invariants, player-physics byte landings, VA-anchor drift guards, shim COFF loader, GUI pack browser + slider routing, save-file editor round-trip, randomizer pools + solver.
+Coverage: patch loader round-trip, every pack's apply/verify, FPS safety invariants, player-physics byte landings, VA-anchor drift guards, shim COFF loader, GUI pack browser + slider routing, save-file editor round-trip, randomizer pools + solver, and the level-loading-zone catalog pinned against the shipped ISO (see [`docs/LOADING_ZONES_AUDIT.md`](docs/LOADING_ZONES_AUDIT.md)).
 
 ---
 

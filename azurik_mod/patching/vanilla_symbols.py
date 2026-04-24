@@ -241,6 +241,59 @@ register(VanillaSymbol(
 ))
 
 register(VanillaSymbol(
+    name="load_critters_config",
+    va=0x00049480,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "Boot-time loader that populates every runtime "
+        "``CritterData`` struct (``Entity *`` registry targets) "
+        "from the seven ``critters_*`` keyed-table assets in "
+        "``config.xbr``.  Sections visited in order:\n\n"
+        "  1. ``config/critters_engine``       — collision + "
+        "rendering fields (piVar9[0..0xD])\n"
+        "  2. ``config/critters_critter_data`` — gameplay fields "
+        "(piVar9[0x0E..0x43])\n"
+        "  3. ``config/critters_damage``       — hitPoints + "
+        "per-damage-type table (piVar9[5] + piVar9[0x23])\n"
+        "  4. ``config/critters_damage_fx``    — per-type FX "
+        "(piVar9[0x24])\n"
+        "  5. ``config/critters_sounds``       — audio refs\n"
+        "  6. ``config/critters_item_data``    — item drops\n"
+        "  7. ``config/critters_special_anims`` — anim overrides\n\n"
+        "IMPORTANT: ``hitPoints`` is read from the "
+        "``critters_damage`` grid (NOT ``critters_critter_data`` "
+        "as a surface read of the CritterData struct layout "
+        "might suggest).  The call at VA 0x495A0-ish does "
+        "``config_name_lookup(critters_damage_grid, \"hitPoints\") "
+        "→ col_idx`` followed by "
+        "``config_cell_value(grid, row, col, default=&DAT_00195790)``; "
+        "the result lands in ``piVar9[5]`` (struct offset 0x14, "
+        "``CritterData.hit_points``).\n\n"
+        "Ghidra-vs-disk caveat (as of April 2026): the shipped "
+        "``config.xbr`` DOES have a ``critters_damage`` grid BUT "
+        "it has no ``hitPoints`` column and no ``garret4`` row.  "
+        "The engine's column-name lookup falls through to the "
+        "default (``&DAT_00195790``, value = 200.0) — every "
+        "critter's HP is effectively hard-coded in the default "
+        "blob at runtime.  The ``critters_critter_data`` grid DOES "
+        "have a ``garret4.hitPoints`` cell but the engine never "
+        "reads it; that cell is dead data.  The ``player_max_hp`` "
+        "pack still writes to ``critters_critter_data.garret4.hitPoints`` "
+        "because it's the only writable cell in the file and "
+        "carries the vanilla value (200.0) for forward-compat, "
+        "while the engine-observable HP rests on the default "
+        "used for the missing ``critters_damage.hitPoints`` column. "
+        "See ``docs/LEARNINGS.md`` § Dead ``critters_critter_data."
+        "hitPoints`` cell for the full trace.\n\n"
+        "ABI: __cdecl — callers (e.g. the boot data-load "
+        "sequence) do CALL with no ADD ESP, N cleanup and the "
+        "function uses ESP-relative stack allocation only "
+        "(``SUB ESP, 0x8A8`` prologue).  No args."
+    ),
+))
+
+register(VanillaSymbol(
     name="load_armor_properties_config",
     va=0x0003C700,
     calling_convention="cdecl",
@@ -257,11 +310,101 @@ register(VanillaSymbol(
         "at ``puVar1[0xE]`` (struct offset 0x38).\n\n"
         "IMPORTANT: the asset ``config/armor_properties`` "
         "resolves to the keyed-table at file offset 0x3000 in "
-        "config.xbr (NOT the TOC entry 1 at 0x4000).  The "
-        "azurik_mod keyed-tables parser labels that 15x19 grid "
-        "as 'armor_properties_real' to disambiguate from the "
-        "TOC's 'armor_properties' string (which is actually "
-        "attack-animation data, 16x24)."
+        "config.xbr — i.e. inside TOC entry 0 at 0x002000, "
+        "whose raw TOC tag is ``armor_hit_fx`` — NOT the TOC "
+        "entry 1 at 0x4000 whose tag happens to be "
+        "``armor_properties``.  The azurik_mod keyed-tables "
+        "parser labels these two slots by what the engine "
+        "actually does with them: ``armor_properties_real`` "
+        "(0x002000, engine-read, 15x19) and "
+        "``armor_properties_unused`` (0x004000, dead data, "
+        "16x24 — looks like leftover attack-animation data)."
+    ),
+))
+
+register(VanillaSymbol(
+    name="armor_reset_out_of_fuel",
+    va=0x000837A0,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "Per-armor-slot reset helper invoked when an armor "
+        "feature runs out of fuel (``puVar1[0xD]`` / fuel-state "
+        "word reaches 0).  Takes the slot struct pointer (``int "
+        "*``, layout documented in azurik_mod docs under "
+        "``armor_properties_real``) and:\n\n"
+        "  1. Calls ``FUN_000836b0(slot)`` — inner zeroer.\n"
+        "  2. Re-resolves the slot's ``Armor`` row via "
+        "``config_name_lookup(config_ctx, \"Armor\")``.\n"
+        "  3. Re-links ``slot[8]`` to a default feature via "
+        "``FUN_0003c660(1)``.\n"
+        "  4. Clears scratch: ``slot[0x17] = 0``, "
+        "``slot->+0x61 byte = 0``, ``slot[9] / [0xb] / [0xd] = 0``.\n\n"
+        "Used by ``mark_armor_feature_used`` / the armor tick "
+        "cluster.  Named in Ghidra by hand (April 2026 armor-"
+        "state reverse-engineering pass).\n\n"
+        "ABI: __cdecl — default x86 convention, single stack "
+        "arg, no explicit cleanup.  Signature provisional until "
+        "a shim actually calls it."
+    ),
+))
+
+register(VanillaSymbol(
+    name="mark_armor_feature_used",
+    va=0x000846D0,
+    calling_convention="fastcall",
+    arg_bytes=0,
+    doc=(
+        "Flips the ``used`` byte on the current player's armor "
+        "feature slot if the slot is live (``fuel != 0``) and "
+        "not already marked.  Per-controller state lives in "
+        "``g_armor_state_per_controller`` — 0x15 DWORDs per "
+        "controller indexed by ``g_active_controller_index`` "
+        "(4 = global fallback / preview).  The ``used`` byte is "
+        "at ``slot + feature_idx + 0x48``.\n\n"
+        "Arguments (from __fastcall ABI):\n"
+        "  ECX = feature-slot key (undefined4 in decomp)\n"
+        "  EDX = feature index (int, 0-based row into the "
+        "       per-controller 0x15-DWORD block)\n\n"
+        "Named in Ghidra April 2026.  Relevant to any shim that "
+        "wants to hook the armor-usage tracker (e.g. fuel HUD "
+        "overlay, no-fuel-consumption cheat).\n\n"
+        "ABI: __fastcall — declared ``void mark_armor_feature_used"
+        "(unsigned slot_key, int feature_idx)`` in "
+        "azurik_vanilla.h; clang lowers to @fastcall@0 mangling "
+        "because fastcall routes the first two args through ECX/"
+        "EDX (no stack bytes to clean up)."
+    ),
+))
+
+register(VanillaSymbol(
+    name="player_ground_land_tick",
+    va=0x00088A80,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "Per-frame tick run after the player lands (ground-"
+        "state transition from airborne).  Called from the "
+        "player state machine (``player_physics_state_machine"
+        "`` @ 0x0008CCC0) whenever the player's vertical "
+        "velocity has been reconciled with terrain and a "
+        "new stance needs to be chosen.\n\n"
+        "Branches into:\n"
+        "  - ``player_slope_slide_tick`` (0x00089A70) when "
+        "    surface normal > 45° from upright\n"
+        "  - Idle/run/walk stance when the terrain is flat\n\n"
+        "Ghidra decomp shows ``in_EAX`` / ``extraout_ECX`` / "
+        "``unaff_ESI`` usage — meaning the function expects "
+        "multiple arguments passed via registers, not purely "
+        "via the stack.  The declared ``(char param_1)`` is "
+        "what Ghidra inferred; real ABI is likely fastcall-ish "
+        "with ECX = player-state and ESI = critter context.\n\n"
+        "ABI: declared __cdecl because no shim currently calls "
+        "it and cdecl is the safest default for future "
+        "call-through wrappers; update the convention once an "
+        "actual call site is added.  Shim authors who want to "
+        "call this should study the caller frame at "
+        "0x0008CCC0 first."
     ),
 ))
 
@@ -3050,6 +3193,105 @@ register(VanillaSymbol(
         "block that the retired infinite_fuel pack NOPed."
     ),
 ))
+
+
+# ---------------------------------------------------------------------------
+# Level-loading pipeline (see docs/LOADING_ZONES_AUDIT.md)
+# ---------------------------------------------------------------------------
+#
+# These four functions form the engine's level-transition backbone.
+# They don't have static CALL xrefs (scene_state_tick and
+# load_level_from_path are dispatched via function-pointer slots on
+# the state-machine object), so calling convention has to be read
+# off the prologue: all four use stack-relative parameter fetches
+# (MOV reg, [ESP+N]), which rules out fastcall/thiscall.  We label
+# them ``cdecl`` — the conservative choice for Azurik's XBE
+# (matches ``return;`` without ``RET N`` cleanup in the
+# decompilation).  Shim authors rarely need to CALL these directly;
+# their primary purpose in the registry is to preserve the VAs +
+# documentation so future tools (randomizer, level-editor, save-
+# state auditors) have a typed anchor point.
+
+register(VanillaSymbol(
+    name="load_level_from_path",
+    va=0x00053750,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "Core level-load entrypoint.  "
+        "Signature: ``void load_level_from_path("
+        "SceneState *scene, const char *path, const char *spot, "
+        "char is_movie)``.  Copies `path` into scene->pending_path "
+        "(strncpy to 0x50 bytes), dispatches to the bink-movie "
+        "branch when `path` starts with 'bink:', otherwise loads "
+        "the 'level' fourcc asset, parses the resulting "
+        "scene/node/sdsr data, constructs the player entity, and "
+        "hands off to the teleport-spot logic.  Every randomizable "
+        "levelSwitch entity, every selector.xbr cheat-menu choice, "
+        "and every hardcoded XBE fallback (levels/water/w1, "
+        "levels/selector, levels/training_room) ultimately funnels "
+        "through here.  Invoked indirectly via a state-machine "
+        "function-pointer slot, so there are no static CALL xrefs "
+        "— confirmed by ``xrefs_list(to=0x53750, type=CALL)`` "
+        "returning 0 hits."
+    ),
+))
+
+register(VanillaSymbol(
+    name="scene_state_tick",
+    va=0x00055AB0,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "Scene / state-machine per-frame tick.  "
+        "Signature: ``int scene_state_tick(SceneState *scene, "
+        "int *state_slot, float dt)``.  Advances the global scene "
+        "state (bink-movie playback, level-switch cooldowns, "
+        "cutscene fade-in/out).  When a `levelSwitch` entity fires "
+        "but its destination is empty (the 'implicit zone' class: "
+        "training_room end-of-tutorial, airship_docking*, "
+        "airship_trans, most diskreplace_*), this function resolves "
+        "the real destination.  Notably: the tutorial-end fallback "
+        "reads the hardcoded path literal 'levels/water/w1' + spot "
+        "'Town_W1_Movie' from data VA 0x0019ECF8 and calls "
+        "load_level_from_path.  Also routes the fallback chain for "
+        "dev_menu_flag_check's 'levels/training_room' / "
+        "'levels/selector' literals."
+    ),
+))
+
+register(VanillaSymbol(
+    name="level_teleport_helper",
+    va=0x00052950,
+    calling_convention="cdecl",
+    arg_bytes=0,
+    doc=(
+        "Level-teleport / shell-return helper.  "
+        "Signature: ``int level_teleport_helper(char mode)``.  "
+        "Takes a byte flag: when the high bit is set, pushes the "
+        "spot literal 'return-to-shell' into the level-load "
+        "pipeline so the engine exits the current level back to "
+        "the title shell.  Otherwise handles in-level teleport / "
+        "respawn spot resolution.  Used by the death handler and "
+        "by the debug-console exit path.  Catalogued as a "
+        "``hardcoded_xbe`` loading-zone source in "
+        ":mod:`azurik_mod.randomizer.loading_zones`.  "
+        "**WARNING (2026 deep-pass audit):** declared here as "
+        "``cdecl`` but the callee implicitly reads its scene-state "
+        "pointer from ``EDI`` and its destination level-path "
+        "pointer (or NULL for shell-return) from ``EBX``.  "
+        "Shim authors SHOULD NOT call this function directly "
+        "through the ``cdecl`` thunk — instead call "
+        "``load_level_from_path(NULL, \"return-to-shell\")`` "
+        "to replicate the shell-return branch.  See "
+        "``docs/LOADING_ZONES_AUDIT.md`` §6a."
+    ),
+))
+
+# ``dev_menu_flag_check`` is already registered above as
+# ``stdcall @8`` for the existing ``_dev_menu_flag_check@8`` import
+# used by the ``qol_enable_dev_menu`` shim stub.  Don't re-register
+# here — the loading-zones audit consumes the existing entry.
 
 
 # ---------------------------------------------------------------------------

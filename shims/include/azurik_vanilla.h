@@ -145,10 +145,13 @@ int load_asset_by_fourcc(int fourcc, int flags);
 
 /* Boot-time armor-properties loader.  Populates DAT_0038C4D4
  * (armor slot struct array) from the `config/armor_properties`
- * asset (which resolves to the keyed-table at file offset 0x3000
- * in config.xbr, labelled `armor_properties_real` by
- * azurik_mod.keyed_tables) and DAT_0038C4AC (armor hit-fx
- * slot array) from `config/armor_hit_fx`.
+ * asset, which resolves to the keyed-table at file offset 0x3000
+ * in config.xbr.  That slot is inside TOC entry 0 at 0x002000,
+ * whose raw TOC tag is `armor_hit_fx` — NOT the 0x004000 entry
+ * tagged `armor_properties`.  The engine never reads the 0x004000
+ * grid, so azurik_mod labels the two slots
+ * `armor_properties_real` (0x002000, engine-read) and
+ * `armor_properties_unused` (0x004000, dead data).
  *
  * The Flaps value (cell type double) is read via
  * config_cell_value, converted to int64 via a FPU FISTP helper
@@ -157,6 +160,80 @@ int load_asset_by_fourcc(int fourcc, int flags);
  *
  * Vanilla VA: 0x0003C700  (mangled: _load_armor_properties_config) */
 void load_armor_properties_config(void);
+
+/* Boot-time critter-config loader.  Walks the seven
+ * ``config/critters_*`` keyed tables and populates every live
+ * ``CritterData`` struct (reached via ``entity_lookup(name)``):
+ *
+ *   1. critters_engine        -> collision + rendering fields
+ *   2. critters_critter_data  -> gameplay fields (f.fear / run
+ *                                speed / ouchN knockback / drops)
+ *   3. critters_damage        -> hitPoints + damageGroup +
+ *                                damageType + per-type table
+ *   4. critters_damage_fx     -> per-damage-type FX
+ *   5. critters_sounds        -> SFX refs
+ *   6. critters_item_data     -> item drops
+ *   7. critters_special_anims -> anim overrides
+ *
+ * CRITICAL: ``hitPoints`` is read from the ``critters_damage``
+ * grid (NOT ``critters_critter_data``).  On the shipped
+ * ``config.xbr`` the ``critters_damage`` grid has no
+ * ``hitPoints`` column and no ``garret4`` row, so every
+ * critter's engine-observable HP falls through to the default
+ * at ``DAT_00195790`` (200.0) — see docs/LEARNINGS.md § "Dead
+ * critters_critter_data.hitPoints cell".  The
+ * ``player_max_hp`` pack still writes to
+ * ``critters_critter_data.garret4.hitPoints`` because it's the
+ * only writable slot with a ``garret4`` column in the file,
+ * and documents the Ghidra-vs-disk mismatch in its pack
+ * docstring.
+ *
+ * Vanilla VA: 0x00049480  (mangled: _load_critters_config) */
+void load_critters_config(void);
+
+
+/* ------------------------------------------------------------------
+ * Armor / feature-state helpers (April 2026 orphan-label promotion)
+ * ------------------------------------------------------------------ */
+
+/* Reset an armor-feature slot to its default config-driven state
+ * when it runs out of fuel.  Called by the armor tick cluster;
+ * restores ``slot[8]`` to the default feature (via FUN_0003c660)
+ * and clears scratch / flag bytes on the slot struct.  See the
+ * docstring in azurik_mod/patching/vanilla_symbols.py for the
+ * full per-field reset sequence.
+ *
+ * Vanilla VA: 0x000837A0  (mangled: _armor_reset_out_of_fuel) */
+void armor_reset_out_of_fuel(int *armor_slot);
+
+/* Stamp the ``used`` byte on the current player's armor feature
+ * slot if the slot is live (fuel != 0).  __fastcall ABI: the
+ * slot key lives in ECX, the feature index in EDX.  Per-controller
+ * state lives in ``g_armor_state_per_controller`` (0x15 DWORDs per
+ * controller), indexed by ``g_active_controller_index``.
+ *
+ * Vanilla VA: 0x000846D0  (mangled: @mark_armor_feature_used@0) */
+__attribute__((fastcall))
+void mark_armor_feature_used(unsigned slot_key, int feature_idx);
+
+
+/* ------------------------------------------------------------------
+ * Player state-machine tick helpers (April 2026 orphan-label
+ * promotion)
+ * ------------------------------------------------------------------ */
+
+/* Per-frame tick run after the player lands (ground-state transition
+ * from airborne).  Dispatched by ``player_physics_state_machine``
+ * at VA 0x0008CCC0.  Branches into ``player_slope_slide_tick`` on
+ * steep terrain or into stance-select on flat ground.
+ *
+ * Ghidra decomp shows register-borne extra args (``in_EAX`` /
+ * ``extraout_ECX`` / ``unaff_ESI``); the declared cdecl(char) is
+ * provisional.  Shim authors calling this must study
+ * ``player_physics_state_machine`` @ 0x0008CCC0 first.
+ *
+ * Vanilla VA: 0x00088A80  (mangled: _player_ground_land_tick) */
+unsigned player_ground_land_tick(char state_byte);
 
 
 /* ------------------------------------------------------------------
@@ -1409,6 +1486,87 @@ long double config_cell_value(void *grid, int row, int col,
 __attribute__((cdecl))
 long double cvar_get_double(void);
 
+
+/* ==================================================================
+ * Level-loading pipeline (April 2026 loading-zone audit pass)
+ * ==================================================================
+ *
+ * These four functions form the level-transition backbone.  See
+ * ``docs/LOADING_ZONES_AUDIT.md`` for the full map of which
+ * loading zones go through which function, and
+ * ``azurik_mod/randomizer/loading_zones.py`` for the typed
+ * catalog of every zone the randomizer + cheat menu + XBE
+ * fallback chain produces.
+ *
+ * None of these are called via static CALL sites — they're all
+ * dispatched through function pointers on the global scene-state
+ * object.  The externs below exist primarily as documentation:
+ * a shim that wants to hook level transitions will install a
+ * trampoline over the function prologue, not issue a direct
+ * CALL.  For that trampoline the VA suffices; the extern is the
+ * mnemonic hook authors should reach for when wiring the
+ * patch-site.
+ * ================================================================== */
+
+/* Core level-load entrypoint.  Copies ``path`` into the scene
+ * state's pending-path slot, dispatches the bink-movie branch
+ * when the path starts with ``"bink:"``, otherwise loads the
+ * ``'level'`` fourcc asset, parses scene/node/sdsr data, spawns
+ * the player entity, and hands off to the teleport-spot logic.
+ *
+ * Every randomizable ``levelSwitch`` entity, every cheat-menu
+ * choice from ``selector.xbr``, and every hardcoded XBE
+ * fallback (``"levels/water/w1"``, ``"levels/selector"``,
+ * ``"levels/training_room"``) funnels through here.
+ *
+ * ``is_movie`` is the 4th byte argument: non-zero when the
+ * transition is a cutscene (bink path OR cutscene-return spot),
+ * zero for normal level-switch entity fires.
+ *
+ * Vanilla VA: 0x00053750  (mangled: _load_level_from_path) */
+__attribute__((cdecl))
+void load_level_from_path(int *scene, const char *path,
+                          const char *spot, char is_movie);
+
+/* Scene / state-machine per-frame tick.  Drives bink-movie
+ * playback, level-switch cooldowns, and cutscene fade-in / out.
+ *
+ * When a ``levelSwitch`` entity fires but its destination field
+ * is empty (the 'implicit zone' class: training_room
+ * end-of-tutorial, ``airship_docking*``, ``airship_trans``, most
+ * ``diskreplace_*``), this function resolves the real
+ * destination.  Notably: tutorial-end reads the hardcoded path
+ * literal ``"levels/water/w1"`` + spot ``"Town_W1_Movie"`` from
+ * data VA ``0x0019ECF8`` and calls ``load_level_from_path``.
+ *
+ * Vanilla VA: 0x00055AB0  (mangled: _scene_state_tick) */
+__attribute__((cdecl))
+int scene_state_tick(int *scene, int *state_slot, float dt);
+
+/* Level-teleport / shell-return helper.  Takes a byte flag:
+ * when the high bit is set, pushes the spot literal
+ * ``"return-to-shell"`` into the level-load pipeline so the
+ * engine exits the current level back to the title shell.
+ * Otherwise handles in-level teleport / respawn spot
+ * resolution.  Used by the death handler and debug-console exit
+ * path.
+ *
+ * Catalogued as a ``hardcoded_xbe`` loading-zone source in
+ * ``azurik_mod/randomizer/loading_zones.py``.
+ *
+ * WARNING (2026 deep-pass audit): declared ``cdecl`` but the
+ * callee implicitly reads its scene-state pointer from ``EDI``
+ * and its destination level-path pointer (or NULL for
+ * shell-return) from ``EBX``.  Calling this thunk directly from
+ * a cdecl shim will NOT set up those registers correctly -- the
+ * function reads stale EDI/EBX values and either crashes or
+ * no-ops.  Prefer calling ``load_level_from_path(NULL,
+ * "return-to-shell")`` instead to replicate the shell-return
+ * branch.  See ``docs/LOADING_ZONES_AUDIT.md`` section 6a.
+ *
+ * Vanilla VA: 0x00052950  (mangled: _level_teleport_helper) */
+__attribute__((cdecl))
+int level_teleport_helper(char mode);
 
 
 #ifdef __cplusplus
