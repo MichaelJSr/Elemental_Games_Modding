@@ -1575,15 +1575,35 @@ def _build_page_class():
             # --- Middle: cell grid ---
             mid = ttk.Frame(body)
             mid.grid(row=0, column=1, sticky="nsew", padx=4)
-            mid.rowconfigure(1, weight=1)
+            # Row 0: section header.  Row 1: dead-data warning
+            # banner (hidden on live sections).  Row 2: cell grid
+            # (only row that grows).
+            mid.rowconfigure(2, weight=1)
             mid.columnconfigure(0, weight=1)
             self._section_header = ttk.Label(
                 mid, text="(no section)", anchor=tk.W,
                 justify=tk.LEFT, wraplength=520)
             self._section_header.grid(
                 row=0, column=0, sticky="ew", pady=(0, 4))
+            # Dead-data warning banner — shown only when the user
+            # selects a section whose friendly name is in
+            # :data:`azurik_mod.xbr.sections.DEAD_SECTION_NAMES`.
+            # Hidden (via grid_remove) otherwise so it doesn't eat
+            # vertical space on live sections.  We lay it out in
+            # its own row above the grid so it can't be missed; the
+            # grid row index bumps to accommodate.
+            self._dead_warning = ttk.Label(
+                mid, text="",
+                foreground="#000000",
+                background="#ffc857",
+                anchor=tk.W, justify=tk.LEFT,
+                wraplength=520,
+                padding=(8, 4))
+            self._dead_warning.grid(
+                row=1, column=0, sticky="ew", pady=(0, 4))
+            self._dead_warning.grid_remove()
             grid_frame = ttk.Frame(mid)
-            grid_frame.grid(row=1, column=0, sticky="nsew")
+            grid_frame.grid(row=2, column=0, sticky="nsew")
             grid_frame.rowconfigure(0, weight=1)
             grid_frame.columnconfigure(0, weight=1)
             self._grid = ttk.Treeview(
@@ -1797,6 +1817,26 @@ def _build_page_class():
                 header += (f"  ·  {s['num_rows']} props × "
                            f"{s['num_cols']} entities")
             self._section_header.configure(text=header)
+            # Dead-data banner: friendly-name ends in "_unused" OR
+            # matches an entry in DEAD_SECTION_NAMES.  Editing a
+            # dead cell writes bytes to disk but the engine ignores
+            # them at runtime, so we pop a bright banner to spare
+            # the user the "why is my edit doing nothing?"  hour.
+            from azurik_mod.xbr.sections import DEAD_SECTION_NAMES
+            friendly_name = s.get("friendly_name") or ""
+            is_dead = (friendly_name in DEAD_SECTION_NAMES
+                       or friendly_name.endswith("_unused"))
+            if is_dead:
+                self._dead_warning.configure(
+                    text=(
+                        f"\u26A0  This section ({friendly_name}) is not "
+                        f"read by the engine at runtime.  Edits here will "
+                        f"be written to disk but WILL NOT affect "
+                        f"gameplay.  See docs/LEARNINGS.md for the list "
+                        f"of dead sections and their live counterparts."))
+                self._dead_warning.grid()
+            else:
+                self._dead_warning.grid_remove()
 
             self._grid.delete(*self._grid.get_children())
             if s.get("kind") != "keyed_table":

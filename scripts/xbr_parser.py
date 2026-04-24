@@ -74,22 +74,32 @@ def parse_toc(data: bytes) -> list[TOCEntry]:
 # Keyed-table section (15 of 18 config sections)
 # ---------------------------------------------------------------------------
 
+# ``armor_properties_real`` / ``armor_properties_unused`` reflect what
+# the engine actually does with these two TOC entries, not what their
+# raw TOC tags suggest.  Ghidra decompile of the ``config/armor_properties``
+# loader (FUN_00049480) reads the 15x19 grid at 0x003000 (header inside
+# TOC entry 0 at 0x002000 — formerly labelled ``armor_hit_fx``), while
+# the 16x24 grid at 0x004000 is referenced nowhere at runtime.  See
+# the canonical copy + rationale in
+# ``azurik_mod/xbr/sections.py::_KEYED_SECTION_OFFSETS``; this table
+# is drift-checked against that one by
+# ``tests/test_xbr_document_roundtrip.KeyedSectionOffsetsDrift``.
 KEYED_SECTION_OFFSETS = {
-    "armor_hit_fx":          0x002000,
-    "armor_properties":      0x004000,
-    "attacks_anims":         0x006000,
-    "attacks_transitions":   0x008000,
-    "critters_critter_data": 0x01A000,
-    "critters_damage":       0x035000,
-    "critters_damage_fx":    0x044000,
-    "critters_engine":       0x05A000,
-    "critters_flocking":     0x05D000,
-    "critters_item_data":    0x060000,
-    "critters_maya_stuff":   0x065000,
-    "critters_mutate":       0x066000,
-    "critters_sounds":       0x077000,
-    "critters_special_anims":0x07A000,
-    "magic":                 0x087000,
+    "armor_properties_real":   0x002000,
+    "armor_properties_unused": 0x004000,
+    "attacks_anims":           0x006000,
+    "attacks_transitions":     0x008000,
+    "critters_critter_data":   0x01A000,
+    "critters_damage":         0x035000,
+    "critters_damage_fx":      0x044000,
+    "critters_engine":         0x05A000,
+    "critters_flocking":       0x05D000,
+    "critters_item_data":      0x060000,
+    "critters_maya_stuff":     0x065000,
+    "critters_mutate":         0x066000,
+    "critters_sounds":         0x077000,
+    "critters_special_anims":  0x07A000,
+    "magic":                   0x087000,
 }
 
 

@@ -311,23 +311,45 @@ class KeyedTableSection(Section):
 # so the two can never silently diverge.
 
 
+# NOTE on the ``armor_*`` entries below: the TOC tag at 0x002000 is
+# ``armor_hit_fx`` and the one at 0x004000 is ``armor_properties``,
+# which would suggest the "flap count" armor data lives in the latter.
+# Decompile of the runtime config loader (``FUN_00049480`` reads
+# ``config/armor_properties``) shows the opposite: the **engine-read**
+# grid is the 15x19 table at +0x1000 inside the 0x002000 TOC entry
+# (i.e. the one labelled ``armor_hit_fx``), while the 16x24 grid at
+# 0x004000 is dead data that nothing references at runtime.  The XBR
+# Editor / pack authors want those two tables to be labelled by what
+# the engine actually does with them — hence ``armor_properties_real``
+# and ``armor_properties_unused``.  See ``docs/LEARNINGS.md`` §
+# "armor_hit_fx vs armor_properties".
 _KEYED_SECTION_OFFSETS: dict[str, int] = {
-    "armor_hit_fx":          0x002000,
-    "armor_properties":      0x004000,
-    "attacks_anims":         0x006000,
-    "attacks_transitions":   0x008000,
-    "critters_critter_data": 0x01A000,
-    "critters_damage":       0x035000,
-    "critters_damage_fx":    0x044000,
-    "critters_engine":       0x05A000,
-    "critters_flocking":     0x05D000,
-    "critters_item_data":    0x060000,
-    "critters_maya_stuff":   0x065000,
-    "critters_mutate":       0x066000,
-    "critters_sounds":       0x077000,
-    "critters_special_anims": 0x07A000,
-    "magic":                 0x087000,
+    "armor_properties_real":   0x002000,
+    "armor_properties_unused": 0x004000,
+    "attacks_anims":           0x006000,
+    "attacks_transitions":     0x008000,
+    "critters_critter_data":   0x01A000,
+    "critters_damage":         0x035000,
+    "critters_damage_fx":      0x044000,
+    "critters_engine":         0x05A000,
+    "critters_flocking":       0x05D000,
+    "critters_item_data":      0x060000,
+    "critters_maya_stuff":     0x065000,
+    "critters_mutate":         0x066000,
+    "critters_sounds":         0x077000,
+    "critters_special_anims":  0x07A000,
+    "magic":                   0x087000,
 }
+
+
+# Section names that are in the file but which the engine never reads.
+# The XBR Editor uses this set to pop a warning banner when the user
+# opens one of these sections so casual editors don't burn an hour
+# tuning values that do nothing at runtime.  Authored alongside
+# :data:`_KEYED_SECTION_OFFSETS` so the two stay in lockstep.
+DEAD_SECTION_NAMES: frozenset[str] = frozenset({
+    "armor_properties_unused",
+})
 
 
 # ---------------------------------------------------------------------------

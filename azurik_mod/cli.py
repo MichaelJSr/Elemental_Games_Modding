@@ -255,7 +255,7 @@ def main() -> None:
                              "have a dedicated CLI flag (xbr-only "
                              "packs, third-party plugins).  "
                              "Repeatable.  Example: --enable-pack "
-                             "cheat_entity_hp.")
+                             "player_max_hp.")
     p_full.add_argument("--config-mod",
                         help="Apply a config mod JSON (inline or file path) "
                              "that tweaks per-entity values (damage, speed, "
@@ -1341,12 +1341,26 @@ def main() -> None:
             "  - every modelled pointer ref resolves in-bounds,\n"
             "  - unmodeled tag types are reported (informational).\n"
             "\n"
+            "With --cross-check-schema, additionally iterate every\n"
+            "registered patch pack's xbr_sites and warn on any\n"
+            "(section, prop) target that azurik_mod/config/\n"
+            "schema.json does not document.  Mirror of the\n"
+            "registration-time Feature schema lint, useful against\n"
+            "already-built packs (including plugins) without\n"
+            "re-importing the feature module.\n"
+            "\n"
             "Exit 0 on success, 1 on drift.  Useful as a sanity\n"
             "check after manual xbr edit invocations."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_xbrv.add_argument("path", help="Path to a .xbr file")
+    p_xbrv.add_argument(
+        "--cross-check-schema",
+        action="store_true",
+        help=("Also lint every registered pack's xbr_sites against "
+              "azurik_mod/config/schema.json (runtime equivalent "
+              "of the register_feature schema check)."))
 
     # #24 level preview
     p_lp = sub.add_parser(

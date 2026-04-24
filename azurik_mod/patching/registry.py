@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Union
 
-from azurik_mod.patching.category import ensure_category
+from azurik_mod.patching.category import ensure_category, ensure_subgroup
 from azurik_mod.patching.feature import ShimSource
 from azurik_mod.patching.spec import (
     ParametricPatch,
@@ -73,6 +73,23 @@ class PatchPack:
     Canonical builtin ids (each with a pre-registered Category):
     ``"performance"``, ``"player"``, ``"boot"``, ``"qol"``,
     ``"other"``.  See ``azurik_mod/patching/category.py``."""
+
+    subgroup: str | None = None
+    """Optional secondary grouping **within** a :attr:`category`.
+
+    When set, the GUI's Patches page renders this feature inside a
+    labelled box (headed by the Subgroup's title) at the top of the
+    category tab, so related quick-edit sliders (e.g. ``player_max_hp``
+    + ``air_shield_flaps`` under ``quick_stats``) live together
+    rather than mixed in with the longer-form player-physics packs.
+
+    Subgroup metadata (title, description, order-within-tab) lives
+    in :mod:`azurik_mod.patching.category` alongside :class:`Category`.
+    Like categories, a subgroup id that isn't pre-registered gets an
+    auto-created placeholder.
+
+    ``None`` (the default) means "render directly in the tab body",
+    below any subgroups, matching pre-subgroup behaviour."""
 
     tags: tuple[str, ...] = field(default_factory=tuple)
     """Secondary free-form classifications surfaced in the GUI as
@@ -179,6 +196,21 @@ class PatchPack:
     docs/LEARNINGS.md § "Deprecated physics packs" for the current
     entries."""
 
+    unchecked_xbr_sites: bool = False
+    """When True, suppress the registration-time schema lint against
+    :data:`azurik_mod.config.schema`.  The lint warns once per
+    ``(pack, section, prop)`` triple that isn't documented in the
+    schema, since undocumented targets are the number-one cause of
+    "edit lands on disk but nothing changes in-game" bugs (see the
+    dead ``critters_critter_data.hitPoints`` case in
+    ``docs/LEARNINGS.md``).
+
+    Set to ``True`` for feature modules whose target cells are
+    intentionally undocumented (experimental packs, plugins that
+    know they're poking sections the upstream schema hasn't caught
+    up to yet).  Leave the default ``False`` for every shipped
+    pack so the registry stays a canary for schema drift."""
+
     def patch_specs(self) -> list[PatchSpec]:
         """Return only the PatchSpec entries in this pack."""
         return [s for s in self.sites if isinstance(s, PatchSpec)]
@@ -236,21 +268,148 @@ Feature = PatchPack
 
 _REGISTRY: dict[str, PatchPack] = {}
 
+#: Legacy pack-name aliases.  Maps old, removed pack identifiers to
+#: their current names so CLI flags (``--enable-pack cheat_entity_hp``)
+#: and saved GUI/script state keep resolving after a rename.  Each
+#: hit warns once via :mod:`warnings` so scripts get a nudge to update.
+#:
+#: Add new entries when you rename a pack; keep the old name here
+#: indefinitely — dropping an alias silently breaks third-party
+#: scripts that pinned the old name.
+_LEGACY_PACK_ALIASES: dict[str, str] = {
+    "cheat_entity_hp": "player_max_hp",
+}
+
+_WARNED_LEGACY_ALIASES: set[str] = set()
+
+
+def _resolve_legacy_alias(name: str) -> str:
+    """Map a legacy pack name to its current name (warning once).
+
+    Returns ``name`` unchanged when it isn't a known legacy alias.
+    """
+    new_name = _LEGACY_PACK_ALIASES.get(name)
+    if new_name is None:
+        return name
+    if name not in _WARNED_LEGACY_ALIASES:
+        import warnings
+        warnings.warn(
+            f"pack {name!r} was renamed to {new_name!r}; update your "
+            f"scripts / saved state to stop seeing this warning",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        _WARNED_LEGACY_ALIASES.add(name)
+    return new_name
+
 
 def register_pack(pack: PatchPack) -> PatchPack:
     """Register a patch pack. Raises on duplicate names.
 
     Also auto-creates a placeholder
     :class:`~azurik_mod.patching.category.Category` for the pack's
-    ``category`` id if no category with that id is registered yet,
-    so feature authors can spin up new categories simply by picking
-    a fresh name.
+    ``category`` id if no category with that id is registered yet
+    (and, for packs that declare a ``subgroup``, a placeholder
+    :class:`~azurik_mod.patching.category.Subgroup` scoped to that
+    category), so feature authors can spin up new groupings simply
+    by picking a fresh name.
+
+    Packs that declare ``xbr_sites`` are lint-checked against
+    :data:`azurik_mod.config.schema.json`: every ``(section, prop)``
+    that isn't in the schema warns once.  Suppress via
+    ``Feature(unchecked_xbr_sites=True)`` for intentional
+    undocumented targets (experimental / plugin packs).
     """
     if pack.name in _REGISTRY:
         raise ValueError(f"Duplicate patch pack name: {pack.name!r}")
     ensure_category(pack.category)
+    if pack.subgroup is not None:
+        ensure_subgroup(pack.subgroup, pack.category)
     _REGISTRY[pack.name] = pack
+    if pack.xbr_sites and not pack.unchecked_xbr_sites:
+        _lint_xbr_sites_against_schema(pack)
     return pack
+
+
+# ---- schema-lint plumbing --------------------------------------------
+#
+# Loaded lazily on first registration that needs it so ``import
+# azurik_mod.patching.registry`` stays cheap.  The {(section, prop)}
+# lookup set is rebuilt each test run via
+# :func:`clear_registry_for_tests`.
+#
+# We cache misses per triple so large pack collections don't spam
+# the same warning N times.
+
+_SCHEMA_CELL_INDEX: frozenset[tuple[str, str]] | None = None
+_WARNED_UNDOC_TRIPLES: set[tuple[str, str, str]] = set()
+
+
+def _schema_cell_index() -> frozenset[tuple[str, str]]:
+    """Return a cached ``{(section_name, prop_key)}`` set built from
+    ``azurik_mod/config/schema.json``.
+
+    Empty set when the schema file is missing or malformed — the
+    lint silently no-ops in that case so a broken schema never
+    blocks pack registration.
+    """
+    global _SCHEMA_CELL_INDEX
+    if _SCHEMA_CELL_INDEX is not None:
+        return _SCHEMA_CELL_INDEX
+
+    import json
+    from pathlib import Path
+
+    schema_path = (Path(__file__).resolve().parent.parent
+                   / "config" / "schema.json")
+    try:
+        raw = json.loads(schema_path.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        _SCHEMA_CELL_INDEX = frozenset()
+        return _SCHEMA_CELL_INDEX
+
+    pairs: set[tuple[str, str]] = set()
+    for sect_name, sect in (raw.get("sections") or {}).items():
+        if not isinstance(sect, dict):
+            continue
+        for prop in sect.get("properties") or ():
+            if isinstance(prop, dict) and "key" in prop:
+                pairs.add((sect_name, prop["key"]))
+    _SCHEMA_CELL_INDEX = frozenset(pairs)
+    return _SCHEMA_CELL_INDEX
+
+
+def _lint_xbr_sites_against_schema(pack: PatchPack) -> None:
+    """Warn once per undocumented ``(pack, section, prop)`` triple.
+
+    No-ops for sites whose shape doesn't carry ``section`` / ``prop``
+    (e.g. raw-bytes / string-replace edits).
+    """
+    import warnings
+
+    index = _schema_cell_index()
+    if not index:
+        return
+    for site in pack.xbr_sites:
+        section = getattr(site, "section", None)
+        prop = getattr(site, "prop", None)
+        if not section or not prop:
+            continue
+        triple = (pack.name, section, prop)
+        if triple in _WARNED_UNDOC_TRIPLES:
+            continue
+        if (section, prop) in index:
+            continue
+        _WARNED_UNDOC_TRIPLES.add(triple)
+        warnings.warn(
+            f"pack {pack.name!r}: xbr_site target {section!r}/"
+            f"{prop!r} is not documented in "
+            f"azurik_mod/config/schema.json — either add the cell "
+            f"to schema.json or set Feature(unchecked_xbr_sites="
+            f"True) to intentionally suppress this check.",
+            UserWarning,
+            stacklevel=4,
+        )
 
 
 def register_feature(feature: Feature) -> Feature:
@@ -259,8 +418,16 @@ def register_feature(feature: Feature) -> Feature:
 
 
 def get_pack(name: str) -> PatchPack:
-    """Look up a pack by name. Raises KeyError if missing."""
-    return _REGISTRY[name]
+    """Look up a pack by name.  Raises KeyError if missing.
+
+    Legacy pack names (see ``_LEGACY_PACK_ALIASES``) are transparently
+    remapped to their current names, with a one-shot
+    :class:`DeprecationWarning` on first hit so existing
+    ``--enable-pack <old_name>`` CLI flags and saved GUI state keep
+    working across renames.
+    """
+    resolved = _resolve_legacy_alias(name)
+    return _REGISTRY[resolved]
 
 
 def all_packs() -> list[PatchPack]:
@@ -337,4 +504,8 @@ def all_trampoline_sites() -> list[tuple[str, TrampolinePatch]]:
 
 def clear_registry_for_tests() -> None:
     """Testing hook — wipe the global registry between runs."""
+    global _SCHEMA_CELL_INDEX
     _REGISTRY.clear()
+    _WARNED_LEGACY_ALIASES.clear()
+    _WARNED_UNDOC_TRIPLES.clear()
+    _SCHEMA_CELL_INDEX = None

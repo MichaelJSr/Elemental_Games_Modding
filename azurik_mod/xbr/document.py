@@ -304,9 +304,9 @@ class XbrDocument:
         matches.
 
         For config.xbr specifically, this lets callers say
-        ``doc.keyed_sections()["armor_properties"]`` without knowing
-        the TOC index.  For other files every keyed-table entry
-        still shows up keyed by ``f"{tag}_{index}"``.
+        ``doc.keyed_sections()["armor_properties_real"]`` without
+        knowing the TOC index.  For other files every keyed-table
+        entry still shows up keyed by ``f"{tag}_{index}"``.
 
         Memoised on first call — the dispatch pass is a linear
         scan of the TOC and the result doesn't change across

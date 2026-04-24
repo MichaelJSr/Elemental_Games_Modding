@@ -131,12 +131,14 @@ Before you consider any task done:
    `XbrParametricEdit` for a slider or `XbrEditSpec` for a fixed
    edit.  Leave `sites=[]` and `apply=lambda *_: None`.  See
    [`docs/XBR_PACKS.md`](docs/XBR_PACKS.md) and
-   [`azurik_mod/patches/cheat_entity_hp/`](azurik_mod/patches/cheat_entity_hp/)
-   for the canonical template.
+   [`azurik_mod/patches/player_max_hp/`](azurik_mod/patches/player_max_hp/)
+   for the canonical template (renamed from ``cheat_entity_hp``
+   in round 12.1 — the legacy name still resolves through
+   ``get_pack`` for backward compatibility).
 3. Register the side-effect import in
    [`azurik_mod/patches/__init__.py`](azurik_mod/patches/__init__.py).
 4. Add a regression test mirroring
-   [`tests/test_cheat_entity_hp.py`](tests/test_cheat_entity_hp.py).
+   [`tests/test_player_max_hp.py`](tests/test_player_max_hp.py).
 5. CLI users enable the pack via `--enable-pack <name>` on
    `randomize-full`; the GUI Patches page picks it up
    automatically once it appears in the registry.

@@ -58,6 +58,8 @@ register_category(Category(
 | `rand_gems`          | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_barriers`      | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
 | `rand_connections`   | 0     | no         | `randomize`    | —             | [azurik_mod/patches/randomize/](../azurik_mod/patches/randomize/) |
+| `player_max_hp`      | 0     | no         | `player` *(Quick Stats)* | xbr       | [azurik_mod/patches/player_max_hp/](../azurik_mod/patches/player_max_hp/) |
+| `air_shield_flaps`   | 0     | no         | `player` *(Quick Stats)* | xbr       | [azurik_mod/patches/air_shield_flaps/](../azurik_mod/patches/air_shield_flaps/) |
 
 ---
 
@@ -369,16 +371,34 @@ landed in the built ISO.
 
 ---
 
-## `cheat_entity_hp`  *(XBR pack reference)*
+## `player_max_hp`  *(XBR pack reference — Player → Quick Stats)*
 
-Scales the player entity's starting hit points by editing
+Sets the player entity's starting hit points by editing
 `critters_critter_data.garret4.hitPoints` inside `config.xbr`.
 Zero XBE bytes touched.
 
-- **CLI**: `azurik-mod randomize-full --enable-pack cheat_entity_hp`
-  (combine with `--pack-params-json` to set the value).
-- **GUI**: Patches tab → Player → `cheat_entity_hp`, plus a slider
-  for the hit-point value (default 100, range 1-9999).
+- **CLI**: `azurik-mod randomize-full --enable-pack player_max_hp`
+  (combine with `--pack-params-json` to set the value).  The old
+  name `cheat_entity_hp` still resolves via the `get_pack` alias
+  table with a one-shot deprecation warning.
+- **GUI**: Patches tab → Player → **Quick Stats** → `player_max_hp`,
+  plus a slider for the hit-point value (default **200** = vanilla
+  starting HP, range 1-9999).
+- **Subgroup**: `quick_stats` — renders inside the Quick Stats
+  `LabelFrame` at the top of the Player tab.
+
+### Ghidra-versus-disk mismatch (authoring note)
+
+Ghidra decompilation of `FUN_00049480` (`0x4a2dd` / `0x4a4b7`)
+shows the engine reads `hitPoints` from the `critters_damage`
+table at runtime.  The retail `config.xbr` shipped by Adrenium
+does **not** actually have a `hitPoints` column in that section
+— the write only lands because the engine **also** consults
+`critters_critter_data.garret4.hitPoints`, which is the cell we
+target.  Documented in depth inside
+[`azurik_mod/patches/player_max_hp/__init__.py`](../azurik_mod/patches/player_max_hp/__init__.py)
+and in [`docs/LEARNINGS.md`](LEARNINGS.md) so future contributors
+don't chase the Ghidra-only path.
 
 Reference implementation for the declarative XBR pack API (Phase
 3 of the XBR mod platform).  Shows the minimal pattern every
@@ -388,9 +408,40 @@ data-file feature follows:
 - `apply=lambda *_: None` — dispatcher does all the work.
 - `xbr_sites=(XbrParametricEdit(...),)` — the declarative edit.
 
-See [`azurik_mod/patches/cheat_entity_hp/__init__.py`](../azurik_mod/patches/cheat_entity_hp/__init__.py)
+See [`azurik_mod/patches/player_max_hp/__init__.py`](../azurik_mod/patches/player_max_hp/__init__.py)
 for the full source and [`docs/XBR_PACKS.md`](XBR_PACKS.md) for
 the authoring walkthrough.
+
+---
+
+## `air_shield_flaps`  *(XBR pack — Player → Quick Stats)*
+
+Sets the number of wing flaps granted by each tier of air-shield
+armor.  Bundles three sliders into **one** pack:
+
+| Slider              | Target cell                                         | Vanilla |
+|---------------------|-----------------------------------------------------|---------|
+| `air_shield_1_flaps`| `armor_properties_real.air_shield_1.Flaps`          | 1.0     |
+| `air_shield_2_flaps`| `armor_properties_real.air_shield_2.Flaps`          | 2.0     |
+| `air_shield_3_flaps`| `armor_properties_real.air_shield_3.Flaps`          | 5.0     |
+
+- **CLI**: `azurik-mod randomize-full --enable-pack air_shield_flaps`
+  + `--pack-params-json '{"air_shield_flaps":{"air_shield_3_flaps":7.0}}'`.
+- **GUI**: Patches tab → Player → **Quick Stats** → `air_shield_flaps`
+  (three sliders rendered together).
+- **Subgroup**: `quick_stats`.
+
+The target is deliberately `armor_properties_real` (TOC entry at
+`0x002000`, which the engine actually reads) rather than the
+similarly-named TOC entry at `0x004000`, which ships as
+`armor_properties_unused` — a dead 16×24 grid the engine never
+consults.  Writing to `armor_properties_unused` is a silent no-op
+in-game and raises a warning banner in the XBR Editor.  See
+[`docs/LEARNINGS.md`](LEARNINGS.md) § "XBR armor table aliasing".
+
+The vanilla defaults match the retail values, so a build with
+`air_shield_flaps` enabled but untouched sliders produces a
+byte-identical `config.xbr` (no flush, no drift).
 
 ---
 
@@ -435,7 +486,7 @@ and not the XBE, skip the byte-patch machinery entirely:
 4. Add the side-effect import line to
    [`azurik_mod/patches/__init__.py`](../azurik_mod/patches/__init__.py).
 5. Add a regression test mirroring
-   [`tests/test_cheat_entity_hp.py`](../tests/test_cheat_entity_hp.py).
+   [`tests/test_player_max_hp.py`](../tests/test_player_max_hp.py).
 
 The unified `apply_pack` dispatcher + `XbrStaging` cache handle
 load / mutate / flush at build time automatically.  Full

@@ -429,8 +429,9 @@ alongside their XBE `sites` — :class:`XbrEditSpec` and
 :class:`XbrParametricEdit` dispatch through the unified
 :func:`apply_pack` at ISO-build time via the new
 :class:`XbrStaging` lazy-load / flush cache.  See
-[`azurik_mod/patches/cheat_entity_hp/`](../azurik_mod/patches/cheat_entity_hp/)
-for the reference implementation.
+[`azurik_mod/patches/player_max_hp/`](../azurik_mod/patches/player_max_hp/)
+for the reference implementation (renamed from
+``cheat_entity_hp`` in round 12.1).
 
 **GUI**: new `XBR Editor` page opens any .xbr, renders its
 TOC + keyed-table grid, edits cells in place, and emits

@@ -654,14 +654,58 @@ class PackBrowser(ttk.Frame):
     # ---- rendering helpers -------------------------------------------
 
     def _build_tab(self, category, packs: list) -> ttk.Frame:
-        """Render the content of one tab (Category header + pack rows)."""
+        """Render the content of one tab.
+
+        Layout, top-to-bottom:
+
+        1. Category description (if any).
+        2. One ``ttk.LabelFrame`` per registered :class:`Subgroup`
+           attached to this category — renders the packs that declared
+           ``subgroup=<id>``, in category.order then pack-registration
+           order.  Empty subgroups are skipped.
+        3. Ungrouped packs (``subgroup is None``) rendered flat at the
+           end, preserving pre-subgroup behaviour for tabs that have
+           no subgroup metadata.
+        """
+        from azurik_mod.patching.category import subgroups_for_category
+
         tab = ttk.Frame(self._notebook, padding=(12, 8))
         if category.description:
             ttk.Label(tab, text=category.description,
                       foreground="gray", wraplength=680,
                       justify=tk.LEFT).pack(anchor=tk.W, pady=(0, 8))
+
+        by_subgroup: dict[str | None, list] = {}
         for pack in packs:
+            by_subgroup.setdefault(
+                getattr(pack, "subgroup", None), []).append(pack)
+
+        for sub in subgroups_for_category(category.id):
+            sub_packs = by_subgroup.get(sub.id, [])
+            if not sub_packs:
+                continue
+            frame = ttk.LabelFrame(
+                tab, text=sub.title, padding=(10, 6))
+            frame.pack(fill=tk.X, pady=(0, 10))
+            if sub.description:
+                ttk.Label(frame, text=sub.description,
+                          foreground="gray", wraplength=660,
+                          justify=tk.LEFT).pack(anchor=tk.W, pady=(0, 6))
+            for pack in sub_packs:
+                self._render_pack_row(frame, pack)
+
+        for pack in by_subgroup.get(None, []):
             self._render_pack_row(tab, pack)
+
+        # Packs whose ``subgroup`` doesn't match any registered Subgroup
+        # for this category fall through to the flat section too, so
+        # they never silently disappear.
+        known_sub_ids = {s.id for s in subgroups_for_category(category.id)}
+        for sub_id, sub_packs in by_subgroup.items():
+            if sub_id is None or sub_id in known_sub_ids:
+                continue
+            for pack in sub_packs:
+                self._render_pack_row(tab, pack)
         return tab
 
     def _render_pack_row(self, parent, pack) -> None:
@@ -704,8 +748,9 @@ class PackBrowser(ttk.Frame):
         # user's perspective a tunable is a tunable, no matter
         # whether the value ends up in the XBE or in a data file.
         # Without this merge a Feature whose only slider is an
-        # ``XbrParametricEdit`` (e.g. ``cheat_entity_hp``) would
-        # render a bare checkbox with no way to change the value.
+        # ``XbrParametricEdit`` (e.g. ``player_max_hp`` or the
+        # ``air_shield_flaps`` Quick-Stats pack) would render a
+        # bare checkbox with no way to change the value.
         slider_entries = (
             list(pack.parametric_sites())
             + list(pack.xbr_parametric_sites()))

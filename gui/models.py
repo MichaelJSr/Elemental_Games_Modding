@@ -22,14 +22,88 @@ Theme = Literal["dark", "light"]
 
 def load_ui_prefs() -> dict:
     try:
-        return json.loads(_PREFS_PATH.read_text())
+        prefs = json.loads(_PREFS_PATH.read_text())
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
+    migrate_legacy_pack_keys(prefs)
+    return prefs
 
 
 def save_ui_prefs(prefs: dict) -> None:
     _PREFS_DIR.mkdir(parents=True, exist_ok=True)
     _PREFS_PATH.write_text(json.dumps(prefs, indent=2))
+
+
+# ---------------------------------------------------------------------------
+# Legacy pack-name migration
+# ---------------------------------------------------------------------------
+#
+# Scripts that pin pack names and any future on-disk GUI prefs that
+# grow an ``enabled_packs`` / ``pack_params`` channel would otherwise
+# quietly stop applying a pack the day we rename it.  We rewrite the
+# stale keys once on load (and emit a single ``UserWarning``) so the
+# user keeps the effect they had pre-rename.
+#
+# Stays in sync with
+# :data:`azurik_mod.patching.registry._LEGACY_PACK_ALIASES` — add new
+# renames in both places (module-level constant here so the gui
+# package doesn't need to import the registry just to migrate
+# prefs).
+
+_LEGACY_PACK_RENAMES: dict[str, str] = {
+    "cheat_entity_hp": "player_max_hp",
+}
+
+
+def migrate_legacy_pack_keys(prefs: dict) -> bool:
+    """Rewrite legacy pack-name keys inside ``prefs`` in place.
+
+    Scans the typical persistence channels (``enabled_packs``,
+    ``pack_params``, top-level ``*_packs`` dicts) and replaces any
+    matching legacy key with its current equivalent.  Warns once per
+    process if any rename actually fires.
+
+    Returns True when at least one key was renamed.  The return value
+    lets callers decide whether to immediately ``save_ui_prefs`` the
+    cleaned-up dict vs. waiting for the next normal save.
+
+    Safe to call on any dict shape — unknown keys / non-dict values
+    are ignored, so this stays future-compatible with prefs schemas
+    we haven't shipped yet.
+    """
+    if not isinstance(prefs, dict) or not _LEGACY_PACK_RENAMES:
+        return False
+
+    dirty = False
+
+    def _rename_keys_in(mapping: object) -> None:
+        nonlocal dirty
+        if not isinstance(mapping, dict):
+            return
+        for old, new in _LEGACY_PACK_RENAMES.items():
+            if old in mapping:
+                if new not in mapping:
+                    mapping[new] = mapping[old]
+                del mapping[old]
+                dirty = True
+
+    for channel in ("enabled_packs", "pack_params"):
+        _rename_keys_in(prefs.get(channel))
+
+    for key, value in prefs.items():
+        if key.endswith("_packs") or key.endswith("_pack_params"):
+            _rename_keys_in(value)
+
+    if dirty:
+        import warnings
+        warnings.warn(
+            "Migrated legacy pack name(s) "
+            f"{sorted(_LEGACY_PACK_RENAMES)} in saved GUI prefs — "
+            "prefs will be rewritten on next save.",
+            UserWarning,
+            stacklevel=2,
+        )
+    return dirty
 
 
 # ---------------------------------------------------------------------------

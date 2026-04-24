@@ -92,6 +92,10 @@ class ApplyPackWithXbrSites(unittest.TestCase):
             description="Throwaway test pack — XBR dispatch plumbing.",
             sites=[],
             apply=lambda xbe_data, **kw: None,
+            # The fixture deliberately targets cells that aren't
+            # modelled in schema.json — suppress the lint so the
+            # warnings don't pollute the pytest output.
+            unchecked_xbr_sites=True,
             xbr_sites=(
                 XbrEditSpec(
                     label="test: set_keyed_double garret4/walkSpeed",

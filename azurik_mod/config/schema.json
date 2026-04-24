@@ -106,6 +106,7 @@
       "record_base_offset": "0x01A000",
       "notes": "String table overlaps with main XBE data section. Property names verified from XBE address 0x001981c8.",
       "properties": [
+        { "key": "hitPoints",        "display": "Hit Points",        "type": "int",   "unit": "HP",         "range_hint": [1, 9999],                             "description": "Per-entity hit-point override.  Writable by the `player_max_hp` pack as `garret4.hitPoints`; whether the shipping engine actually reads this cell is still under RE (see azurik_mod/patches/player_max_hp/__init__.py for the Ghidra-vs-disk mismatch story)." },
         { "key": "walkSpeed",        "display": "Walk Speed",        "type": "float", "unit": "units/s",    "range_hint": [0, 50],    "xbe_addr": "0x001981C8", "description": "Base walking speed." },
         { "key": "walkAnimSpeed",    "display": "Walk Anim Speed",   "type": "float", "unit": "multiplier", "range_hint": [0.1, 5],   "xbe_addr": "0x001981B8", "description": "Animation playback rate multiplier while walking." },
         { "key": "runSpeed",         "display": "Run Speed",         "type": "float", "unit": "units/s",    "range_hint": [0, 100],   "xbe_addr": "0x001981AC", "description": "Base running speed." },
@@ -204,11 +205,43 @@
       ]
     },
 
-    "armor_properties": {
-      "description": "Armor type definitions: tiers, elemental affinities, protection multipliers.",
+    "armor_properties_real": {
+      "description": "Engine-read armor table (15×19 grid).  The runtime reads this section — edit here for effects that actually show up in-game (e.g. `Flaps` per air shield).  The adjacent `armor_properties_unused` section at 0x004000 carries a similar shape but the engine never indexes it; see docs/LEARNINGS.md § 'XBR armor table aliasing'.",
+      "file_offset": "0x002000",
+      "virtual_size": "0x1856",
+      "record_base_offset": "0x003000",
+      "armor_types": [
+        "no_armor_1", "earth_armor_1", "earth_armor_2", "earth_armor_3",
+        "ice_armor_1", "ice_armor_2", "ice_armor_3",
+        "light_armor_1", "light_armor_2", "light_armor_3",
+        "force_field_1", "force_field_2", "force_field_3",
+        "air_shield_1", "air_shield_2", "air_shield_3",
+        "electro_shield_1", "electro_shield_2", "electro_shield_3"
+      ],
+      "properties": [
+        { "key": "Name",                 "display": "Name",                     "type": "string","unit": "",       "description": "Display/engine name for this armor." },
+        { "key": "Type",                 "display": "Type",                     "type": "string","unit": "",       "description": "Damage type / affinity string." },
+        { "key": "Level",                "display": "Armor Level",              "type": "int",   "unit": "tier",   "range_hint": [0, 10], "description": "Power tier of this armor set." },
+        { "key": "Strong vs",            "display": "Strong vs Damage Type",   "type": "string","unit": "",       "description": "Damage type this armor resists strongly." },
+        { "key": "Weak vs",              "display": "Weak vs Damage Type",     "type": "string","unit": "",       "description": "Damage type this armor is vulnerable to." },
+        { "key": "Strong protection",    "display": "Strong Protection Mult",  "type": "float", "unit": "mult",   "range_hint": [0, 1],  "description": "Damage fraction taken from strongly-resisted hits (0=immune)." },
+        { "key": "Normal protection",    "display": "Normal Protection Mult",  "type": "float", "unit": "mult",   "range_hint": [0, 1],  "description": "Damage fraction taken from neutral hits." },
+        { "key": "Strong protection hp", "display": "Strong Prot HP Modifier", "type": "float", "unit": "mult",   "range_hint": [0, 5],  "description": "HP multiplier applied when strong protection activates." },
+        { "key": "Normal protection hp", "display": "Normal Prot HP Modifier", "type": "float", "unit": "mult",   "range_hint": [0, 5],  "description": "HP multiplier applied for neutral-hit protection." },
+        { "key": "Cost",                 "display": "Purchase Cost",            "type": "int",   "unit": "gold",   "range_hint": [0, 9999],"description": "In-game gem/gold cost to purchase this armor." },
+        { "key": "Hits",                 "display": "Hits",                     "type": "int",   "unit": "hits",   "range_hint": [0, 9999],"description": "Per-armor hit-count budget." },
+        { "key": "Time",                 "display": "Time",                     "type": "float", "unit": "seconds","range_hint": [0, 9999],"description": "Duration-based armor timer." },
+        { "key": "Flaps",                "display": "Flap Count",               "type": "int",   "unit": "flaps",  "range_hint": [0, 20],  "description": "Number of wing flaps the air-shield variant grants.  Driven by the `air_shield_flaps` quick-stats pack." },
+        { "key": "Features",             "display": "Features",                 "type": "string","unit": "",       "description": "Feature-flag string applied to this armor." }
+      ]
+    },
+
+    "armor_properties_unused": {
+      "description": "DEAD (not read by engine).  16×24 grid at 0x004000 labelled `armor_properties` by the raw TOC tag, but the runtime indexes the sibling 0x002000 section instead.  Kept in schema so humans exploring the XBR structure see the two grids side by side; NEVER target this section from a patch pack.",
       "file_offset": "0x004000",
       "virtual_size": "0x1447",
       "record_base_offset": "0x004000",
+      "deprecated": true,
       "armor_types": [
         "no_armor_1", "earth_armor_1", "earth_armor_2", "earth_armor_3",
         "ice_armor_1", "ice_armor_2", "ice_armor_3",

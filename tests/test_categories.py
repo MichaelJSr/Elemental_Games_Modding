@@ -306,15 +306,22 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         #   speed / flap modifiers).  Every one is a
         #   ParametricPatch in ``sites``.
         #
-        #   cheat_entity_hp owns 1 XBR-side slider (garret4 hit
-        #   points) via ``xbr_sites``.  The browser renders BOTH
-        #   site kinds through the same ParametricSlider widget,
-        #   so the two lists merge here.
+        #   player_max_hp (Quick Stats) owns 1 XBR-side slider
+        #   (garret4 hit points) via ``xbr_sites``.  The browser
+        #   renders BOTH site kinds through the same
+        #   ParametricSlider widget, so the lists merge here.
+        #
+        #   air_shield_flaps (Quick Stats) owns 3 XBR-side sliders
+        #   (one per air-shield tier, targeting
+        #   ``armor_properties_real.air_shield_N.Flaps``).
         #
         #   Deprecated packs (flap_at_peak / root_motion_roll /
         #   etc.) register but are hidden by the PackBrowser.
         expected_keys = [
-            ("cheat_entity_hp",    "garret4_hit_points"),
+            ("air_shield_flaps",   "air_shield_1_flaps"),
+            ("air_shield_flaps",   "air_shield_2_flaps"),
+            ("air_shield_flaps",   "air_shield_3_flaps"),
+            ("player_max_hp",      "garret4_hit_points"),
             ("player_physics",     "air_control_scale"),
             ("player_physics",     "flap_below_peak_scale"),
             ("player_physics",     "flap_descent_fuel_cost_scale"),
@@ -329,8 +336,10 @@ class PackBrowserRendersTabsPerCategory(unittest.TestCase):
         self.assertEqual(slider_keys, expected_keys)
         self.assertIn("player_physics", params)
         self.assertEqual(len(params["player_physics"]), 10)
-        self.assertIn("cheat_entity_hp", params)
-        self.assertEqual(len(params["cheat_entity_hp"]), 1)
+        self.assertIn("player_max_hp", params)
+        self.assertEqual(len(params["player_max_hp"]), 1)
+        self.assertIn("air_shield_flaps", params)
+        self.assertEqual(len(params["air_shield_flaps"]), 3)
         for pack_name in ("flap_at_peak", "root_motion_roll",
                           "root_motion_climb", "slope_slide_speed",
                           "animation_root_motion_scale"):

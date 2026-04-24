@@ -109,6 +109,9 @@ _BUILTIN_CATEGORIES: tuple[Category, ...] = (
                      "Affects how the protagonist moves and feels."),
         order=20,
     ),
+    # NOTE: subgroups for the "player" tab are declared below in
+    # _BUILTIN_SUBGROUPS — keep the ``category_id`` there in sync if
+    # this tab moves or gets renamed.
     Category(
         id="boot",
         title="Boot / Intro",
@@ -226,9 +229,20 @@ def all_categories() -> list[Category]:
 
 
 def clear_registry_for_tests() -> None:
-    """Testing hook — wipe the registry and re-seed with builtins."""
+    """Testing hook — wipe both the Category AND Subgroup registries
+    and re-seed them with their respective builtins."""
     _REGISTRY.clear()
     _register_builtin_categories()
+    # Subgroup registry lives further down the file but must share a
+    # reset cycle so tests that touch features get a clean slate for
+    # both tables in one call.
+    try:
+        _SUBGROUP_REGISTRY.clear()
+        _register_builtin_subgroups()
+    except NameError:
+        # Subgroup registry not defined yet during early import —
+        # the subgroup block below will seed it on first load.
+        pass
 
 
 def _register_builtin_categories() -> None:
@@ -242,11 +256,168 @@ def _register_builtin_categories() -> None:
 _register_builtin_categories()
 
 
+# ===========================================================================
+# Subgroups — second-level grouping *within* a category tab
+# ===========================================================================
+#
+# Where a :class:`Category` becomes one notebook tab in the Patches
+# page, a :class:`Subgroup` becomes one labelled frame **inside** that
+# tab.  This lets us cluster related quick-edit sliders (``max HP``,
+# ``air-shield flaps``) at the top of the Player tab without bolting
+# on a whole new category for every cluster.
+#
+# Authoring: set ``Feature(..., subgroup="quick_stats")`` on each
+# feature that belongs to the same bucket.  If no :class:`Subgroup`
+# with that id is registered yet the registry auto-creates a
+# placeholder on first use (same escape hatch as
+# :func:`ensure_category`).
+#
+# Packs with ``subgroup=None`` (the default) render directly in the
+# tab body below every subgroup, preserving pre-subgroup behaviour.
+
+
+@dataclass(frozen=True)
+class Subgroup:
+    """Authoring-time description of a second-level grouping inside a tab.
+
+    Attributes
+    ----------
+    id: str
+        Stable identifier.  Use lowercase-underscore (e.g.
+        ``"quick_stats"``).  This is the value feature modules set on
+        ``Feature(subgroup=...)``.
+    category_id: str
+        The :class:`Category` this subgroup lives inside.  Must match
+        the ``category`` of every feature that uses it — the GUI
+        silently ignores cross-category misfires (e.g. a feature in
+        ``player`` declaring ``subgroup="boot_stuff"`` where
+        ``boot_stuff`` is under the ``boot`` category).  Pinning
+        ``category_id`` here lets the Patches page render subgroups
+        at the top of the right tab with zero ambiguity.
+    title: str
+        Human-readable label for the ``ttk.LabelFrame`` header.
+        Keep it short (~20 chars, title-cased).  Example:
+        ``"Quick Stats"``.
+    description: str
+        One-sentence hint rendered under the LabelFrame title.
+        Leave empty if the title is self-explanatory.
+    order: int
+        Sort key for subgroups within the tab.  Lower values appear
+        first.  Builtin subgroups use 10/20/30; plugin-owned groups
+        should pick 100+ to avoid colliding with future builtins.
+    """
+
+    id: str
+    category_id: str
+    title: str
+    description: str = ""
+    order: int = 1000
+
+
+_BUILTIN_SUBGROUPS: tuple[Subgroup, ...] = (
+    Subgroup(
+        id="quick_stats",
+        category_id="player",
+        title="Quick Stats",
+        description=("One-click sliders for the commonly-tuned gameplay "
+                     "stats (max HP, air-shield flaps, ...).  Each edit "
+                     "writes directly to config.xbr so no XBE changes "
+                     "are needed."),
+        order=10,
+    ),
+)
+
+
+_SUBGROUP_REGISTRY: dict[str, Subgroup] = {}
+
+
+def register_subgroup(sub: Subgroup) -> Subgroup:
+    """Register ``sub`` globally.
+
+    Re-registering the same id is idempotent if the Subgroup values
+    match bit-for-bit (so the builtin catalogue can be re-seeded
+    safely across test runs).  Conflicting re-registrations raise
+    :exc:`ValueError`.
+    """
+    existing = _SUBGROUP_REGISTRY.get(sub.id)
+    if existing is not None and existing != sub:
+        raise ValueError(
+            f"Subgroup id {sub.id!r} already registered with different "
+            f"metadata.\n  existing: {existing}\n  new:      {sub}")
+    _SUBGROUP_REGISTRY[sub.id] = sub
+    return sub
+
+
+def ensure_subgroup(subgroup_id: str, category_id: str) -> Subgroup:
+    """Return the Subgroup for ``subgroup_id``, auto-creating a
+    placeholder under ``category_id`` if it's not yet registered.
+
+    Matches :func:`ensure_category`'s behaviour: unknown ids get a
+    title-cased placeholder and ``order=1000`` so auto-created groups
+    always appear after every builtin subgroup but before
+    very-late plugin-owned ones.
+    """
+    existing = _SUBGROUP_REGISTRY.get(subgroup_id)
+    if existing is not None:
+        return existing
+    title = subgroup_id.replace("_", " ").title()
+    placeholder = Subgroup(
+        id=subgroup_id,
+        category_id=category_id,
+        title=title,
+        description="",
+        order=1000,
+    )
+    _SUBGROUP_REGISTRY[subgroup_id] = placeholder
+    return placeholder
+
+
+def get_subgroup(subgroup_id: str) -> Subgroup:
+    """Return the Subgroup for ``subgroup_id`` or raise :exc:`KeyError`."""
+    return _SUBGROUP_REGISTRY[subgroup_id]
+
+
+def subgroups_for_category(category_id: str) -> list[Subgroup]:
+    """Return every Subgroup attached to ``category_id``, sorted by
+    ``order`` then ``id``.  Used by the Patches page to enumerate the
+    LabelFrames it has to draw at the top of a tab.
+    """
+    return sorted(
+        (s for s in _SUBGROUP_REGISTRY.values()
+         if s.category_id == category_id),
+        key=lambda s: (s.order, s.id),
+    )
+
+
+def all_subgroups() -> list[Subgroup]:
+    """Return every registered subgroup, sorted (category_id, order, id)."""
+    return sorted(
+        _SUBGROUP_REGISTRY.values(),
+        key=lambda s: (s.category_id, s.order, s.id),
+    )
+
+
+def _register_builtin_subgroups() -> None:
+    """Idempotently register every subgroup in :data:`_BUILTIN_SUBGROUPS`."""
+    for sub in _BUILTIN_SUBGROUPS:
+        _SUBGROUP_REGISTRY[sub.id] = sub
+
+
+# Seed at import time, same pattern as categories.
+_register_builtin_subgroups()
+
+
 __all__ = [
     "Category",
+    "Subgroup",
     "all_categories",
+    "all_subgroups",
     "clear_registry_for_tests",
     "ensure_category",
+    "ensure_subgroup",
     "get_category",
+    "get_subgroup",
     "register_category",
+    "register_subgroup",
+    "subgroups_for_category",
 ]

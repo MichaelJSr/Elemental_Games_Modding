@@ -1243,7 +1243,7 @@ def cmd_xbr_edit(args) -> None:
 
 
 def cmd_xbr_verify(args) -> None:
-    """``azurik-mod xbr verify <file>``.
+    """``azurik-mod xbr verify <file> [--cross-check-schema]``.
 
     Round-trips the file through :class:`XbrDocument` and reports:
 
@@ -1252,7 +1252,19 @@ def cmd_xbr_verify(args) -> None:
     - Whether any unmodeled tag types are present (informational —
       not a failure).
 
-    Exit code 0 when every invariant holds; 1 on drift.
+    With ``--cross-check-schema``, additionally iterate every
+    registered patch pack's ``xbr_sites`` and report any ``(section,
+    prop)`` triple that isn't documented in
+    ``azurik_mod/config/schema.json``.  Mirror of the
+    registration-time lint in
+    :func:`azurik_mod.patching.registry.register_feature` — useful
+    for catching schema drift in third-party plugin packs.
+
+    Exit code 0 when every invariant holds; 1 on drift (any FAIL
+    bumps the exit code).  Schema-lint misses are reported as
+    warnings and do NOT affect the exit code (so CI that uses
+    ``xbr verify`` today doesn't break the day we adopt a pack
+    that targets a temporarily-undocumented cell).
     """
     from azurik_mod.xbr import PointerGraph, XbrDocument
     from azurik_mod.xbr.sections import RawSection
@@ -1293,12 +1305,71 @@ def cmd_xbr_verify(args) -> None:
     raw_count = sum(1 for i in range(len(doc.toc))
                     if isinstance(doc.section_for(i), RawSection))
 
+    if getattr(args, "cross_check_schema", False):
+        _cross_check_schema_against_registry()
+
     if ok:
         print(f"xbr verify: OK  ({len(doc.toc)} TOC entries, "
               f"{len(graph)} refs, {raw_count} unmodeled sections)")
         sys.exit(0)
     else:
         sys.exit(1)
+
+
+def _cross_check_schema_against_registry() -> None:
+    """Run the schema-lint over every registered pack, printing a
+    human-readable report to stdout.
+
+    Kept in sync with the register_feature-side lint: both share
+    :data:`azurik_mod.patching.registry._SCHEMA_CELL_INDEX` via
+    :func:`azurik_mod.patching.registry._schema_cell_index`, so a
+    schema update or an ``unchecked_xbr_sites=True`` opt-out lands
+    in both paths simultaneously.
+    """
+    # Importing azurik_mod.patches at function scope keeps plain
+    # ``xbr verify`` (no cross-check) fast — the pack tree never
+    # gets imported when the flag is off.
+    import azurik_mod.patches  # noqa: F401
+    from azurik_mod.patching.registry import (
+        _schema_cell_index,
+        all_packs,
+    )
+
+    index = _schema_cell_index()
+    if not index:
+        print("xbr verify: cross-check: schema.json unreadable — "
+              "skipping.")
+        return
+
+    misses: list[tuple[str, str, str]] = []
+    suppressed: list[str] = []
+    for pack in all_packs():
+        if not pack.xbr_sites:
+            continue
+        if pack.unchecked_xbr_sites:
+            suppressed.append(pack.name)
+            continue
+        for site in pack.xbr_sites:
+            section = getattr(site, "section", None)
+            prop = getattr(site, "prop", None)
+            if not section or not prop:
+                continue
+            if (section, prop) not in index:
+                misses.append((pack.name, section, prop))
+
+    if not misses:
+        suffix = (f" ({len(suppressed)} pack(s) opted out via "
+                  f"unchecked_xbr_sites)" if suppressed else "")
+        print(f"xbr verify: cross-check: OK{suffix}")
+        return
+
+    print(f"xbr verify: cross-check: {len(misses)} undocumented "
+          f"pack target(s):")
+    for pack_name, section, prop in misses:
+        print(f"  - {pack_name}: {section}.{prop}")
+    if suppressed:
+        print(f"  ({len(suppressed)} pack(s) opted out: "
+              f"{', '.join(sorted(suppressed))})")
 
 
 def cmd_level_preview(args) -> None:

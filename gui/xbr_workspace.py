@@ -39,11 +39,25 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+# Legacy section names that existed in pending_edits.json before
+# the "armor_hit_fx" / "armor_properties" rename.  Keys here are
+# the old names, values are the new canonical names.  Used by
+# :meth:`XbrWorkspace.load_pending_edits` to migrate persisted
+# state on load so users who saved edits under the old names
+# don't lose their work.  See docs/LEARNINGS.md §
+# "armor_hit_fx vs armor_properties" for why the rename happened.
+_LEGACY_SECTION_NAME_MAP: dict[str, str] = {
+    "armor_hit_fx":     "armor_properties_real",
+    "armor_properties": "armor_properties_unused",
+}
 
 WORKSPACE_DIR = REPO_ROOT / ".xbr_workspace"
 """Absolute path to the per-user workspace root.  Kept inside the
@@ -329,7 +343,16 @@ class XbrWorkspace:
 
     def load_pending_edits(self) -> list[dict]:
         """Load the persisted pending-edits list.  Returns an empty
-        list when the file is missing or malformed."""
+        list when the file is missing or malformed.
+
+        Also migrates legacy section names stored before the
+        ``armor_hit_fx`` / ``armor_properties`` rename (see
+        :data:`_LEGACY_SECTION_NAME_MAP`).  Migrated edits are
+        rewritten in-place and a single :mod:`warnings` hint is
+        emitted per call so the user sees what happened, but no
+        prompting or disk IO is required — the migration is applied
+        lazily every time the file is loaded.
+        """
         if not self.pending_path.exists():
             return []
         try:
@@ -341,7 +364,27 @@ class XbrWorkspace:
         edits = payload.get("xbr_edits")
         if not isinstance(edits, list):
             return []
-        return [e for e in edits if isinstance(e, dict)]
+        out = [e for e in edits if isinstance(e, dict)]
+        migrated = 0
+        for edit in out:
+            old = edit.get("section")
+            if not isinstance(old, str):
+                continue
+            new = _LEGACY_SECTION_NAME_MAP.get(old)
+            if new is None:
+                continue
+            edit["section"] = new
+            migrated += 1
+        if migrated:
+            warnings.warn(
+                f"Migrated {migrated} pending XBR edit(s) from legacy "
+                f"section names ({', '.join(sorted(_LEGACY_SECTION_NAME_MAP))}) "
+                f"to their renamed counterparts.  See docs/LEARNINGS.md "
+                f"for why the rename happened.  Save the workspace (or "
+                f"apply any edit) to persist the migration.",
+                stacklevel=2,
+            )
+        return out
 
     def save_pending_edits(self, edits: list[dict]) -> None:
         """Persist the edit list.  Overwrites any previous file.

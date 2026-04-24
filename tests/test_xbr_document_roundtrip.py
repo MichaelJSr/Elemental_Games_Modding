@@ -245,11 +245,14 @@ class SectionDispatchSanity(unittest.TestCase):
     surfaces immediately."""
 
     def test_config_xbr_has_16_keyed_sections(self):
-        """Vanilla config.xbr has 15 listed in KEYED_SECTION_OFFSETS
-        plus ``armor_properties`` which shares an offset with
-        ``armor_hit_fx`` — the new parser discovers 16 via
-        :meth:`XbrDocument.keyed_sections` by going off file
-        offsets, not a static list."""
+        """Vanilla config.xbr has 15 named entries in
+        KEYED_SECTION_OFFSETS (including the renamed
+        ``armor_properties_real`` / ``armor_properties_unused``
+        pair that used to be labelled ``armor_hit_fx`` /
+        ``armor_properties`` by their raw TOC tags); the new
+        parser discovers 16 via :meth:`XbrDocument.keyed_sections`
+        because it scans file offsets rather than going off a
+        static list."""
         doc = XbrDocument.load(_GAMEDATA / "config.xbr")
         keyed = doc.keyed_sections()
         self.assertGreaterEqual(len(keyed), 15,

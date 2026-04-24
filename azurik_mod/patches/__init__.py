@@ -93,10 +93,24 @@ import azurik_mod.patches.animation_root_motion_scale  # noqa: F401
 # side effects.
 import azurik_mod.patches.randomize  # noqa: F401
 # Reference implementation for the Phase-3 XBR pack API — a single
-# slider that scales garret4's hitPoints via config.xbr.  Also acts
-# as an integration canary so apply_pack ``xbr_sites`` wiring stays
-# exercised end-to-end.
-import azurik_mod.patches.cheat_entity_hp  # noqa: F401
+# slider that sets garret4's max hit points via config.xbr.  Also
+# acts as an integration canary so apply_pack ``xbr_sites`` wiring
+# stays exercised end-to-end.
+#
+# Previously shipped as ``cheat_entity_hp``.  Renamed to drop the
+# cheat framing and surfaced under the Player tab's Quick Stats
+# sub-group.  The underlying target cell is the only writable
+# garret4/hitPoints cell on disk — see the module docstring for the
+# Ghidra-vs-disk investigation and the reason the plan's
+# ``critters_damage`` target was rejected.  Backwards-compat alias
+# lives in :func:`azurik_mod.patching.registry.get_pack`.
+import azurik_mod.patches.player_max_hp  # noqa: F401
+# Quick-stats slider bundle: one pack, three sliders for the
+# wing-flap counts granted by the three air-shield tiers.  Edits
+# land in ``armor_properties_real.air_shield_N.Flaps`` (the
+# engine-read table at 0x003000 — NOT the dead 0x004000 grid that
+# the raw TOC tag ``armor_properties`` labels).
+import azurik_mod.patches.air_shield_flaps  # noqa: F401
 
 # Non-pack helpers used by the CLI (not part of the pack registry).
 from azurik_mod.patches._player_character import apply_player_character_patch

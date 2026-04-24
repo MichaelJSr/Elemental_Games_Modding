@@ -417,6 +417,70 @@ purposes.  The two sliders compose: entry-cost governs the
 cheap per-flap drain, descent-cost governs the punishment for
 trying to flap too far below peak_z.
 
+### XBR armor table aliasing — `armor_properties_real` vs `armor_properties_unused` (round 12.1)
+
+The 0x3000-vs-0x5000 gotcha documented below bit users in real
+life: the original `cheat_entity_hp` pack worked because it wrote
+to a cell inside the correct table, but a one-line XBR Editor
+edit of `armor_properties.air_shield_3.Flaps` silently landed on
+the **0x4000 dead table** and changed nothing in-game.  To stop
+that class of bug, `azurik_mod/xbr/sections.py`'s
+`_KEYED_SECTION_OFFSETS` now uses unambiguous internal names:
+
+| File offset | Old TOC-derived label  | New canonical label          | Notes                                        |
+|-------------|------------------------|------------------------------|----------------------------------------------|
+| `0x002000`  | `armor_hit_fx`         | `armor_properties_real`      | Engine-read 15×19 grid (Flaps / Features).   |
+| `0x004000`  | `armor_properties`     | `armor_properties_unused`    | Dead 16×24 grid; engine never reads it.      |
+
+Consequences:
+
+- Persisted `pending_edits.json` entries from older GUI
+  workspaces are transparently migrated by
+  `gui/xbr_workspace.py::_LEGACY_SECTION_NAME_MAP` (warn once).
+- Opening a section whose name ends in `_unused` (or is listed in
+  `DEAD_SECTION_NAMES`) pops a warning banner in the XBR Editor
+  (`gui/pages/xbr_editor.py`) so users know their edits won't
+  land in-game.
+- `scripts/xbr_parser.py`'s `KEYED_SECTION_OFFSETS` was updated
+  in lockstep — `tests/test_xbr_document_roundtrip.py::KeyedSectionOffsetsDrift`
+  guards the two tables from drifting apart.
+- The `air_shield_flaps` pack targets
+  `armor_properties_real.air_shield_N.Flaps` and would fail the
+  new registration-time schema-lint if it accidentally targeted
+  the `_unused` section (the schema now flags that table
+  `deprecated: true`).
+
+### Dead `critters_critter_data.hitPoints` cell (round 12.1)
+
+Ghidra decompilation of `FUN_00049480` at `0x4a2dd` / `0x4a4b7`
+shows the engine reads `hitPoints` from the **`critters_damage`**
+table — not `critters_critter_data`.  However, the retail
+`config.xbr` shipped by Adrenium does **not** have a `hitPoints`
+column in `critters_damage`; the cell we have to write to in
+practice is `critters_critter_data.garret4.hitPoints`.
+
+Empirical observation (xemu, April 2026): editing the
+`critters_critter_data` cell **does** change the player's
+starting HP in-game, even though Ghidra says that section's
+loader (`FUN_00049480` @ `0x4a2dd`) doesn't reach for
+`hitPoints`.  Two plausible explanations (neither disproved
+yet):
+
+1. A second loader we haven't identified reads the cell.
+2. The retail build is wired differently from the Ghidra
+   annotations — the public decomp may be stale for this path.
+
+Either way: the `player_max_hp` pack targets
+`critters_critter_data.garret4.hitPoints` because that's where
+the write has to go on retail disk.  The Ghidra-versus-disk
+mismatch is documented in
+[`azurik_mod/patches/player_max_hp/__init__.py`](../azurik_mod/patches/player_max_hp/__init__.py)
+and in [`azurik_mod/config/schema.json`](../azurik_mod/config/schema.json).
+If someone later completes the RE and confirms the
+`critters_damage` path, retargeting the pack is a one-line
+change — the Quick Stats infra already assumes one slider per
+cell, so the migration path is trivial.
+
 ### Armor config loader — engine reads the 0x3000 table, not TOC entry 1 (round 11.13)
 
 `load_armor_properties_config` at VA 0x3C700 populates the

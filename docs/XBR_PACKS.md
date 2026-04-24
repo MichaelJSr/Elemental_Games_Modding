@@ -106,11 +106,11 @@ build time instead of silently no-op'ing.
 
 ---
 
-## Reference feature: ``cheat_entity_hp``
+## Reference feature: ``player_max_hp``
 
 Lives at
-[`azurik_mod/patches/cheat_entity_hp/`](../azurik_mod/patches/cheat_entity_hp/).
-A single slider that scales ``critters_critter_data.garret4.hitPoints``
+[`azurik_mod/patches/player_max_hp/`](../azurik_mod/patches/player_max_hp/).
+A single slider that sets ``critters_critter_data.garret4.hitPoints``
 inside ``config.xbr``.  Zero XBE bytes touched.
 
 ```python
@@ -119,12 +119,12 @@ from azurik_mod.patching.xbr_spec import XbrParametricEdit
 
 GARRET4_HP_SLIDER = XbrParametricEdit(
     name="garret4_hit_points",
-    label="Garret4 hit points",
+    label="Max HP (garret4)",
     xbr_file="config.xbr",
     section="critters_critter_data",
     entity="garret4",
     prop="hitPoints",
-    default=100.0,
+    default=200.0,
     slider_min=1.0,
     slider_max=9999.0,
     slider_step=1.0,
@@ -132,17 +132,92 @@ GARRET4_HP_SLIDER = XbrParametricEdit(
 )
 
 register_feature(Feature(
-    name="cheat_entity_hp",
-    description="Adjust player HP via config.xbr.",
+    name="player_max_hp",
+    description="Set the player's starting HP via config.xbr.",
     sites=[],                             # no XBE patches
     apply=lambda xbe_data, **kw: None,   # nothing to do
     xbr_sites=(GARRET4_HP_SLIDER,),      # the declarative edit
     category="player",
-    tags=("cheat", "xbr"),
+    subgroup="quick_stats",              # Player-tab Quick Stats
+    tags=("xbr",),
 ))
 ```
 
 That's it.  The dispatcher handles load + apply + flush.
+
+### Quick Stats sub-group
+
+Packs whose primary UI surface is a single commonly-adjusted slider
+(HP, air-shield flap counts, …) declare ``subgroup="quick_stats"``
+so the GUI renders them in a labelled box at the top of the Player
+tab.  The Quick Stats shape is defined in
+[`azurik_mod/patching/category.py`](../azurik_mod/patching/category.py);
+add more subgroups the same way when a new cluster of related
+sliders emerges.
+
+> **Legacy alias.**  ``player_max_hp`` was called
+> ``cheat_entity_hp`` before the Quick Stats reshuffle.  The old
+> name still resolves via
+> [`get_pack`](../azurik_mod/patching/registry.py)'s alias table
+> with a one-shot :class:`DeprecationWarning`, and
+> [`gui/models.py::migrate_legacy_pack_keys`](../gui/models.py)
+> rewrites it in saved prefs — so existing
+> ``--enable-pack cheat_entity_hp`` scripts and saved GUI states
+> keep working.
+
+### Companion feature: ``air_shield_flaps``
+
+[`azurik_mod/patches/air_shield_flaps/`](../azurik_mod/patches/air_shield_flaps/)
+bundles three sliders in one pack (air shields 1 / 2 / 3) and is
+the canonical example of a multi-slider Quick-Stats feature:
+
+```python
+AIR_SHIELD_1_FLAPS = XbrParametricEdit(
+    name="air_shield_1_flaps", ...,
+    section="armor_properties_real",
+    entity="air_shield_1", prop="Flaps",
+    default=1.0, slider_min=0.0, slider_max=20.0, slider_step=1.0,
+    ...)
+# AIR_SHIELD_2_FLAPS / AIR_SHIELD_3_FLAPS are identical in shape.
+
+register_feature(Feature(
+    name="air_shield_flaps",
+    description="Set the number of flaps each air shield grants.",
+    sites=[], apply=lambda *_, **__: None,
+    xbr_sites=(AIR_SHIELD_1_FLAPS, AIR_SHIELD_2_FLAPS,
+               AIR_SHIELD_3_FLAPS),
+    category="player",
+    subgroup="quick_stats",
+    tags=("xbr",),
+))
+```
+
+The target section ``armor_properties_real`` is deliberate — the
+raw TOC tag ``armor_properties`` labels the **dead** 16×24 grid at
+0x004000; the engine-read 15×19 grid sits at 0x002000 and is
+exposed as ``armor_properties_real`` (paired with
+``armor_properties_unused`` for the dead neighbour).  See
+[LEARNINGS.md § "XBR armor table aliasing"](LEARNINGS.md).
+
+### Registration-time schema lint
+
+``register_feature(...)`` cross-checks every ``xbr_sites`` entry's
+``(section, prop)`` against
+[`azurik_mod/config/schema.json`](../azurik_mod/config/schema.json).
+Undocumented targets emit a one-shot :class:`UserWarning` naming
+the pack and cell.  Escape hatches:
+
+- Add the cell to ``schema.json`` (preferred — keeps the schema
+  useful as a source of truth).
+- Declare ``Feature(unchecked_xbr_sites=True)`` on the pack — for
+  intentionally undocumented targets (experimental packs, plugin
+  packs targeting sections upstream hasn't modelled yet).
+
+The same check runs against already-registered packs via::
+
+    azurik-mod xbr verify <file> --cross-check-schema
+
+Useful for auditing plugin packs after install.
 
 ---
 

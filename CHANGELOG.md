@@ -2,6 +2,95 @@
 
 ## Unreleased
 
+### Quick Stats sub-group + flap / HP dead-cell fix (round 12.1)
+
+Two bug-class fixes rolled up into one user-facing release:
+
+**1. `armor_properties` TOC label shadow (flaps bug).** The XBR
+Editor exposed two keyed tables whose TOC tags overlap with the
+engine-read armor table: `armor_hit_fx` (0x002000 — the **real**
+table with `Flaps`) and `armor_properties` (0x004000 — a dead
+16×24 grid the engine never consults).  Users hitting the
+grid-view path wrote to the dead table, which silently no-op'd
+in-game.  Renames:
+
+- `azurik_mod/xbr/sections.py::_KEYED_SECTION_OFFSETS`:
+  `armor_hit_fx → armor_properties_real` (0x002000),
+  `armor_properties → armor_properties_unused` (0x004000).
+- Mirror rename in `scripts/xbr_parser.py::KEYED_SECTION_OFFSETS`
+  (pinned by `test_xbr_document_roundtrip.py::KeyedSectionOffsetsDrift`).
+- `azurik_mod/config/keyed_tables.py` dropped the redundant
+  `armor_hit_fx` alias.
+- `gui/xbr_workspace.py::load_pending_edits` transparently
+  rewrites legacy `section="armor_hit_fx"` /
+  `section="armor_properties"` entries in saved workspaces (warn
+  once per session).
+- `gui/pages/xbr_editor.py` raises a warning banner when a user
+  opens any section whose name ends in `_unused` or is listed in
+  `DEAD_SECTION_NAMES`.
+
+Ghidra citation: `load_armor_properties_config` (FUN_0003C700)
+calls `FUN_000a5ca0("config/armor_properties", 0)` → the asset
+manager resolves the string to the keyed table at file offset
+0x3000 (inside TOC entry 0 / 0x2000), **not** TOC entry 1.
+
+**2. `cheat_entity_hp` → `player_max_hp` rename + retarget.**
+Decompilation of `FUN_00049480` at `0x4a2dd` / `0x4a4b7` shows
+the engine reads `hitPoints` from `critters_damage` at runtime:
+
+```
+0x4a2dd  CALL FUN_000a5ca0("config/critters_damage", 0)
+0x4a4b7  CALL config_name_lookup(piVar6, "hitPoints")
+```
+
+However, the retail `config.xbr` lacks a `hitPoints` column in
+`critters_damage`.  The pack therefore targets
+`critters_critter_data.garret4.hitPoints` (which empirically
+lands in-game on retail) and documents the Ghidra-versus-disk
+mismatch inline.  New default: **200.0** (vanilla starting HP);
+the old 100.0 default silently halved the player's HP bar when
+the pack was enabled with no parameter override.
+
+**3. Quick Stats sub-group infra.** New
+`subgroup: str | None` field on `Feature` + a tiny `Subgroup`
+registry alongside `Category`.  `gui/widgets.py::PackBrowser._build_tab`
+groups packs by subgroup and renders each as a `ttk.LabelFrame`.
+The builtin `quick_stats` subgroup lives inside the Player tab
+and houses the two new packs: `player_max_hp` and
+`air_shield_flaps` (three sliders, one pack, targeting
+`armor_properties_real.air_shield_N.Flaps` with vanilla defaults
+1.0 / 2.0 / 5.0).
+
+**4. Schema-lint safety net.**  `register_feature(...)` now
+checks every `xbr_sites` entry's `(section, prop)` against
+`azurik_mod/config/schema.json`; undocumented targets raise a
+one-shot `UserWarning`.  Suppressible via
+`Feature(unchecked_xbr_sites=True)`.  Runtime variant shipped
+as `azurik-mod xbr verify <file> --cross-check-schema`.
+
+**5. Backward-compat migrations.**  `get_pack("cheat_entity_hp")`
+resolves to `player_max_hp` with a one-shot deprecation warning;
+`gui/models.py::migrate_legacy_pack_keys` rewrites the old key
+in `enabled_packs` / `pack_params` on preferences load, so
+existing GUI sessions and `--enable-pack cheat_entity_hp`
+scripts keep working.
+
+**Tests added / updated**:
+`tests/test_player_max_hp.py` (replaces
+`test_cheat_entity_hp.py`), `tests/test_air_shield_flaps.py`,
+`tests/test_patches_quick_stats_subgroup.py`,
+`tests/test_legacy_pack_migration.py`,
+`tests/test_xbr_schema_lint.py` (lint + CLI cross-check),
+expanded `tests/test_xbr_build_integration.py` with end-to-end
+flap + HP asserts.
+
+**Docs**: `docs/XBR_PACKS.md` retargeted at `player_max_hp` as
+the reference feature, `docs/PATCHES.md` gained
+`player_max_hp` / `air_shield_flaps` entries (old
+`cheat_entity_hp` section replaced), `docs/LEARNINGS.md` gained
+"XBR armor table aliasing" and "Dead `critters_critter_data.hitPoints`
+cell" subsections.
+
 ### Deprecate flap_at_peak (round 11.14)
 
 User testing confirmed the 43-byte FSTP-replay shim at

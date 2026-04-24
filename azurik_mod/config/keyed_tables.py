@@ -231,9 +231,24 @@ class KeyedTable:
 
 
 # Section map: (toc_index, file_offset, name)
+#
+# NOTE on the ``armor_*`` entries at 0x002000 and 0x004000:
+# The TOC tags for these slots are ``armor_hit_fx`` and
+# ``armor_properties`` respectively, but the runtime config loader
+# (FUN_00049480 decompiled in Ghidra) reads ``config/armor_properties``
+# from the 15x19 grid whose header is at 0x003000 — i.e. inside
+# TOC entry 0 at 0x002000, the one labelled ``armor_hit_fx``.  The
+# 16x24 grid at 0x004000 is dead data that the engine doesn't touch.
+#
+# We therefore label the tables by what the engine actually does with
+# them (``armor_properties_real`` / ``armor_properties_unused``)
+# rather than by their raw TOC tags.  See
+# :data:`azurik_mod.xbr.sections._KEYED_SECTION_OFFSETS` for the
+# canonical parallel table; the two are drift-checked by
+# ``tests/test_xbr_document_roundtrip.KeyedSectionOffsetsDrift``.
 KEYED_SECTIONS = [
-    (0,  0x002000, "armor_hit_fx"),
-    (1,  0x004000, "armor_properties"),
+    (0,  0x002000, "armor_properties_real"),
+    (1,  0x004000, "armor_properties_unused"),
     (2,  0x006000, "attacks_anims"),
     (3,  0x008000, "attacks_transitions"),
     (4,  0x01A000, "critters_critter_data"),
@@ -248,9 +263,6 @@ KEYED_SECTIONS = [
     (13, 0x07A000, "critters_special_anims"),
     (14, 0x083000, "critters_walking_dmg"),
     (16, 0x087000, "magic"),
-    # armor_properties: table header at 0x3000 (within armor_hit_fx extent), NOT at TOC offset 0x4000
-    # 15 rows x 19 columns = 285 cells, grid at 0x308C
-    (-1, 0x002000, "armor_properties_real"),
 ]
 
 

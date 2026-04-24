@@ -20,7 +20,8 @@
  * Documentation conventions:
  *
  * - Every named field carries its byte offset and the Ghidra
- *   decomp the name came from (most commonly ``FUN_00049480`` for
+ *   decomp the name came from (most commonly
+ *   ``load_critters_config`` (formerly ``FUN_00049480``) for
  *   ``CritterData`` and ``FUN_00084f90`` / ``FUN_00084940`` /
  *   ``FUN_00085f50`` for ``PlayerInputState``).
  *
@@ -126,12 +127,27 @@ typedef struct ControllerState *ControllerStatePtr;
  * CritterData
  * ==========================================================================
  * The engine's in-memory descriptor for every critter — player
- * included (garret4 is a critter under the hood).  Populated at boot
- * by ``FUN_00049480`` across three config.xbr tables:
+ * included (garret4 is a critter under the hood).  Populated at
+ * boot by ``load_critters_config`` (vanilla VA 0x00049480, formerly
+ * the ``FUN_00049480`` Ghidra placeholder) which walks seven
+ * ``critters_*`` keyed tables of config.xbr in sequence:
  *
- *   1. ``critters_engine``       collision + rendering fields
- *   2. ``critters_critter_data``  gameplay fields
- *   3. ``critters_sounds`` etc.   audio / drop tables (indices 0x17+)
+ *   1. ``critters_engine``        collision + rendering fields
+ *      (piVar9[0..0xD])
+ *   2. ``critters_critter_data``  gameplay fields (piVar9[0xE..0x16],
+ *      f.fear / walk / run / ouch* / drops)
+ *   3. ``critters_damage``        hitPoints + per-damage-type table
+ *      (piVar9[5] at +0x14 and piVar9[0x23] at +0x8C)
+ *   4. ``critters_damage_fx``     per-damage-type FX (piVar9[0x24+])
+ *   5. ``critters_sounds``        audio refs
+ *   6. ``critters_item_data``     item drops
+ *   7. ``critters_special_anims`` anim overrides
+ *
+ * Field names below track piVar9 indices from that decompilation,
+ * so ``piVar9[5]`` maps directly to the ``hit_points`` slot at
+ * +0x14.  Offset column (hex) is the BYTE offset from the struct
+ * base.  Properties populated from ``FUN_000d1420("name")`` carry
+ * their config-key name in the comment.
  *
  * Note: ``walk_speed`` / ``run_speed`` are populated by the
  * CritterData struct default initialiser, NOT from
@@ -140,12 +156,6 @@ typedef struct ControllerState *ControllerStatePtr;
  * (confirmed via lldb at VA 0x00085F65).  See
  * azurik_mod/patches/player_physics/__init__.py for the independence
  * math that layers walk / run multipliers on top of this baseline.
- *
- * Offset column (hex) is BYTE offset from the struct base.  The
- * ``piVar9[N]`` column is the Ghidra decomp index — ``piVar9`` is
- * the entity struct pointer in ``FUN_00049480``.  Properties
- * populated from ``FUN_000d1420("name")`` carry their config-key
- * name in the comment.
  */
 typedef struct CritterData {
     /* --- critters_engine identifying fields --- */
@@ -154,7 +164,20 @@ typedef struct CritterData {
     u32 _reserved_08;                 /* +0x08 piVar9[2] — "sound dir" token           */
     u32 feature_class_id;             /* +0x0C piVar9[3] — from FUN_000493d0           */
     u32 use_skeleton_collision_word;  /* +0x10 piVar9[4] — contains bool at +0x13      */
-    u32 _reserved_14;                 /* +0x14 piVar9[5] — set from a later file pass  */
+    /* +0x14 piVar9[5] — ``critters_damage.hitPoints`` (int32,
+     * stored as FISTP-rounded int64 via FUN_000f5a40 and
+     * truncated back to 4 bytes on store).  CAVEAT: the shipped
+     * ``config.xbr`` has no ``hitPoints`` column and no
+     * ``garret4`` row in ``critters_damage``, so the engine
+     * falls through to the default blob at ``DAT_00195790``
+     * (200.0) — every critter's runtime HP is effectively
+     * hard-coded in vanilla.  The azurik_mod ``player_max_hp``
+     * pack writes ``critters_critter_data.garret4.hitPoints``
+     * instead (the only writable cell that survives a round
+     * trip), with full docs in that pack's docstring.  Consumed
+     * by damage / death code that reads ``critter->hit_points``
+     * at a handful of VAs; see ``docs/LEARNINGS.md``. */
+    i32 hit_points;                   /* +0x14 piVar9[5]                               */
     f32 collision_radius;             /* +0x18 piVar9[6] — "collisionRadius"           */
     f32 collision_aspect_ratio;       /* +0x1C piVar9[7] — "collisionAspectRatio"      */
     f32 player_collision_radius;      /* +0x20 piVar9[8] — "playerCollisionRadius"     */
@@ -203,8 +226,9 @@ typedef struct CritterData {
 
     /* --- critters_critter_data: bool flags (byte-typed) ---
      * These four bools are all written via `*(bool *)(base + N) =
-     * value != 0.0` in FUN_00049480.  The surrounding bytes are
-     * nominally 32-bit words but the game only reads the low byte. */
+     * value != 0.0` in load_critters_config (FUN_00049480).
+     * The surrounding bytes are nominally 32-bit words but the
+     * game only reads the low byte. */
     u8  _reserved_78;                 /* +0x78 — low byte of piVar9[0x1E]              */
     u8  use_center_basis;             /* +0x79 — "useCenterBasis"                      */
     u8  always_glued;                 /* +0x7A — "alwaysGlued"                         */
@@ -230,13 +254,14 @@ typedef struct CritterData {
     /* --- critters_critter_data: awareness / attack ranges ---
      * Units are world-space (identical scale to collision_radius and
      * camera distances).  Used by the AI for target-acquisition,
-     * line-of-sight, and attack-range gating in FUN_00049480. */
+     * line-of-sight, and attack-range gating in
+     * load_critters_config (FUN_00049480). */
     f32 range;                        /* +0xB8 piVar9[0x2E] — "range" (sight radius)  */
     f32 range_up;                     /* +0xBC piVar9[0x2F] — "range up"              */
     f32 range_down;                   /* +0xC0 piVar9[0x30] — "range down"            */
     f32 attack_range;                 /* +0xC4 piVar9[0x31] — "attackRange"            */
 
-    /* --- unmapped gap; piVar9[0x32]..[0x34] not observed in FUN_00049480 --- */
+    /* --- unmapped gap; piVar9[0x32]..[0x34] not observed in load_critters_config --- */
     u8  _reserved_C8[0xD4 - 0xC8];
 
     /* --- critters_critter_data: drop tables ---
@@ -862,6 +887,10 @@ _Static_assert(sizeof(u32) == 4,  "u32 must be 4 bytes");
 _Static_assert(sizeof(u8)  == 1,  "u8 must be 1 byte");
 _Static_assert(sizeof(f32) == 4,  "f32 must be 4 bytes");
 
+_Static_assert(__builtin_offsetof(CritterData, hit_points) == 0x14,
+               "CritterData.hit_points drifted — piVar9[5] slot is where "
+               "load_critters_config stores the FISTP-rounded "
+               "critters_damage.hitPoints value");
 _Static_assert(__builtin_offsetof(CritterData, collision_radius) == 0x18,
                "CritterData.collision_radius drifted");
 _Static_assert(__builtin_offsetof(CritterData, walk_speed) == 0x38,

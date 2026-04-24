@@ -15,6 +15,26 @@
       "name": "poll_movie"
     },
     {
+      "address": "0x0003C700",
+      "name": "load_armor_properties_config"
+    },
+    {
+      "address": "0x00042910",
+      "name": "anim_change"
+    },
+    {
+      "address": "0x00042E40",
+      "name": "anim_apply_translation"
+    },
+    {
+      "address": "0x00044640",
+      "name": "apply_damage"
+    },
+    {
+      "address": "0x00049480",
+      "name": "load_critters_config"
+    },
+    {
       "address": "0x0004B510",
       "name": "entity_lookup"
     },
@@ -23,16 +43,116 @@
       "name": "caseD_8"
     },
     {
+      "address": "0x00052950",
+      "name": "level_teleport_helper"
+    },
+    {
       "address": "0x00052F50",
       "name": "dev_menu_flag_check"
+    },
+    {
+      "address": "0x00053750",
+      "name": "load_level_from_path"
+    },
+    {
+      "address": "0x00055AB0",
+      "name": "scene_state_tick"
+    },
+    {
+      "address": "0x0005C920",
+      "name": "calculate_save_signature"
+    },
+    {
+      "address": "0x0005E620",
+      "name": "cvar_get_double"
     },
     {
       "address": "0x0005F620",
       "name": "boot_state_tick"
     },
     {
+      "address": "0x0007E2E0",
+      "name": "load_attacks_anims_config"
+    },
+    {
+      "address": "0x000837A0",
+      "name": "armor_reset_out_of_fuel"
+    },
+    {
+      "address": "0x00083D80",
+      "name": "player_armor_state_tick"
+    },
+    {
+      "address": "0x00083F90",
+      "name": "player_airborne_reinit"
+    },
+    {
+      "address": "0x000842D0",
+      "name": "consume_fuel"
+    },
+    {
+      "address": "0x000846D0",
+      "name": "mark_armor_feature_used"
+    },
+    {
+      "address": "0x00084940",
+      "name": "player_input_tick"
+    },
+    {
       "address": "0x00085700",
       "name": "gravity_integrate_raw"
+    },
+    {
+      "address": "0x00085F50",
+      "name": "player_walk_state"
+    },
+    {
+      "address": "0x00087F80",
+      "name": "player_climb_tick"
+    },
+    {
+      "address": "0x00088A80",
+      "name": "player_ground_land_tick"
+    },
+    {
+      "address": "0x00089060",
+      "name": "player_jump_init"
+    },
+    {
+      "address": "0x00089300",
+      "name": "wing_flap"
+    },
+    {
+      "address": "0x00089480",
+      "name": "player_airborne_tick"
+    },
+    {
+      "address": "0x00089A70",
+      "name": "player_slope_slide_tick"
+    },
+    {
+      "address": "0x0008AB70",
+      "name": "fall_damage_dispatch"
+    },
+    {
+      "address": "0x0008B700",
+      "name": "player_swim_tick"
+    },
+    {
+      "address": "0x0008BE00",
+      "name": "fall_death_dispatch"
+    },
+    {
+      "address": "0x0008C080",
+      "name": "player_landing"
+    },
+    {
+      "address": "0x0008CCC0",
+      "name": "player_physics_state_machine"
+    },
+    {
+      "address": "0x000A2DF0",
+      "name": "xinput_device_poll"
     },
     {
       "address": "0x000A67A0",
@@ -6337,6 +6457,24 @@
       "type": "Label"
     },
     {
+      "address": "0003c700",
+      "name": "load_armor_properties_config",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "00042910",
+      "name": "anim_change",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "00042e40",
+      "name": "anim_apply_translation",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
       "address": "00043235",
       "name": "switchD",
       "namespace": "switchD_00043235",
@@ -6389,6 +6527,18 @@
       "name": "switchdataD_000436a4",
       "namespace": "switchD_00043235",
       "type": "Label"
+    },
+    {
+      "address": "00044640",
+      "name": "apply_damage",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "00049480",
+      "name": "load_critters_config",
+      "namespace": "Global",
+      "type": "Function"
     },
     {
       "address": "0004b510",
@@ -6595,8 +6745,20 @@
       "type": "Label"
     },
     {
+      "address": "00052950",
+      "name": "level_teleport_helper",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
       "address": "00052f50",
       "name": "dev_menu_flag_check",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "00053750",
+      "name": "load_level_from_path",
       "namespace": "Global",
       "type": "Function"
     },
@@ -6677,6 +6839,12 @@
       "name": "switchdataD_00055848",
       "namespace": "switchD_000552aa",
       "type": "Label"
+    },
+    {
+      "address": "00055ab0",
+      "name": "scene_state_tick",
+      "namespace": "Global",
+      "type": "Function"
     },
     {
       "address": "00058eb5",
@@ -6869,6 +7037,18 @@
       "name": "switchdataD_0005aa78",
       "namespace": "switchD_0005a914",
       "type": "Label"
+    },
+    {
+      "address": "0005c920",
+      "name": "calculate_save_signature",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "0005e620",
+      "name": "cvar_get_double",
+      "namespace": "Global",
+      "type": "Function"
     },
     {
       "address": "0005f620",
@@ -7723,8 +7903,122 @@
       "type": "Label"
     },
     {
+      "address": "0007e2e0",
+      "name": "load_attacks_anims_config",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "000837a0",
+      "name": "armor_reset_out_of_fuel",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "00083d80",
+      "name": "player_armor_state_tick",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "00083f90",
+      "name": "player_airborne_reinit",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "000842d0",
+      "name": "consume_fuel",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "000846d0",
+      "name": "mark_armor_feature_used",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "00084940",
+      "name": "player_input_tick",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
       "address": "00085700",
       "name": "gravity_integrate_raw",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "00085f50",
+      "name": "player_walk_state",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "00087f80",
+      "name": "player_climb_tick",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "00088a80",
+      "name": "player_ground_land_tick",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "00089060",
+      "name": "player_jump_init",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "00089300",
+      "name": "wing_flap",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "00089480",
+      "name": "player_airborne_tick",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "00089a70",
+      "name": "player_slope_slide_tick",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "0008ab70",
+      "name": "fall_damage_dispatch",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "0008b700",
+      "name": "player_swim_tick",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "0008be00",
+      "name": "fall_death_dispatch",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "0008c080",
+      "name": "player_landing",
+      "namespace": "Global",
+      "type": "Function"
+    },
+    {
+      "address": "0008ccc0",
+      "name": "player_physics_state_machine",
       "namespace": "Global",
       "type": "Function"
     },
@@ -8633,6 +8927,12 @@
       "name": "switchdataD_0009e488",
       "namespace": "switchD_0009e2a3",
       "type": "Label"
+    },
+    {
+      "address": "000a2df0",
+      "name": "xinput_device_poll",
+      "namespace": "Global",
+      "type": "Function"
     },
     {
       "address": "000a572b",
@@ -23581,6 +23881,18 @@
       "type": "Label"
     },
     {
+      "address": "001980e4",
+      "name": "g_climb_speed_const",
+      "namespace": "Global",
+      "type": "Label"
+    },
+    {
+      "address": "00198120",
+      "name": "g_frame_time_recip_30",
+      "namespace": "Global",
+      "type": "Label"
+    },
+    {
       "address": "00198420",
       "name": "00198420",
       "namespace": "Global",
@@ -30493,6 +30805,18 @@
       "type": "Label"
     },
     {
+      "address": "001a25b8",
+      "name": "g_flap_subsequent_threshold_6m",
+      "namespace": "Global",
+      "type": "Label"
+    },
+    {
+      "address": "001a26c4",
+      "name": "g_flap_boost_1_5",
+      "namespace": "Global",
+      "type": "Label"
+    },
+    {
       "address": "001a29a4",
       "name": "001a29a4",
       "namespace": "Global",
@@ -30831,6 +31155,12 @@
     {
       "address": "001a6738",
       "name": "001a6738",
+      "namespace": "Global",
+      "type": "Label"
+    },
+    {
+      "address": "001a7ae4",
+      "name": "g_active_controller_index",
       "namespace": "Global",
       "type": "Label"
     },
@@ -31447,6 +31777,12 @@
       "type": "Label"
     },
     {
+      "address": "001aab68",
+      "name": "g_slope_slide_speed_const",
+      "namespace": "Global",
+      "type": "Label"
+    },
+    {
       "address": "001aabf4",
       "name": "001aabf4",
       "namespace": "Global",
@@ -31480,6 +31816,18 @@
       "address": "001addc8",
       "name": "_tls_index",
       "namespace": "XAPILIB",
+      "type": "Label"
+    },
+    {
+      "address": "0037be98",
+      "name": "g_armor_state_per_controller",
+      "namespace": "Global",
+      "type": "Label"
+    },
+    {
+      "address": "0038bc60",
+      "name": "g_attack_data_array_base",
+      "namespace": "Global",
       "type": "Label"
     },
     {
@@ -31781,11 +32129,11 @@
           "comment": "+0x10 piVar9[4] \u2014 contains bool at +0x13"
         },
         {
-          "name": "_reserved_14",
-          "type": "uint",
+          "name": "hit_points",
+          "type": "int",
           "offset": 20,
           "length": 4,
-          "comment": "+0x14 piVar9[5] \u2014 set from a later file pass"
+          "comment": "+0x14 piVar9[5]"
         },
         {
           "name": "collision_radius",
@@ -31847,22 +32195,20 @@
           "name": "walk_speed",
           "type": "float",
           "offset": 56,
-          "length": 4,
-          "comment": "+0x38 piVar9[0xE] \u2014 \"walkSpeed\" (= 1.0)"
+          "length": 4
         },
         {
           "name": "walk_anim_speed",
           "type": "float",
           "offset": 60,
           "length": 4,
-          "comment": "+0x3C piVar9[0xF] \u2014 \"walkAnimSpeed\""
+          "comment": "+0x3C piVar9[0xF]  \u2014 \"walkAnimSpeed\""
         },
         {
           "name": "run_speed",
           "type": "float",
           "offset": 64,
-          "length": 4,
-          "comment": "+0x40 piVar9[0x10] \u2014 \"runSpeed\" (= 1.0)"
+          "length": 4
         },
         {
           "name": "run_anim_speed",
